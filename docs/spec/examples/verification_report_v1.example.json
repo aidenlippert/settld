@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "VerificationReport.v1",
+  "profile": "strict",
+  "tool": { "name": "settld", "version": "0.0.0-example" },
+  "warnings": [],
+  "signer": { "keyId": "key_example", "scope": "global", "governanceEventRef": null },
+  "bundleHeadAttestation": {
+    "schemaVersion": "BundleHeadAttestation.v1",
+    "attestationHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "signerKeyId": "key_example",
+    "signedAt": "2026-01-01T00:00:00.000Z",
+    "manifestHash": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "subject": {
+    "type": "JobProofBundle.v1",
+    "tenantId": "tenant_example",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "manifestHash": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "reportHash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "signature": null,
+  "signerKeyId": null,
+  "signedAt": null
+}
+

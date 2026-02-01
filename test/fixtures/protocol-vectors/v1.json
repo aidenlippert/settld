@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "ProtocolVectors.v1",
+  "generatedAt": "2026-02-01T00:00:00.000Z",
+  "signer": {
+    "keyId": "key_282c80df2381d6831a92e89b"
+  },
+  "jobProof": {
+    "manifestHash": "c3e63dd99b3d83759945684efa414a026adf6d2dacadc8e7939a8e9988a0fd86",
+    "headAttestationHash": "fd6ff8b9c7479d95d478d69219f02440aac744a8e7881b491d1edeef791d81af",
+    "verificationReportHash": "59e4f6a4d800e6f2b9ed70415cc77084cc88884ea7ddf09779841bdecd161fc6"
+  },
+  "monthProof": {
+    "manifestHash": "2685fb7f30ac549904fcf091b33230914cb4e99da9fa10aac1fc392a2808940e",
+    "headAttestationHash": "e6bd313509bd6422070fd3b37796b1f5ab8018035e9560f506032df23acd7450",
+    "verificationReportHash": "228ed9cd419812a5bb30969ee57951c0fb07f4e0fd3ca5eb78f9f89c7f49b805"
+  },
+  "financePack": {
+    "manifestHash": "91af9c79fa464a200ef7a87b516cff85f3c5e9941ba848004a7f962d5c2b41a0",
+    "headAttestationHash": "cb7f8c41687957391e4f13a18b57fb725390cfe14fa56a7e5585cbd89e649a77",
+    "verificationReportHash": "4373cd25ee135bc07920341a7fa62ae579c9bda8a5eab941b579a51ad7ce6c7b"
+  }
+}
+

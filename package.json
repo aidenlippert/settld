@@ -31,5 +31,8 @@
   },
   "dependencies": {
     "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1"
   }
 }

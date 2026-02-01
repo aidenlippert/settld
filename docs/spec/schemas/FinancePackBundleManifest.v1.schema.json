@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/FinancePackBundleManifest.v1.schema.json",
+  "title": "FinancePackBundleManifest.v1",
+  "type": "object",
+  "required": ["schemaVersion", "type", "tenantId", "period", "createdAt", "protocol", "hashing", "files"],
+  "properties": {
+    "schemaVersion": { "const": "FinancePackBundleManifest.v1" },
+    "type": { "const": "FinancePackBundle.v1" },
+    "tenantId": { "type": "string" },
+    "period": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "protocol": { "type": "string" },
+    "hashing": {
+      "type": "object",
+      "required": ["schemaVersion", "fileOrder", "excludes"],
+      "properties": {
+        "schemaVersion": { "const": "FinancePackBundleManifestHash.v1" },
+        "fileOrder": { "const": "path_asc" },
+        "excludes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "sha256", "bytes"],
+        "properties": {
+          "name": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "manifestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+

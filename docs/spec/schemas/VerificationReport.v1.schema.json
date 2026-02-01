@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/VerificationReport.v1.schema.json",
+  "title": "VerificationReport.v1",
+  "type": "object",
+  "required": ["schemaVersion", "profile", "tool", "warnings", "subject", "reportHash"],
+  "properties": {
+    "schemaVersion": { "const": "VerificationReport.v1" },
+    "profile": { "const": "strict" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "settld" },
+        "version": { "type": ["string", "null"] }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "enum": [
+              "LEGACY_KEYS_FORMAT_USED",
+              "NONSERVER_REVOCATION_NOT_ENFORCED",
+              "MISSING_GOVERNANCE_SNAPSHOT_LENIENT",
+              "UNSIGNED_REPORT_LENIENT",
+              "TOOL_VERSION_UNKNOWN"
+            ]
+          },
+          "message": { "type": ["string", "null"] },
+          "detail": {}
+        }
+      }
+    },
+    "signer": {
+      "type": ["object", "null"],
+      "properties": {
+        "keyId": { "type": "string" },
+        "scope": { "enum": ["global", "tenant"] },
+        "governanceEventRef": { "type": ["object", "null"] }
+      }
+    },
+    "bundleHeadAttestation": {
+      "type": ["object", "null"],
+      "properties": {
+        "schemaVersion": { "type": ["string", "null"] },
+        "attestationHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "signerKeyId": { "type": ["string", "null"] },
+        "signedAt": { "type": ["string", "null"] },
+        "manifestHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "policy": { "type": ["object", "null"] },
+    "subject": {
+      "type": "object",
+      "required": ["type", "manifestHash"],
+      "properties": {
+        "type": { "type": "string" },
+        "tenantId": { "type": ["string", "null"] },
+        "period": { "type": ["string", "null"] },
+        "createdAt": { "type": ["string", "null"] },
+        "protocol": { "type": ["string", "null"] },
+        "manifestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "inputs": {},
+    "monthProofAttestation": { "type": ["object", "null"] },
+    "reportHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": { "type": ["string", "null"] },
+    "signerKeyId": { "type": ["string", "null"] },
+    "signedAt": { "type": ["string", "null"] }
+  }
+}
+

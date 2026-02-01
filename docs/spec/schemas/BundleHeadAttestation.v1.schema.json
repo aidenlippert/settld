@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/BundleHeadAttestation.v1.schema.json",
+  "title": "BundleHeadAttestation.v1",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "tenantId", "scope", "generatedAt", "manifestHash", "heads", "signedAt", "signerKeyId", "attestationHash", "signature"],
+  "properties": {
+    "schemaVersion": { "const": "BundleHeadAttestation.v1" },
+    "kind": { "type": "string" },
+    "tenantId": { "type": "string" },
+    "scope": { "type": "object" },
+    "generatedAt": { "type": "string" },
+    "manifestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "heads": { "type": "object" },
+    "signedAt": { "type": "string" },
+    "signerKeyId": { "type": "string" },
+    "attestationHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": { "type": "string" }
+  }
+}
+
