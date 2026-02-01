@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "WorkCertificate.v1",
+  "artifactType": "WorkCertificate.v1",
+  "artifactId": "cert_job_587be5f9-1d7b-43f3-b20e-c3f0a0439c0a_evt_6c912836-4d65-44b8-84c8-ca7d9c309a26",
+  "generatedAt": "2026-01-20T10:49:00.000Z",
+  "tenantId": "tenant_default",
+  "jobId": "job_587be5f9-1d7b-43f3-b20e-c3f0a0439c0a",
+  "jobVersion": 16,
+  "policyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+  "eventProof": {
+    "lastChainHash": "d5840c273bba0919b267666298cc969e2a2d0d7b3da0227b05e2bc8aa5f80191",
+    "eventCount": 16,
+    "signatures": {
+      "signedEventCount": 16,
+      "signerKeyIds": [
+        "key_80dd104bffdf69b1c5d4045f",
+        "key_ba17e66c2185a7e8da4b1fd1"
+      ]
+    }
+  },
+  "job": {
+    "templateId": "reset_lite",
+    "customerId": "cust_demo",
+    "siteId": "site_demo",
+    "contractId": "c_demo_delivery",
+    "customerContractHash": "f2afeb6ba382daf6a0591436f1e8c330fe90c2fb004864809d6a5a9857c12334",
+    "customerCompilerId": "contract_compiler.v1",
+    "customerPolicyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+    "operatorContractHash": "f2afeb6ba382daf6a0591436f1e8c330fe90c2fb004864809d6a5a9857c12334",
+    "operatorCompilerId": "contract_compiler.v1",
+    "operatorPolicyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+    "zoneId": "zone_default",
+    "environmentTier": "ENV_MANAGED_BUILDING",
+    "bookingWindow": {
+      "startAt": "2026-01-20T10:30:00.000Z",
+      "endAt": "2026-01-20T10:45:00.000Z"
+    },
+    "access": {
+      "status": "granted",
+      "accessPlanId": "ap_job_587be5f9-1d7b-43f3-b20e-c3f0a0439c0a",
+      "grantedAt": "2026-01-20T10:31:00.000Z",
+      "deniedAt": null,
+      "revokedAt": null,
+      "expiredAt": null
+    },
+    "execution": {
+      "startedAt": "2026-01-20T10:46:00.000Z",
+      "robotId": "rob_demo_delivery",
+      "stage": null,
+      "lastHeartbeatAt": null,
+      "lastHeartbeatStage": null,
+      "lastHeartbeatProgress": null,
+      "lastHeartbeatAssistRequested": null,
+      "stalledAt": null,
+      "stallReason": null,
+      "resumedAt": null,
+      "completedAt": "2026-01-20T10:48:00.000Z",
+      "abortedAt": null
+    },
+    "assist": {
+      "status": "none",
+      "queueId": null,
+      "operatorId": null,
+      "queuedAt": null,
+      "assignedAt": null,
+      "acceptedAt": null,
+      "declinedAt": null
+    },
+    "operatorCoverage": {
+      "status": "none",
+      "reservationId": null,
+      "operatorId": null,
+      "startAt": null,
+      "endAt": null,
+      "reservedAt": null,
+      "releasedAt": null
+    },
+    "risk": {
+      "basis": "BOOK",
+      "scoredAt": "2026-01-20T10:00:00.000Z",
+      "modelVersion": 1,
+      "riskScore": 45,
+      "expectedAssistSeconds": 180,
+      "expectedIncidentProbabilityBps": 550,
+      "expectedCreditBurnRateCents": 10,
+      "currency": "USD",
+      "policyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e"
+    },
+    "incidentsCount": 0,
+    "claimsCount": 0,
+    "slaBreachesCount": 0,
+    "slaCreditsCount": 0,
+    "status": "SETTLED"
+  },
+  "evidence": [],
+  "sourceEventId": "evt_6c912836-4d65-44b8-84c8-ca7d9c309a26",
+  "atChainHash": "d5840c273bba0919b267666298cc969e2a2d0d7b3da0227b05e2bc8aa5f80191",
+  "artifactHash": "ab8d2829292e6a381c5bee620fd3c59194a00384953066b495f23aa0bbbb5c18"
+}

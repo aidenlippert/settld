@@ -1,0 +1,14 @@
+{
+  "runId": "finance_pack_v1",
+  "tenantId": "tenant_default",
+  "jobId": "job_det_00000012",
+  "month": "2026-01",
+  "bookedPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+  "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+  "outputs": [
+    "CreditMemo.v1",
+    "SettlementStatement.v1",
+    "WorkCertificate.v1"
+  ],
+  "glBatchArtifactHash": "3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6"
+}

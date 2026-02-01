@@ -1,0 +1,11 @@
+{
+  "copied": [
+    "run.json",
+    "sample_ingest_request.json",
+    "sample_ingest_response.json",
+    "timeline.json",
+    "WorkCertificate.v1.json",
+    "SettlementStatement.v1.json",
+    "CreditMemo.v1.json"
+  ]
+}

@@ -1,0 +1,1856 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Settld API",
+    "version": "0.0.0",
+    "description": "Settld system-of-record API (protocol-gated).",
+    "x-settld-protocol": "1.0"
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "ProxyApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-proxy-api-key"
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "details": {}
+        }
+      },
+      "JobCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "templateId"
+        ],
+        "properties": {
+          "templateId": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "siteId": {
+            "type": "string",
+            "nullable": true
+          },
+          "contractId": {
+            "type": "string",
+            "nullable": true
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "JobQuoteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "startAt",
+          "endAt",
+          "environmentTier"
+        ],
+        "properties": {
+          "startAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "environmentTier": {
+            "type": "string"
+          },
+          "requiresOperatorCoverage": {
+            "type": "boolean"
+          },
+          "zoneId": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "string"
+          },
+          "siteId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          }
+        }
+      },
+      "JobBookRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "startAt",
+          "endAt",
+          "environmentTier"
+        ],
+        "properties": {
+          "paymentHoldId": {
+            "type": "string",
+            "nullable": true
+          },
+          "startAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "environmentTier": {
+            "type": "string"
+          },
+          "requiresOperatorCoverage": {
+            "type": "boolean"
+          },
+          "zoneId": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "string"
+          },
+          "siteId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          }
+        }
+      },
+      "JobEventAppendRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "payload"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "signature": {
+            "type": "string"
+          },
+          "signerKeyId": {
+            "type": "string"
+          }
+        }
+      },
+      "MonthCloseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "month"
+        ],
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-02"
+          },
+          "basis": {
+            "type": "string",
+            "example": "settledAt"
+          }
+        }
+      },
+      "AckRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryId"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "artifactHash": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Health with signals",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Metrics",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities": {
+      "get": {
+        "summary": "Server capabilities",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI document",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "post": {
+        "summary": "Create job",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "templateId"
+                ],
+                "properties": {
+                  "templateId": {
+                    "type": "string"
+                  },
+                  "customerId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "siteId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "contractId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "constraints": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}": {
+      "get": {
+        "summary": "Get job",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}/quote": {
+      "post": {
+        "summary": "Quote job (optimistic concurrency)",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "x-proxy-expected-prev-chain-hash",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optimistic concurrency precondition for append-style endpoints."
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "startAt",
+                  "endAt",
+                  "environmentTier"
+                ],
+                "properties": {
+                  "startAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "environmentTier": {
+                    "type": "string"
+                  },
+                  "requiresOperatorCoverage": {
+                    "type": "boolean"
+                  },
+                  "zoneId": {
+                    "type": "string"
+                  },
+                  "customerId": {
+                    "type": "string"
+                  },
+                  "siteId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Quoted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}/book": {
+      "post": {
+        "summary": "Book job (optimistic concurrency)",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "x-proxy-expected-prev-chain-hash",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optimistic concurrency precondition for append-style endpoints."
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "startAt",
+                  "endAt",
+                  "environmentTier"
+                ],
+                "properties": {
+                  "paymentHoldId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "startAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "environmentTier": {
+                    "type": "string"
+                  },
+                  "requiresOperatorCoverage": {
+                    "type": "boolean"
+                  },
+                  "zoneId": {
+                    "type": "string"
+                  },
+                  "customerId": {
+                    "type": "string"
+                  },
+                  "siteId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Booked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}/events": {
+      "post": {
+        "summary": "Append job event",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "payload"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "actor": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "signature": {
+                    "type": "string"
+                  },
+                  "signerKeyId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Appended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/status": {
+      "get": {
+        "summary": "Ops status summary",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "ops_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/month-close": {
+      "post": {
+        "summary": "Request month close",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "month"
+                ],
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "example": "2026-02"
+                  },
+                  "basis": {
+                    "type": "string",
+                    "example": "settledAt"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get month close state",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/party-statements": {
+      "get": {
+        "summary": "List party statements",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-02"
+            }
+          },
+          {
+            "name": "partyId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "CLOSED"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/party-statements/{partyId}/{period}": {
+      "get": {
+        "summary": "Get party statement",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "partyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-02"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/payouts/{partyId}/{period}/enqueue": {
+      "post": {
+        "summary": "Enqueue payout instruction for a closed period",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "partyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-02"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_write"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/finance/account-map": {
+      "get": {
+        "summary": "Get finance account map",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "ops_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Upsert finance account map (audited)",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/finance/gl-batch": {
+      "get": {
+        "summary": "Get latest GLBatch artifact for a period",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-02"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_write"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/finance/gl-batch.csv": {
+      "get": {
+        "summary": "Render deterministic journal CSV for a period",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-02"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_write"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/exports/ack": {
+      "post": {
+        "summary": "ACK a delivery (destination-signed)",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-proxy-destination-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-proxy-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-proxy-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "deliveryId"
+                ],
+                "properties": {
+                  "deliveryId": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "artifactHash": {
+                    "type": "string"
+                  },
+                  "receivedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

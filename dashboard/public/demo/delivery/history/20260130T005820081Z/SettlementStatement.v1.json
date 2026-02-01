@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "SettlementStatement.v1",
+  "artifactType": "SettlementStatement.v1",
+  "artifactId": "settlement_job_587be5f9-1d7b-43f3-b20e-c3f0a0439c0a_evt_6c912836-4d65-44b8-84c8-ca7d9c309a26",
+  "generatedAt": "2026-01-20T10:49:00.000Z",
+  "tenantId": "tenant_default",
+  "jobId": "job_587be5f9-1d7b-43f3-b20e-c3f0a0439c0a",
+  "jobVersion": 16,
+  "policyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+  "eventProof": {
+    "lastChainHash": "d5840c273bba0919b267666298cc969e2a2d0d7b3da0227b05e2bc8aa5f80191",
+    "eventCount": 16,
+    "signatures": {
+      "signedEventCount": 16,
+      "signerKeyIds": [
+        "key_80dd104bffdf69b1c5d4045f",
+        "key_ba17e66c2185a7e8da4b1fd1"
+      ]
+    }
+  },
+  "job": {
+    "templateId": "reset_lite",
+    "customerId": "cust_demo",
+    "siteId": "site_demo",
+    "contractId": "c_demo_delivery",
+    "customerContractHash": "f2afeb6ba382daf6a0591436f1e8c330fe90c2fb004864809d6a5a9857c12334",
+    "customerCompilerId": "contract_compiler.v1",
+    "customerPolicyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+    "operatorContractHash": "f2afeb6ba382daf6a0591436f1e8c330fe90c2fb004864809d6a5a9857c12334",
+    "operatorCompilerId": "contract_compiler.v1",
+    "operatorPolicyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+    "zoneId": "zone_default",
+    "environmentTier": "ENV_MANAGED_BUILDING"
+  },
+  "settlement": {
+    "currency": "USD",
+    "quoteAmountCents": 7150,
+    "operatorCostCents": 0,
+    "slaCreditsCents": 0,
+    "claimsPaidCents": 0,
+    "splitPlanHash": null,
+    "partyRollups": [
+      {
+        "partyRole": "customer",
+        "partyId": "pty_customer:cust_demo",
+        "feesCents": 0,
+        "payoutCents": 0,
+        "creditsCents": 0,
+        "netCents": 0,
+        "balanceDeltaCents": 0
+      },
+      {
+        "partyRole": "operator",
+        "partyId": "pty_operator",
+        "feesCents": 0,
+        "payoutCents": 5577,
+        "creditsCents": 0,
+        "netCents": 5577,
+        "balanceDeltaCents": -5577
+      },
+      {
+        "partyRole": "platform",
+        "partyId": "pty_platform",
+        "feesCents": 1430,
+        "payoutCents": 0,
+        "creditsCents": 0,
+        "netCents": 1430,
+        "balanceDeltaCents": 5577
+      }
+    ],
+    "ledgerEntryIds": [
+      "jnl_evt_5fbfa2cf-971f-4583-9edd-541a18cdf43e",
+      "jnl_evt_6c912836-4d65-44b8-84c8-ca7d9c309a26"
+    ],
+    "totalsByAccountId": {
+      "acct_cash": 7150,
+      "acct_customer_escrow": 0,
+      "acct_platform_revenue": -1430,
+      "acct_owner_payable": -5577,
+      "acct_insurance_reserve": -143
+    }
+  },
+  "sourceEventId": "evt_6c912836-4d65-44b8-84c8-ca7d9c309a26",
+  "atChainHash": "d5840c273bba0919b267666298cc969e2a2d0d7b3da0227b05e2bc8aa5f80191",
+  "artifactHash": "0337ccdb632ce825fce781caf955a61c2417012bd0952f58223e31c5f679087e"
+}

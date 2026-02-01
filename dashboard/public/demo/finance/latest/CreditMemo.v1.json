@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "CreditMemo.v1",
+  "artifactType": "CreditMemo.v1",
+  "artifactId": "credit_job_det_00000012_cred_det_00000050",
+  "generatedAt": "2026-01-20T10:19:32.000Z",
+  "tenantId": "tenant_default",
+  "jobId": "job_det_00000012",
+  "jobVersion": 17,
+  "policyHash": "c12e7b9f6aba3585b1e0c795d40062719c3a15313a6d32020eb4ae9eefd356e8",
+  "eventProof": {
+    "lastChainHash": "8d052700ede8a005dd4db0713a67b10d38e6c448c326b64a570b5d33daf7aff7",
+    "eventCount": 17,
+    "signatures": {
+      "signedEventCount": 17,
+      "signerKeyIds": [
+        "key_11d527437c641225cc41a7c7",
+        "key_194af022ebdc840a1ff22836"
+      ]
+    }
+  },
+  "credit": {
+    "creditId": "cred_det_00000050",
+    "type": "SLA",
+    "amountCents": 1250,
+    "currency": "USD",
+    "issuedAt": "2026-01-20T10:19:32.000Z",
+    "reason": "SLA_BREACH",
+    "trigger": {
+      "type": "SLA_BREACH",
+      "breachEventId": "evt_det_00000049",
+      "detectedAt": "2026-01-20T10:19:32.000Z",
+      "window": {
+        "startAt": "2026-01-20T10:00:00.000Z",
+        "endAt": "2026-01-20T10:15:00.000Z"
+      },
+      "policy": {
+        "slaVersion": 1,
+        "mustStartWithinWindow": true,
+        "maxStallMs": 600000,
+        "maxExecutionMs": 5400000
+      },
+      "breaches": [
+        {
+          "type": "START_LATE",
+          "startedAt": "2026-01-20T10:18:00.000Z",
+          "windowStartAt": "2026-01-20T10:00:00.000Z",
+          "windowEndAt": "2026-01-20T10:15:00.000Z",
+          "latenessMs": 180000
+        },
+        {
+          "type": "COMPLETE_LATE",
+          "completedAt": "2026-01-20T10:18:32.000Z",
+          "windowEndAt": "2026-01-20T10:15:00.000Z",
+          "latenessMs": 212000
+        }
+      ]
+    },
+    "settledEventId": "evt_det_00000046",
+    "funding": {
+      "model": "PLATFORM_EXPENSE",
+      "insurerId": null,
+      "recoverablePercent": null,
+      "recoverableCents": null,
+      "receivableRefId": null
+    }
+  },
+  "job": {
+    "templateId": "reset_standard",
+    "customerId": "cust_demo",
+    "siteId": "site_demo",
+    "contractId": "c_demo_delivery",
+    "zoneId": "zone_default",
+    "environmentTier": "ENV_HOSPITALITY"
+  },
+  "sourceEventId": "evt_det_00000051",
+  "atChainHash": "8d052700ede8a005dd4db0713a67b10d38e6c448c326b64a570b5d33daf7aff7",
+  "artifactHash": "2663d42ee9cdc28c72f97c346f6c4c679c2af6ec9a463cb9ae1f31b1e03b8cef"
+}

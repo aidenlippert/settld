@@ -1,0 +1,36 @@
+{
+  "copiedRuns": [
+    {
+      "runId": "debug1",
+      "copied": [
+        "run.json",
+        "steps.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "GLBatch.v1.json"
+      ]
+    },
+    {
+      "runId": "debug2",
+      "copied": [
+        "run.json",
+        "steps.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "GLBatch.v1.json"
+      ]
+    },
+    {
+      "runId": "finance_pack_v1",
+      "copied": [
+        "run.json",
+        "steps.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "GLBatch.v1.json",
+        "JournalCsv.v1.csv"
+      ]
+    }
+  ],
+  "latestRunId": "finance_pack_v1"
+}

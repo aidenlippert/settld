@@ -1,0 +1,19 @@
+{
+  "runId": "20260130T005820081Z",
+  "scenario": "delivery_robot_late",
+  "tenantId": "tenant_default",
+  "jobId": "job_587be5f9-1d7b-43f3-b20e-c3f0a0439c0a",
+  "bookedPolicyHash": "0145cefa325446314c15ab000dd319866631ed8528d1700dfce30b46d884f00e",
+  "contractId": "c_demo_delivery",
+  "contractVersionAtBooking": 1,
+  "contractVersionAfterUpdate": 2,
+  "artifacts": [
+    "CreditMemo.v1",
+    "SettlementStatement.v1",
+    "WorkCertificate.v1"
+  ],
+  "notes": [
+    "Booking pins policyHash; later contract updates do not change bookedPolicyHash.",
+    "Robot starts after booking window end -> SLA_BREACH_DETECTED, then SLA_CREDIT_ISSUED (creditPolicy enabled)."
+  ]
+}

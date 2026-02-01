@@ -1,0 +1,19 @@
+{{- if .Values.receiver.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "settld.fullname" . }}-receiver
+  labels:
+    {{- include "settld.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.receiver.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.receiver.service.port }}
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: {{ include "settld.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: receiver
+{{- end }}
+

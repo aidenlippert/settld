@@ -1,0 +1,311 @@
+{
+  "job": {
+    "id": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+    "tenantId": "tenant_default",
+    "customerId": "cust_demo",
+    "siteId": "site_demo",
+    "contractId": "c_demo_delivery",
+    "customerContractHash": "3065ead4129634d0bc3e0b0c895481388ddfbfbf82c456143ea2d1d0181aff26",
+    "customerPolicyHash": "194fb7ef04a079d777f5168c934fe1e33bee876297c97a88b94c55ab30841ade",
+    "customerCompilerId": "contract_compiler.v1",
+    "operatorContractHash": null,
+    "operatorPolicyHash": null,
+    "operatorCompilerId": null,
+    "templateId": "reset_standard",
+    "constraints": {},
+    "status": "BOOKED",
+    "revision": 7,
+    "createdAt": "2026-01-20T09:50:00.000Z",
+    "updatedAt": "2026-01-20T10:05:00.000Z",
+    "lastChainHash": "284128f7c0d0cc564cc5176da09f6817cc4f26c55b6b45e0bd546df84e997c43",
+    "lastEventId": "evt_c4a67149-3f2d-4696-9171-f3c70a87577d",
+    "quote": {
+      "pricingVersion": 1,
+      "currency": "USD",
+      "amountCents": 12500,
+      "breakdown": {
+        "baseCents": 9500,
+        "riskPremiumCents": 400,
+        "operatorCoverageCents": 0,
+        "surgeCents": 950,
+        "coverageFeeCents": 1650,
+        "totalCents": 12500
+      },
+      "supplySnapshot": {
+        "availableRobots": 1,
+        "activeOperators": 0
+      },
+      "sla": {
+        "slaVersion": 1,
+        "mustStartWithinWindow": true,
+        "maxStallMs": 600000,
+        "maxExecutionMs": 5400000
+      },
+      "inputs": {
+        "startAt": "2026-01-20T10:00:00.000Z",
+        "endAt": "2026-01-20T10:15:00.000Z",
+        "environmentTier": "ENV_HOSPITALITY",
+        "requiresOperatorCoverage": false,
+        "customerId": "cust_demo",
+        "siteId": "site_demo",
+        "contractId": "c_demo_delivery",
+        "zoneId": "zone_default",
+        "contractVersion": 1
+      }
+    },
+    "booking": {
+      "paymentHoldId": "hold_job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+      "startAt": "2026-01-20T10:00:00.000Z",
+      "endAt": "2026-01-20T10:15:00.000Z",
+      "environmentTier": "ENV_HOSPITALITY",
+      "requiresOperatorCoverage": false,
+      "zoneId": "zone_default",
+      "requiredZones": {
+        "schemaVersion": "ZoneSet.v1",
+        "zoneSetId": "zones_job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+        "zones": [
+          {
+            "zoneId": "zone_default",
+            "label": "zone_default"
+          }
+        ]
+      },
+      "requiredZonesHash": "6eaa05ff854a95246785a67158246f5417a499b731e9468143b865e415e0daf9",
+      "sla": {
+        "slaVersion": 1,
+        "mustStartWithinWindow": true,
+        "maxStallMs": 600000,
+        "maxExecutionMs": 5400000
+      },
+      "customerId": "cust_demo",
+      "siteId": "site_demo",
+      "contractId": "c_demo_delivery",
+      "contractVersion": 1,
+      "customerContractHash": "3065ead4129634d0bc3e0b0c895481388ddfbfbf82c456143ea2d1d0181aff26",
+      "customerCompilerId": "contract_compiler.v1",
+      "creditPolicy": {
+        "enabled": true,
+        "defaultAmountCents": 1250,
+        "maxAmountCents": 1250,
+        "currency": "USD"
+      },
+      "evidencePolicy": {
+        "retentionDays": 30
+      },
+      "policySnapshot": {
+        "schemaVersion": "PolicySnapshot.v1",
+        "contractId": "c_demo_delivery",
+        "contractVersion": 1,
+        "environmentTier": "ENV_HOSPITALITY",
+        "requiresOperatorCoverage": false,
+        "sla": {
+          "slaVersion": 1,
+          "mustStartWithinWindow": true,
+          "maxStallMs": 600000,
+          "maxExecutionMs": 5400000
+        },
+        "proofPolicy": null,
+        "creditPolicy": {
+          "enabled": true,
+          "defaultAmountCents": 1250,
+          "maxAmountCents": 1250,
+          "currency": "USD"
+        },
+        "evidencePolicy": {
+          "retentionDays": 30
+        },
+        "claimPolicy": {
+          "currency": "USD",
+          "autoApproveThresholdCents": 0,
+          "maxPayoutCents": 0,
+          "reservePercent": 0
+        },
+        "coveragePolicy": {
+          "required": true,
+          "coverageTierId": null,
+          "feeModel": "PER_JOB",
+          "feeCentsPerJob": 1650,
+          "creditFundingModel": "PLATFORM_EXPENSE",
+          "reserveFundPercent": 100,
+          "insurerId": null,
+          "recoverablePercent": 100,
+          "recoverableTerms": null,
+          "responseSlaSeconds": 0,
+          "includedAssistSeconds": 0,
+          "overageRateCentsPerMinute": 0
+        }
+      },
+      "policyHash": "194fb7ef04a079d777f5168c934fe1e33bee876297c97a88b94c55ab30841ade"
+    },
+    "cancellation": null,
+    "match": null,
+    "reservation": null,
+    "accessPlan": null,
+    "access": {
+      "status": "none",
+      "accessPlanId": null,
+      "grantedAt": null,
+      "deniedAt": null,
+      "revokedAt": null,
+      "expiredAt": null
+    },
+    "execution": {
+      "startedAt": null,
+      "robotId": null,
+      "stage": null,
+      "lastHeartbeatAt": null,
+      "lastHeartbeatStage": null,
+      "lastHeartbeatProgress": null,
+      "lastHeartbeatAssistRequested": null,
+      "stalledAt": null,
+      "stallReason": null,
+      "resumedAt": null,
+      "completedAt": null,
+      "abortedAt": null
+    },
+    "operatorCoverage": {
+      "status": "none",
+      "reservationId": null,
+      "operatorId": null,
+      "startAt": null,
+      "endAt": null,
+      "reservedAt": null,
+      "releasedAt": null
+    },
+    "assist": {
+      "status": "none",
+      "queueId": null,
+      "operatorId": null,
+      "queuedAt": null,
+      "assignedAt": null,
+      "acceptedAt": null,
+      "declinedAt": null
+    },
+    "skillLicenses": [],
+    "skillUses": [],
+    "operatorCosts": [],
+    "slaBreaches": [],
+    "slaCredits": [],
+    "riskScores": [
+      {
+        "at": "2026-01-20T09:50:00.000Z",
+        "payload": {
+          "jobId": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+          "basis": "QUOTE",
+          "scoredAt": "2026-01-20T09:50:00.000Z",
+          "sourceEventId": "evt_4ef7ab89-088b-45c2-9e8b-e10b45376851",
+          "modelVersion": 1,
+          "riskScore": 70,
+          "expectedAssistSeconds": 240,
+          "expectedIncidentProbabilityBps": 1150,
+          "expectedCreditBurnRateCents": 50,
+          "currency": "USD",
+          "policyHash": null,
+          "features": {
+            "templateId": "reset_standard",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "siteId": "site_demo",
+            "customerId": "cust_demo",
+            "availableRobots": 1,
+            "activeOperators": 0,
+            "avgAvailableRobotTrustScoreBps": 5000,
+            "historyWindowDays": 30,
+            "historySampleJobs": 0,
+            "historyIncidentRateBps": 0,
+            "historyStallRateBps": 0,
+            "historyAvgAssistSeconds": 0,
+            "historyAvgCreditCents": 0,
+            "historyAvgClaimsPaidCents": 0
+          }
+        },
+        "actor": {
+          "type": "risk",
+          "id": "risk_v1"
+        }
+      },
+      {
+        "at": "2026-01-20T09:50:00.000Z",
+        "payload": {
+          "jobId": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+          "basis": "BOOK",
+          "scoredAt": "2026-01-20T09:50:00.000Z",
+          "sourceEventId": "evt_8a3809bc-3f74-4d30-93d2-b16955b1b6ba",
+          "modelVersion": 1,
+          "riskScore": 70,
+          "expectedAssistSeconds": 240,
+          "expectedIncidentProbabilityBps": 1150,
+          "expectedCreditBurnRateCents": 50,
+          "currency": "USD",
+          "policyHash": "194fb7ef04a079d777f5168c934fe1e33bee876297c97a88b94c55ab30841ade",
+          "features": {
+            "templateId": "reset_standard",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "siteId": "site_demo",
+            "customerId": "cust_demo",
+            "availableRobots": 1,
+            "activeOperators": 0,
+            "avgAvailableRobotTrustScoreBps": 5000,
+            "historyWindowDays": 30,
+            "historySampleJobs": 0,
+            "historyIncidentRateBps": 0,
+            "historyStallRateBps": 0,
+            "historyAvgAssistSeconds": 0,
+            "historyAvgCreditCents": 0,
+            "historyAvgClaimsPaidCents": 0
+          }
+        },
+        "actor": {
+          "type": "risk",
+          "id": "risk_v1"
+        }
+      }
+    ],
+    "incidents": [],
+    "evidence": [],
+    "claims": []
+  },
+  "results": [
+    {
+      "externalEventId": "ext_evt_dispatch_eval_1",
+      "status": "accepted",
+      "acceptedEventId": "evt_c4a67149-3f2d-4696-9171-f3c70a87577d",
+      "reason": null,
+      "reasonCode": null,
+      "late": false
+    }
+  ],
+  "events": [
+    {
+      "v": 1,
+      "id": "evt_c4a67149-3f2d-4696-9171-f3c70a87577d",
+      "at": "2026-01-20T10:05:00.000Z",
+      "streamId": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+      "type": "DISPATCH_EVALUATED",
+      "actor": {
+        "type": "ingest",
+        "id": "anon"
+      },
+      "payload": {
+        "jobId": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+        "evaluatedAt": "2026-01-20T10:05:00.000Z",
+        "window": {
+          "startAt": "2026-01-20T10:00:00.000Z",
+          "endAt": "2026-01-20T10:15:00.000Z"
+        },
+        "zoneId": "default",
+        "requiresOperatorCoverage": false,
+        "candidates": [],
+        "selected": null
+      },
+      "payloadHash": "418942742fdc8d19a12011d6cb4dedaefdad3e6b6d3f9d46ec208e8f7bdef3da",
+      "prevChainHash": "42e528e968beeb0f0b7c98361c866d983190a33aeed034fb7982ed43e6691818",
+      "chainHash": "284128f7c0d0cc564cc5176da09f6817cc4f26c55b6b45e0bd546df84e997c43",
+      "signature": "wgtVY5F9vPEA1uP+n5AAJZxiUbaFf3KkD0sF1c6B0Q1KO64i7bPFbypVAhx/D9f/4xS0H/L3F/G4wY4QGdRcAg==",
+      "signerKeyId": "key_86c809caa9e68d0d2161e9a4"
+    }
+  ]
+}

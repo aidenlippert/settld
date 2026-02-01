@@ -1,0 +1,266 @@
+export const JOB_STATUS = Object.freeze({
+  CREATED: "CREATED",
+  QUOTED: "QUOTED",
+  BOOKED: "BOOKED",
+  MATCHED: "MATCHED",
+  RESERVED: "RESERVED",
+  EN_ROUTE: "EN_ROUTE",
+  ACCESS_GRANTED: "ACCESS_GRANTED",
+  EXECUTING: "EXECUTING",
+  ASSISTED: "ASSISTED",
+  STALLED: "STALLED",
+  ABORTING_SAFE_EXIT: "ABORTING_SAFE_EXIT",
+  COMPLETED: "COMPLETED",
+  ABORTED: "ABORTED",
+  SETTLED: "SETTLED"
+});
+
+export const JOB_EVENT_TYPE = Object.freeze({
+  QUOTE_PROPOSED: "QUOTE_PROPOSED",
+  BOOKED: "BOOKED",
+  MATCHED: "MATCHED",
+  RESERVED: "RESERVED",
+  EN_ROUTE: "EN_ROUTE",
+  ACCESS_GRANTED: "ACCESS_GRANTED",
+  ACCESS_REVOKED: "ACCESS_REVOKED",
+  ACCESS_EXPIRED: "ACCESS_EXPIRED",
+  EXECUTION_STARTED: "EXECUTION_STARTED",
+  JOB_EXECUTION_STARTED: "JOB_EXECUTION_STARTED",
+  JOB_EXECUTION_STALLED: "JOB_EXECUTION_STALLED",
+  JOB_EXECUTION_RESUMED: "JOB_EXECUTION_RESUMED",
+  ASSIST_STARTED: "ASSIST_STARTED",
+  ASSIST_ENDED: "ASSIST_ENDED",
+  EXECUTION_COMPLETED: "EXECUTION_COMPLETED",
+  JOB_EXECUTION_COMPLETED: "JOB_EXECUTION_COMPLETED",
+  EXECUTION_ABORTED: "EXECUTION_ABORTED",
+  JOB_EXECUTION_ABORTED: "JOB_EXECUTION_ABORTED",
+  JOB_RESCHEDULED: "JOB_RESCHEDULED",
+  JOB_CANCELLED: "JOB_CANCELLED",
+  SETTLED: "SETTLED",
+  INCIDENT_REPORTED: "INCIDENT_REPORTED"
+});
+
+export class InvalidJobTransitionError extends Error {
+  constructor(message, { jobId, fromStatus, eventType } = {}) {
+    super(message);
+    this.name = "InvalidJobTransitionError";
+    this.jobId = jobId;
+    this.fromStatus = fromStatus;
+    this.eventType = eventType;
+  }
+}
+
+const TRANSITIONS = new Map([
+  [`${JOB_STATUS.CREATED}:${JOB_EVENT_TYPE.QUOTE_PROPOSED}`, JOB_STATUS.QUOTED],
+  [`${JOB_STATUS.QUOTED}:${JOB_EVENT_TYPE.BOOKED}`, JOB_STATUS.BOOKED],
+  [`${JOB_STATUS.BOOKED}:${JOB_EVENT_TYPE.MATCHED}`, JOB_STATUS.MATCHED],
+  [`${JOB_STATUS.MATCHED}:${JOB_EVENT_TYPE.RESERVED}`, JOB_STATUS.RESERVED],
+  [`${JOB_STATUS.RESERVED}:${JOB_EVENT_TYPE.EN_ROUTE}`, JOB_STATUS.EN_ROUTE],
+  [`${JOB_STATUS.EN_ROUTE}:${JOB_EVENT_TYPE.ACCESS_GRANTED}`, JOB_STATUS.ACCESS_GRANTED],
+  [`${JOB_STATUS.ACCESS_GRANTED}:${JOB_EVENT_TYPE.EXECUTION_STARTED}`, JOB_STATUS.EXECUTING],
+  [`${JOB_STATUS.ACCESS_GRANTED}:${JOB_EVENT_TYPE.JOB_EXECUTION_STARTED}`, JOB_STATUS.EXECUTING],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.ASSIST_STARTED}`, JOB_STATUS.ASSISTED],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.ASSIST_ENDED}`, JOB_STATUS.EXECUTING],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.EXECUTION_COMPLETED}`, JOB_STATUS.COMPLETED],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.EXECUTION_COMPLETED}`, JOB_STATUS.COMPLETED],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.JOB_EXECUTION_COMPLETED}`, JOB_STATUS.COMPLETED],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.JOB_EXECUTION_COMPLETED}`, JOB_STATUS.COMPLETED],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.ABORTING_SAFE_EXIT}:${JOB_EVENT_TYPE.EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.JOB_EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.JOB_EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.ABORTING_SAFE_EXIT}:${JOB_EVENT_TYPE.JOB_EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.JOB_EXECUTION_STALLED}`, JOB_STATUS.STALLED],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.JOB_EXECUTION_STALLED}`, JOB_STATUS.STALLED],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.JOB_EXECUTION_RESUMED}`, JOB_STATUS.EXECUTING],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.JOB_EXECUTION_ABORTED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.EXECUTION_COMPLETED}`, JOB_STATUS.COMPLETED],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.JOB_EXECUTION_COMPLETED}`, JOB_STATUS.COMPLETED],
+
+  // Rescheduling resets dispatch.
+  [`${JOB_STATUS.BOOKED}:${JOB_EVENT_TYPE.JOB_RESCHEDULED}`, JOB_STATUS.BOOKED],
+  [`${JOB_STATUS.MATCHED}:${JOB_EVENT_TYPE.JOB_RESCHEDULED}`, JOB_STATUS.BOOKED],
+  [`${JOB_STATUS.RESERVED}:${JOB_EVENT_TYPE.JOB_RESCHEDULED}`, JOB_STATUS.BOOKED],
+
+  // Cancellation: aborts the job or forces safe exit if already active.
+  [`${JOB_STATUS.CREATED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.QUOTED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.BOOKED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.MATCHED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.RESERVED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.EN_ROUTE}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ACCESS_GRANTED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ABORTING_SAFE_EXIT}:${JOB_EVENT_TYPE.JOB_CANCELLED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+
+  // Access revocation/expiry forces safe exit when active; otherwise cancels.
+  [`${JOB_STATUS.CREATED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.QUOTED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.BOOKED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.MATCHED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.RESERVED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.EN_ROUTE}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ACCESS_GRANTED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.ACCESS_REVOKED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+
+  [`${JOB_STATUS.CREATED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.QUOTED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.BOOKED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.MATCHED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.RESERVED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTED],
+  [`${JOB_STATUS.EN_ROUTE}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ACCESS_GRANTED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.EXECUTING}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.ASSISTED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+  [`${JOB_STATUS.STALLED}:${JOB_EVENT_TYPE.ACCESS_EXPIRED}`, JOB_STATUS.ABORTING_SAFE_EXIT],
+
+  [`${JOB_STATUS.COMPLETED}:${JOB_EVENT_TYPE.SETTLED}`, JOB_STATUS.SETTLED],
+  [`${JOB_STATUS.ABORTED}:${JOB_EVENT_TYPE.SETTLED}`, JOB_STATUS.SETTLED]
+]);
+
+const TRANSITION_EVENT_TYPES = new Set([
+  JOB_EVENT_TYPE.QUOTE_PROPOSED,
+  JOB_EVENT_TYPE.BOOKED,
+  JOB_EVENT_TYPE.MATCHED,
+  JOB_EVENT_TYPE.RESERVED,
+  JOB_EVENT_TYPE.EN_ROUTE,
+  JOB_EVENT_TYPE.ACCESS_GRANTED,
+  JOB_EVENT_TYPE.ACCESS_REVOKED,
+  JOB_EVENT_TYPE.ACCESS_EXPIRED,
+  JOB_EVENT_TYPE.EXECUTION_STARTED,
+  JOB_EVENT_TYPE.JOB_EXECUTION_STARTED,
+  JOB_EVENT_TYPE.JOB_EXECUTION_STALLED,
+  JOB_EVENT_TYPE.JOB_EXECUTION_RESUMED,
+  JOB_EVENT_TYPE.ASSIST_STARTED,
+  JOB_EVENT_TYPE.ASSIST_ENDED,
+  JOB_EVENT_TYPE.EXECUTION_COMPLETED,
+  JOB_EVENT_TYPE.EXECUTION_ABORTED,
+  JOB_EVENT_TYPE.JOB_EXECUTION_COMPLETED,
+  JOB_EVENT_TYPE.JOB_EXECUTION_ABORTED,
+  JOB_EVENT_TYPE.JOB_RESCHEDULED,
+  JOB_EVENT_TYPE.JOB_CANCELLED,
+  JOB_EVENT_TYPE.SETTLED
+]);
+
+export function createJob({
+  id,
+  templateId,
+  constraints = {},
+  createdAt = new Date().toISOString(),
+  tenantId = null,
+  customerId = null,
+  siteId = null,
+  contractId = null
+}) {
+  return {
+    id,
+    tenantId,
+    customerId,
+    siteId,
+    contractId,
+    customerContractHash: null,
+    customerPolicyHash: null,
+    customerCompilerId: null,
+    operatorContractHash: null,
+    operatorPolicyHash: null,
+    operatorCompilerId: null,
+    templateId,
+    constraints,
+    status: JOB_STATUS.CREATED,
+    revision: 0,
+    createdAt,
+    updatedAt: createdAt,
+    lastChainHash: null,
+    lastEventId: null,
+    quote: null,
+    booking: null,
+    cancellation: null,
+    match: null,
+    reservation: null,
+    accessPlan: null,
+    access: {
+      status: "none",
+      accessPlanId: null,
+      grantedAt: null,
+      deniedAt: null,
+      revokedAt: null,
+      expiredAt: null
+    },
+    execution: {
+      startedAt: null,
+      robotId: null,
+      stage: null,
+      lastHeartbeatAt: null,
+      lastHeartbeatStage: null,
+      lastHeartbeatProgress: null,
+      lastHeartbeatAssistRequested: null,
+      stalledAt: null,
+      stallReason: null,
+      resumedAt: null,
+      completedAt: null,
+      abortedAt: null
+    },
+    operatorCoverage: {
+      status: "none",
+      reservationId: null,
+      operatorId: null,
+      startAt: null,
+      endAt: null,
+      reservedAt: null,
+      releasedAt: null
+    },
+    assist: {
+      status: "none",
+      queueId: null,
+      operatorId: null,
+      queuedAt: null,
+      assignedAt: null,
+      acceptedAt: null,
+      declinedAt: null
+    },
+    skillLicenses: [],
+    skillUses: []
+  };
+}
+
+export function applyJobEvent(job, event) {
+  if (!job || typeof job !== "object") throw new TypeError("job must be an object");
+  if (!event || typeof event !== "object") throw new TypeError("event must be an object");
+  if (event.streamId && event.streamId !== job.id) {
+    throw new Error(`event.streamId (${event.streamId}) does not match job.id (${job.id})`);
+  }
+
+  const now = event.at ?? new Date().toISOString();
+
+  if (event.type === JOB_EVENT_TYPE.INCIDENT_REPORTED || !TRANSITION_EVENT_TYPES.has(event.type)) {
+    return { ...job, revision: job.revision + 1, updatedAt: now };
+  }
+
+  const key = `${job.status}:${event.type}`;
+  const next = TRANSITIONS.get(key);
+  if (!next) {
+    throw new InvalidJobTransitionError(`Invalid transition from ${job.status} via ${event.type}`, {
+      jobId: job.id,
+      fromStatus: job.status,
+      eventType: event.type
+    });
+  }
+
+  const nextJob = { ...job, status: next, revision: job.revision + 1, updatedAt: now };
+
+  if (event.type === JOB_EVENT_TYPE.QUOTE_PROPOSED) {
+    nextJob.quote = event.payload ?? null;
+  }
+  if (event.type === JOB_EVENT_TYPE.MATCHED) {
+    nextJob.match = event.payload ?? null;
+  }
+
+  return nextJob;
+}

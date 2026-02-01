@@ -1,0 +1,48 @@
+groups:
+  - name: settld.rules
+    rules:
+      - alert: SettldOutboxBacklogHigh
+        expr: sum(outbox_pending_gauge) > 2000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld outbox backlog is high"
+          description: "sum(outbox_pending_gauge) has been > 2000 for 10m (workers may be stuck or PG slow)."
+
+      - alert: SettldDeliveriesPendingHigh
+        expr: deliveries_pending_gauge{state="pending"} > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld deliveries pending is high"
+          description: "deliveries_pending_gauge{state=\"pending\"} has been > 1000 for 10m."
+
+      - alert: SettldDeliveryDLQNonZero
+        expr: delivery_dlq_pending_total_gauge > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Settld delivery DLQ is non-zero"
+          description: "delivery_dlq_pending_total_gauge has been > 0 for 5m. Inspect /ops/dlq and /ops/deliveries."
+
+      - alert: SettldIngestRejectedNonZero
+        expr: ingest_rejected_gauge > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld ingest rejected backlog non-zero"
+          description: "ingest_rejected_gauge has been > 0 for 10m."
+
+      - alert: SettldRetentionCleanupStale
+        expr: time() - maintenance_last_success_unixtime{kind="retention_cleanup"} > 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld retention cleanup has not succeeded recently"
+          description: "No successful retention cleanup recorded in the last hour (check maintenance runner / ops audit)."
+

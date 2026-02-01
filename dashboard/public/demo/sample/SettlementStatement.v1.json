@@ -1,0 +1,13 @@
+{
+  "artifactType": "SettlementStatement.v1",
+  "artifactId": "settlement_demo",
+  "artifactHash": "demo_hash",
+  "jobId": "job_demo",
+  "generatedAt": "2026-01-20T10:51:00.000Z",
+  "summary": {
+    "currency": "USD",
+    "grossCents": 12500,
+    "creditsCents": 1250,
+    "netCents": 11250
+  }
+}

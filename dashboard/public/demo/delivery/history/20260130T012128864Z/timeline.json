@@ -1,0 +1,1146 @@
+{
+  "job": {
+    "id": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+    "tenantId": "tenant_default",
+    "customerId": "cust_demo",
+    "siteId": "site_demo",
+    "contractId": "c_demo_delivery",
+    "customerContractHash": "3065ead4129634d0bc3e0b0c895481388ddfbfbf82c456143ea2d1d0181aff26",
+    "customerPolicyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+    "customerCompilerId": "contract_compiler.v1",
+    "operatorContractHash": "3065ead4129634d0bc3e0b0c895481388ddfbfbf82c456143ea2d1d0181aff26",
+    "operatorPolicyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+    "operatorCompilerId": "contract_compiler.v1",
+    "templateId": "reset_standard",
+    "constraints": {},
+    "status": "SETTLED",
+    "revision": 18,
+    "createdAt": "2026-01-20T09:50:00.000Z",
+    "updatedAt": "2026-01-20T10:19:32.000Z",
+    "lastChainHash": "bfe1c8459cce0f77a99164548ba53745f44e0be5f39333fcfdcc71ab5cf954d8",
+    "lastEventId": "evt_0a857f2c-0210-4203-84e1-9c4621226171",
+    "quote": {
+      "pricingVersion": 1,
+      "currency": "USD",
+      "amountCents": 12500,
+      "breakdown": {
+        "baseCents": 9500,
+        "riskPremiumCents": 400,
+        "operatorCoverageCents": 0,
+        "surgeCents": 950,
+        "coverageFeeCents": 1650,
+        "totalCents": 12500
+      },
+      "supplySnapshot": {
+        "availableRobots": 1,
+        "activeOperators": 0
+      },
+      "sla": {
+        "slaVersion": 1,
+        "mustStartWithinWindow": true,
+        "maxStallMs": 600000,
+        "maxExecutionMs": 5400000
+      },
+      "inputs": {
+        "startAt": "2026-01-20T10:00:00.000Z",
+        "endAt": "2026-01-20T10:15:00.000Z",
+        "environmentTier": "ENV_HOSPITALITY",
+        "requiresOperatorCoverage": false,
+        "customerId": "cust_demo",
+        "siteId": "site_demo",
+        "contractId": "c_demo_delivery",
+        "zoneId": "zone_default",
+        "contractVersion": 1
+      }
+    },
+    "booking": {
+      "paymentHoldId": "hold_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "startAt": "2026-01-20T10:00:00.000Z",
+      "endAt": "2026-01-20T10:15:00.000Z",
+      "environmentTier": "ENV_HOSPITALITY",
+      "requiresOperatorCoverage": false,
+      "zoneId": "zone_default",
+      "sla": {
+        "slaVersion": 1,
+        "mustStartWithinWindow": true,
+        "maxStallMs": 600000,
+        "maxExecutionMs": 5400000
+      },
+      "customerId": "cust_demo",
+      "siteId": "site_demo",
+      "contractId": "c_demo_delivery",
+      "contractVersion": 1,
+      "customerContractHash": "3065ead4129634d0bc3e0b0c895481388ddfbfbf82c456143ea2d1d0181aff26",
+      "customerCompilerId": "contract_compiler.v1",
+      "creditPolicy": {
+        "enabled": true,
+        "defaultAmountCents": 1250,
+        "maxAmountCents": 1250,
+        "currency": "USD"
+      },
+      "evidencePolicy": {
+        "retentionDays": 30
+      },
+      "policySnapshot": {
+        "schemaVersion": "PolicySnapshot.v1",
+        "contractId": "c_demo_delivery",
+        "contractVersion": 1,
+        "environmentTier": "ENV_HOSPITALITY",
+        "requiresOperatorCoverage": false,
+        "sla": {
+          "slaVersion": 1,
+          "mustStartWithinWindow": true,
+          "maxStallMs": 600000,
+          "maxExecutionMs": 5400000
+        },
+        "creditPolicy": {
+          "enabled": true,
+          "defaultAmountCents": 1250,
+          "maxAmountCents": 1250,
+          "currency": "USD"
+        },
+        "evidencePolicy": {
+          "retentionDays": 30
+        },
+        "claimPolicy": {
+          "currency": "USD",
+          "autoApproveThresholdCents": 0,
+          "maxPayoutCents": 0,
+          "reservePercent": 0
+        },
+        "coveragePolicy": {
+          "required": true,
+          "coverageTierId": null,
+          "feeModel": "PER_JOB",
+          "feeCentsPerJob": 1650,
+          "creditFundingModel": "PLATFORM_EXPENSE",
+          "reserveFundPercent": 100,
+          "insurerId": null,
+          "recoverablePercent": 100,
+          "recoverableTerms": null,
+          "responseSlaSeconds": 0,
+          "includedAssistSeconds": 0,
+          "overageRateCentsPerMinute": 0
+        }
+      },
+      "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0"
+    },
+    "cancellation": null,
+    "match": {
+      "robotId": "rob_demo_delivery"
+    },
+    "reservation": {
+      "robotId": "rob_demo_delivery",
+      "startAt": "2026-01-20T10:00:00.000Z",
+      "endAt": "2026-01-20T10:15:00.000Z",
+      "reservationId": "rsv_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96"
+    },
+    "accessPlan": {
+      "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "accessPlanId": "ap_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "method": "DOCKED_IN_BUILDING",
+      "credentialRef": "vault://access/ap_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96/v1",
+      "scope": {
+        "areas": [
+          "LOADING_DOCK"
+        ],
+        "noGo": []
+      },
+      "validFrom": "2026-01-20T10:00:00.000Z",
+      "validTo": "2026-01-20T10:45:00.000Z",
+      "revocable": true,
+      "requestedBy": "system"
+    },
+    "access": {
+      "status": "granted",
+      "accessPlanId": "ap_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "grantedAt": "2026-01-20T10:01:00.000Z",
+      "deniedAt": null,
+      "revokedAt": null,
+      "expiredAt": null
+    },
+    "execution": {
+      "startedAt": "2026-01-20T10:18:00.000Z",
+      "robotId": "rob_demo_delivery",
+      "stage": null,
+      "lastHeartbeatAt": null,
+      "lastHeartbeatStage": null,
+      "lastHeartbeatProgress": null,
+      "lastHeartbeatAssistRequested": null,
+      "stalledAt": null,
+      "stallReason": null,
+      "resumedAt": null,
+      "completedAt": "2026-01-20T10:18:32.000Z",
+      "abortedAt": null
+    },
+    "operatorCoverage": {
+      "status": "none",
+      "reservationId": null,
+      "operatorId": null,
+      "startAt": null,
+      "endAt": null,
+      "reservedAt": null,
+      "releasedAt": null
+    },
+    "assist": {
+      "status": "none",
+      "queueId": null,
+      "operatorId": null,
+      "queuedAt": null,
+      "assignedAt": null,
+      "acceptedAt": null,
+      "declinedAt": null
+    },
+    "skillLicenses": [],
+    "skillUses": [],
+    "operatorCosts": [
+      {
+        "at": "2026-01-20T10:19:32.000Z",
+        "payload": {
+          "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+          "zoneId": "zone_default",
+          "operatorId": null,
+          "assistSeconds": 0,
+          "rateCentsPerMinute": 0,
+          "costCents": 0,
+          "currency": "USD",
+          "basis": "SHIFT_RATE",
+          "settledEventId": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e"
+        },
+        "actor": {
+          "type": "accounting",
+          "id": "job_accounting_v0"
+        }
+      }
+    ],
+    "slaBreaches": [
+      {
+        "at": "2026-01-20T10:19:32.000Z",
+        "payload": {
+          "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+          "detectedAt": "2026-01-20T10:19:32.000Z",
+          "settledEventId": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e",
+          "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+          "window": {
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z"
+          },
+          "policy": {
+            "slaVersion": 1,
+            "mustStartWithinWindow": true,
+            "maxStallMs": 600000,
+            "maxExecutionMs": 5400000
+          },
+          "breaches": [
+            {
+              "type": "START_LATE",
+              "startedAt": "2026-01-20T10:18:00.000Z",
+              "windowStartAt": "2026-01-20T10:00:00.000Z",
+              "windowEndAt": "2026-01-20T10:15:00.000Z",
+              "latenessMs": 180000
+            },
+            {
+              "type": "COMPLETE_LATE",
+              "completedAt": "2026-01-20T10:18:32.000Z",
+              "windowEndAt": "2026-01-20T10:15:00.000Z",
+              "latenessMs": 212000
+            }
+          ]
+        },
+        "actor": {
+          "type": "accounting",
+          "id": "job_accounting_v0"
+        }
+      }
+    ],
+    "slaCredits": [
+      {
+        "at": "2026-01-20T10:19:32.000Z",
+        "payload": {
+          "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+          "creditId": "cred_e5062ae7-fcee-4d13-ac62-ecc38a0833f0",
+          "issuedAt": "2026-01-20T10:19:32.000Z",
+          "amountCents": 1250,
+          "currency": "USD",
+          "reason": "SLA_BREACH",
+          "settledEventId": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e",
+          "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+          "trigger": {
+            "type": "SLA_BREACH",
+            "breachEventId": "evt_b6aa4f97-8332-4d44-ba4a-75b197b14fac",
+            "detectedAt": "2026-01-20T10:19:32.000Z",
+            "window": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z"
+            },
+            "policy": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "breaches": [
+              {
+                "type": "START_LATE",
+                "startedAt": "2026-01-20T10:18:00.000Z",
+                "windowStartAt": "2026-01-20T10:00:00.000Z",
+                "windowEndAt": "2026-01-20T10:15:00.000Z",
+                "latenessMs": 180000
+              },
+              {
+                "type": "COMPLETE_LATE",
+                "completedAt": "2026-01-20T10:18:32.000Z",
+                "windowEndAt": "2026-01-20T10:15:00.000Z",
+                "latenessMs": 212000
+              }
+            ]
+          }
+        },
+        "actor": {
+          "type": "accounting",
+          "id": "job_accounting_v0"
+        }
+      }
+    ],
+    "riskScores": [
+      {
+        "at": "2026-01-20T09:50:00.000Z",
+        "payload": {
+          "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+          "basis": "QUOTE",
+          "scoredAt": "2026-01-20T09:50:00.000Z",
+          "sourceEventId": "evt_96dc4e66-d59b-40a4-9425-88ea07ae3f88",
+          "modelVersion": 1,
+          "riskScore": 70,
+          "expectedAssistSeconds": 240,
+          "expectedIncidentProbabilityBps": 1150,
+          "expectedCreditBurnRateCents": 50,
+          "currency": "USD",
+          "policyHash": null,
+          "features": {
+            "templateId": "reset_standard",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "siteId": "site_demo",
+            "customerId": "cust_demo",
+            "availableRobots": 1,
+            "activeOperators": 0,
+            "avgAvailableRobotTrustScoreBps": 5000,
+            "historyWindowDays": 30,
+            "historySampleJobs": 0,
+            "historyIncidentRateBps": 0,
+            "historyStallRateBps": 0,
+            "historyAvgAssistSeconds": 0,
+            "historyAvgCreditCents": 0,
+            "historyAvgClaimsPaidCents": 0
+          }
+        },
+        "actor": {
+          "type": "risk",
+          "id": "risk_v1"
+        }
+      },
+      {
+        "at": "2026-01-20T09:50:00.000Z",
+        "payload": {
+          "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+          "basis": "BOOK",
+          "scoredAt": "2026-01-20T09:50:00.000Z",
+          "sourceEventId": "evt_2d3c328b-850e-43cc-bd29-ade8be40f8f7",
+          "modelVersion": 1,
+          "riskScore": 70,
+          "expectedAssistSeconds": 240,
+          "expectedIncidentProbabilityBps": 1150,
+          "expectedCreditBurnRateCents": 50,
+          "currency": "USD",
+          "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+          "features": {
+            "templateId": "reset_standard",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "siteId": "site_demo",
+            "customerId": "cust_demo",
+            "availableRobots": 1,
+            "activeOperators": 0,
+            "avgAvailableRobotTrustScoreBps": 5000,
+            "historyWindowDays": 30,
+            "historySampleJobs": 0,
+            "historyIncidentRateBps": 0,
+            "historyStallRateBps": 0,
+            "historyAvgAssistSeconds": 0,
+            "historyAvgCreditCents": 0,
+            "historyAvgClaimsPaidCents": 0
+          }
+        },
+        "actor": {
+          "type": "risk",
+          "id": "risk_v1"
+        }
+      }
+    ],
+    "incidents": [],
+    "evidence": [],
+    "claims": []
+  },
+  "events": [
+    {
+      "v": 1,
+      "id": "evt_0c8a8bd3-5f2a-441a-9561-3caa9add4b97",
+      "at": "2026-01-20T09:50:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "JOB_CREATED",
+      "actor": {
+        "type": "system",
+        "id": "proxy"
+      },
+      "payload": {
+        "tenantId": "tenant_default",
+        "customerId": "cust_demo",
+        "siteId": "site_demo",
+        "contractId": "c_demo_delivery",
+        "templateId": "reset_standard",
+        "constraints": {}
+      },
+      "payloadHash": "b344f5091ae589f23fca32d26caf6322b7e3fcdbe7efdf2a0450ca827c4db00a",
+      "prevChainHash": null,
+      "chainHash": "7559a09aa7e9890560ac93b2f8f7052e41cf8f134ae6c5c4751b54a572a7f87a",
+      "signature": "6Bqzj+Kc3Akej4fUyA3i1ZH1mfRB2sUsTbSbx3IyouKa0pzG0oCoGSYnt5BCeD7Skk7AZYJHgPLBBKp4mfO5BA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_96dc4e66-d59b-40a4-9425-88ea07ae3f88",
+      "at": "2026-01-20T09:50:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "QUOTE_PROPOSED",
+      "actor": {
+        "type": "pricing",
+        "id": "pricing_v0"
+      },
+      "payload": {
+        "pricingVersion": 1,
+        "currency": "USD",
+        "amountCents": 12500,
+        "breakdown": {
+          "baseCents": 9500,
+          "riskPremiumCents": 400,
+          "operatorCoverageCents": 0,
+          "surgeCents": 950,
+          "coverageFeeCents": 1650,
+          "totalCents": 12500
+        },
+        "supplySnapshot": {
+          "availableRobots": 1,
+          "activeOperators": 0
+        },
+        "sla": {
+          "slaVersion": 1,
+          "mustStartWithinWindow": true,
+          "maxStallMs": 600000,
+          "maxExecutionMs": 5400000
+        },
+        "inputs": {
+          "startAt": "2026-01-20T10:00:00.000Z",
+          "endAt": "2026-01-20T10:15:00.000Z",
+          "environmentTier": "ENV_HOSPITALITY",
+          "requiresOperatorCoverage": false,
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "zoneId": "zone_default",
+          "contractVersion": 1
+        }
+      },
+      "payloadHash": "f944153dfa17807281e62253c25da7c75f3adf53cd1325a39b1334536be07db6",
+      "prevChainHash": "7559a09aa7e9890560ac93b2f8f7052e41cf8f134ae6c5c4751b54a572a7f87a",
+      "chainHash": "ec622551384c32ad1b99000b31879c6351fe56fe44bc7d96bee90f8ffc19b832",
+      "signature": "7DdIlR0MXy4G7nBcCIVPP/1WICqHkPm8mKJRHxb69ANxcJucQNYTr6zpNJQNZbMe6i5lRxGhDrP4zrdox45ZDw==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_e3a2d9ef-3e15-4baf-9eee-a5c36fbe354c",
+      "at": "2026-01-20T09:50:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "RISK_SCORED",
+      "actor": {
+        "type": "risk",
+        "id": "risk_v1"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "basis": "QUOTE",
+        "scoredAt": "2026-01-20T09:50:00.000Z",
+        "sourceEventId": "evt_96dc4e66-d59b-40a4-9425-88ea07ae3f88",
+        "modelVersion": 1,
+        "riskScore": 70,
+        "expectedAssistSeconds": 240,
+        "expectedIncidentProbabilityBps": 1150,
+        "expectedCreditBurnRateCents": 50,
+        "currency": "USD",
+        "policyHash": null,
+        "features": {
+          "templateId": "reset_standard",
+          "environmentTier": "ENV_HOSPITALITY",
+          "requiresOperatorCoverage": false,
+          "zoneId": "zone_default",
+          "siteId": "site_demo",
+          "customerId": "cust_demo",
+          "availableRobots": 1,
+          "activeOperators": 0,
+          "avgAvailableRobotTrustScoreBps": 5000,
+          "historyWindowDays": 30,
+          "historySampleJobs": 0,
+          "historyIncidentRateBps": 0,
+          "historyStallRateBps": 0,
+          "historyAvgAssistSeconds": 0,
+          "historyAvgCreditCents": 0,
+          "historyAvgClaimsPaidCents": 0
+        }
+      },
+      "payloadHash": "43228a8a4343b8d9a4d424079e41dab614f079faf9869c31bd85ec95de21c3ae",
+      "prevChainHash": "ec622551384c32ad1b99000b31879c6351fe56fe44bc7d96bee90f8ffc19b832",
+      "chainHash": "a2d5df36d1391971e39ef8c938ab343d5a4f504b17a26f84db3301991a4ed723",
+      "signature": "H8LgdU2qe6E7/l4KcPwfBpj9sD5GryMA/6rTFv5Pcmh/zrqXDO/xogPjWDYfSl6qAxLg5psRphE6LTjVYjN7Dg==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_2d3c328b-850e-43cc-bd29-ade8be40f8f7",
+      "at": "2026-01-20T09:50:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "BOOKED",
+      "actor": {
+        "type": "requester",
+        "id": "requester_demo"
+      },
+      "payload": {
+        "paymentHoldId": "hold_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "startAt": "2026-01-20T10:00:00.000Z",
+        "endAt": "2026-01-20T10:15:00.000Z",
+        "environmentTier": "ENV_HOSPITALITY",
+        "requiresOperatorCoverage": false,
+        "zoneId": "zone_default",
+        "sla": {
+          "slaVersion": 1,
+          "mustStartWithinWindow": true,
+          "maxStallMs": 600000,
+          "maxExecutionMs": 5400000
+        },
+        "customerId": "cust_demo",
+        "siteId": "site_demo",
+        "contractId": "c_demo_delivery",
+        "contractVersion": 1,
+        "customerContractHash": "3065ead4129634d0bc3e0b0c895481388ddfbfbf82c456143ea2d1d0181aff26",
+        "customerCompilerId": "contract_compiler.v1",
+        "creditPolicy": {
+          "enabled": true,
+          "defaultAmountCents": 1250,
+          "maxAmountCents": 1250,
+          "currency": "USD"
+        },
+        "evidencePolicy": {
+          "retentionDays": 30
+        },
+        "policySnapshot": {
+          "schemaVersion": "PolicySnapshot.v1",
+          "contractId": "c_demo_delivery",
+          "contractVersion": 1,
+          "environmentTier": "ENV_HOSPITALITY",
+          "requiresOperatorCoverage": false,
+          "sla": {
+            "slaVersion": 1,
+            "mustStartWithinWindow": true,
+            "maxStallMs": 600000,
+            "maxExecutionMs": 5400000
+          },
+          "creditPolicy": {
+            "enabled": true,
+            "defaultAmountCents": 1250,
+            "maxAmountCents": 1250,
+            "currency": "USD"
+          },
+          "evidencePolicy": {
+            "retentionDays": 30
+          },
+          "claimPolicy": {
+            "currency": "USD",
+            "autoApproveThresholdCents": 0,
+            "maxPayoutCents": 0,
+            "reservePercent": 0
+          },
+          "coveragePolicy": {
+            "required": true,
+            "coverageTierId": null,
+            "feeModel": "PER_JOB",
+            "feeCentsPerJob": 1650,
+            "creditFundingModel": "PLATFORM_EXPENSE",
+            "reserveFundPercent": 100,
+            "insurerId": null,
+            "recoverablePercent": 100,
+            "recoverableTerms": null,
+            "responseSlaSeconds": 0,
+            "includedAssistSeconds": 0,
+            "overageRateCentsPerMinute": 0
+          }
+        },
+        "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0"
+      },
+      "payloadHash": "fb2719865c50b89f17a5dce3db8b81966cc00786c06662837f422e6af56d71b5",
+      "prevChainHash": "a2d5df36d1391971e39ef8c938ab343d5a4f504b17a26f84db3301991a4ed723",
+      "chainHash": "7df20652fdd229d1420e7504c34058fcb7afddca0818b2a3f94be8ad34dd95f5",
+      "signature": "IwnH2j1XSdEOAda3zeUHoz/O4AiEtNi0ZAZKF8sKDfb30aR8o2qd9Mme+/VVX4F4wpbKd2n6WJwPzTaJKSAPBA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_75d04234-6e78-4b4b-a6c5-ba1c2b577b89",
+      "at": "2026-01-20T09:50:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "RISK_SCORED",
+      "actor": {
+        "type": "risk",
+        "id": "risk_v1"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "basis": "BOOK",
+        "scoredAt": "2026-01-20T09:50:00.000Z",
+        "sourceEventId": "evt_2d3c328b-850e-43cc-bd29-ade8be40f8f7",
+        "modelVersion": 1,
+        "riskScore": 70,
+        "expectedAssistSeconds": 240,
+        "expectedIncidentProbabilityBps": 1150,
+        "expectedCreditBurnRateCents": 50,
+        "currency": "USD",
+        "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+        "features": {
+          "templateId": "reset_standard",
+          "environmentTier": "ENV_HOSPITALITY",
+          "requiresOperatorCoverage": false,
+          "zoneId": "zone_default",
+          "siteId": "site_demo",
+          "customerId": "cust_demo",
+          "availableRobots": 1,
+          "activeOperators": 0,
+          "avgAvailableRobotTrustScoreBps": 5000,
+          "historyWindowDays": 30,
+          "historySampleJobs": 0,
+          "historyIncidentRateBps": 0,
+          "historyStallRateBps": 0,
+          "historyAvgAssistSeconds": 0,
+          "historyAvgCreditCents": 0,
+          "historyAvgClaimsPaidCents": 0
+        }
+      },
+      "payloadHash": "50224fffb25e1f2b9ae885b2b7711bc59e6c71f9fbdb7e040be9cfa943a31baa",
+      "prevChainHash": "7df20652fdd229d1420e7504c34058fcb7afddca0818b2a3f94be8ad34dd95f5",
+      "chainHash": "7f2f84a10e349347de9e6cda1d88df9dd287d9d3c00c6875d8d9aff42a881875",
+      "signature": "xUQjltDi8CKEQPR6WmMoK/QDY0mF+TXET4x2WweERBTwWfst4ao1YeOGMSf7vK2eCyzmbKMjS5h4JYqRbv63DA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_e89b1f8a-11c0-4ba5-877a-3185ee5f96ab",
+      "at": "2026-01-20T09:50:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "DISPATCH_REQUESTED",
+      "actor": {
+        "type": "dispatch",
+        "id": "dispatch_v1"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "requestedAt": "2026-01-20T09:50:00.000Z",
+        "trigger": "BOOKED"
+      },
+      "payloadHash": "35517a9db485e937046209ccd1c6e17e18c0401696198e5ce8a266343059ee45",
+      "prevChainHash": "7f2f84a10e349347de9e6cda1d88df9dd287d9d3c00c6875d8d9aff42a881875",
+      "chainHash": "c984a5aab0e3c441f2a3aa8c695e29523df304d6d3793fe1c0c9792f924efdaf",
+      "signature": "OzO+pHSuGQiiCLwn0d5/BmBaYL5jpIvvefQJurGOWtx5EYwZYuDn1Ko0+pBuw8I2QMunNxanhFaMZC1bVHxyCA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_17d80935-b8b1-46a0-b17c-0dfcfb778726",
+      "at": "2026-01-20T10:06:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "CORRELATION_LINKED",
+      "actor": {
+        "type": "ops",
+        "id": "auth:sk_test_79694815-92eb-4cf7-b7f1-e07749567bcc"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "siteId": "site_demo",
+        "correlationKey": "ext_delivery_412",
+        "linkedAt": "2026-01-20T10:06:00.000Z",
+        "expiresAt": null,
+        "previousJobId": null,
+        "forceRelink": false
+      },
+      "payloadHash": "78b5018463feddf391dd7c28d9a0d843fa0deae794d548f7d3a7fccd00c8994d",
+      "prevChainHash": "c984a5aab0e3c441f2a3aa8c695e29523df304d6d3793fe1c0c9792f924efdaf",
+      "chainHash": "2152462944f7970fe56e56a1032f7dd4955216ed571c1b3697a5c627eee80ebf",
+      "signature": "T/K69ex57f6gkTq2wqML1NIC4acsTgb/OjkW/NA3shqCoSmcSQoecRh+ql+Vz58beCWeFnKKsYHzfCrdgpdRDQ==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_7ca79738-9b83-40bb-843f-a00e0082afef",
+      "at": "2026-01-20T10:05:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "DISPATCH_EVALUATED",
+      "actor": {
+        "type": "ingest",
+        "id": "anon"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "evaluatedAt": "2026-01-20T10:05:00.000Z",
+        "window": {
+          "startAt": "2026-01-20T10:00:00.000Z",
+          "endAt": "2026-01-20T10:15:00.000Z"
+        },
+        "zoneId": "default",
+        "requiresOperatorCoverage": false,
+        "candidates": [],
+        "selected": null
+      },
+      "payloadHash": "14608b52c49da2ce24a3bb4c3b6f8ce2814c6d78e2445df43392471c816e3a63",
+      "prevChainHash": "2152462944f7970fe56e56a1032f7dd4955216ed571c1b3697a5c627eee80ebf",
+      "chainHash": "2109a305d3f5988248584e47279694fc7814d9d527f8d7930ff9e611609d94d8",
+      "signature": "WdgrPhgmYdHYIs7odILeau7FmRlPRzmjYd0AiWHPVp/I7PVJ/pC+btigm/Xu3XYkJXP4JyM7tFdxCXhsjvdsAA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_97d9e66d-9fe5-4aa0-a34c-879551146a48",
+      "at": "2026-01-20T10:06:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "MATCHED",
+      "actor": {
+        "type": "system",
+        "id": "proxy"
+      },
+      "payload": {
+        "robotId": "rob_demo_delivery"
+      },
+      "payloadHash": "f688c9540053c2cf4d572cd31bc816fea35f081f402b3c9a1dd9e5fd85de1a15",
+      "prevChainHash": "2109a305d3f5988248584e47279694fc7814d9d527f8d7930ff9e611609d94d8",
+      "chainHash": "c45fb3a0dd24c3decb5ba66e686086f7bc287d3117a31f462c6fc0615454379f",
+      "signature": "fGSo5bshQZ19kUy9kv/IeAoftjQama+53lBJg5ie8SZnO54T1095hfHT9jFFE9hbuUJB9jXRiJfugQW8mws7CA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_acac05ab-a9f5-407f-9659-9ff06ecc547e",
+      "at": "2026-01-20T10:06:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "RESERVED",
+      "actor": {
+        "type": "system",
+        "id": "proxy"
+      },
+      "payload": {
+        "robotId": "rob_demo_delivery",
+        "startAt": "2026-01-20T10:00:00.000Z",
+        "endAt": "2026-01-20T10:15:00.000Z",
+        "reservationId": "rsv_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96"
+      },
+      "payloadHash": "1ae0cf4555734803210283338f8e10009a7280f7b436053d6655e0ad0d725304",
+      "prevChainHash": "c45fb3a0dd24c3decb5ba66e686086f7bc287d3117a31f462c6fc0615454379f",
+      "chainHash": "f2fbd91d2a8df28cde3ef3c6e90e298d3f811f57f75488acf0b250f7ade906b0",
+      "signature": "1v42MAa3e+276lXBSOrqE3Y7wtwUcc4Tia2u/AZ9eAvq6dF5xT9lp+kZyR/47mVf65q/zw97xl1NvuY7hWs6Cg==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_010d04b7-3294-4411-811d-fec7f0285f88",
+      "at": "2026-01-20T10:06:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "ACCESS_PLAN_ISSUED",
+      "actor": {
+        "type": "system",
+        "id": "proxy"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "accessPlanId": "ap_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "method": "DOCKED_IN_BUILDING",
+        "credentialRef": "vault://access/ap_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96/v1",
+        "scope": {
+          "areas": [
+            "LOADING_DOCK"
+          ],
+          "noGo": []
+        },
+        "validFrom": "2026-01-20T10:00:00.000Z",
+        "validTo": "2026-01-20T10:45:00.000Z",
+        "revocable": true,
+        "requestedBy": "system"
+      },
+      "payloadHash": "ae9346f2e48838499395ae2deecc80eb5647e3055470cd25a82a60a403257555",
+      "prevChainHash": "f2fbd91d2a8df28cde3ef3c6e90e298d3f811f57f75488acf0b250f7ade906b0",
+      "chainHash": "2cbe2504ef52f26b921ea37d3fbb0dab57b0fc6f31f5d7b90c1213e6a984082e",
+      "signature": "NtYpbhHcotlCBG6TXQiYcEfqCMkw/EZEZ260iQJBOvMFB4o4L/mx9RJUpdyFTsexJKm1XtoPOV7m3nNzyiI3BQ==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_ff95cd73-74bd-4068-ad01-fe761c762c19",
+      "at": "2026-01-20T09:58:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "EN_ROUTE",
+      "actor": {
+        "type": "robot",
+        "id": "rob_demo_delivery"
+      },
+      "payload": {
+        "etaSeconds": 60
+      },
+      "payloadHash": "c79190d8041985f74968b3ddc12ed467ed625b517ddea855ef30c4100a3d919e",
+      "prevChainHash": "2cbe2504ef52f26b921ea37d3fbb0dab57b0fc6f31f5d7b90c1213e6a984082e",
+      "chainHash": "81c2dcbf494f45acbf16b193da76f9fa956e89a6e9093608fcfb0d051f09b962",
+      "signature": "RBlQQ50nTvn657VLE+lsVH7n+l2q2gjC4x4iRUB/qjdY0IvXBe6tl55aEe7X1sXqoBOU6/PohgS2iKvwh+ZmDg==",
+      "signerKeyId": "key_d84573ecdad85d5b51a52f59"
+    },
+    {
+      "v": 1,
+      "id": "evt_c27d95a3-f09f-4170-80f9-45b39a624170",
+      "at": "2026-01-20T10:01:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "ACCESS_GRANTED",
+      "actor": {
+        "type": "robot",
+        "id": "rob_demo_delivery"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "accessPlanId": "ap_job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "method": "DOCKED_IN_BUILDING"
+      },
+      "payloadHash": "9f85553930e3953991b31098811b00ad00e9e5f8241dba22f31ad2645fa8704b",
+      "prevChainHash": "81c2dcbf494f45acbf16b193da76f9fa956e89a6e9093608fcfb0d051f09b962",
+      "chainHash": "5a454c41d3be19d6fd992cd9c6ca03eb8214dd01ecd2c3f0dc2b2117d85b8136",
+      "signature": "0DPyTCetFWNmVT3CCeBUxVE2yEmAhnqFI1f++eBt5+DUkPeOxQz1ogMyNBcpcdy5pp32MOaJ5wzJk1hBi6TMBw==",
+      "signerKeyId": "key_d84573ecdad85d5b51a52f59"
+    },
+    {
+      "v": 1,
+      "id": "evt_b3a1c04b-f4e1-4b3f-8b0a-12c5305e3f18",
+      "at": "2026-01-20T10:18:00.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "EXECUTION_STARTED",
+      "actor": {
+        "type": "robot",
+        "id": "rob_demo_delivery"
+      },
+      "payload": {
+        "plan": [
+          "deliver"
+        ],
+        "destination": "room_412"
+      },
+      "payloadHash": "d3aee46c81b87a16eba914f5f9a883f6a1ecf908d03cf60bb99e009f69b723d8",
+      "prevChainHash": "5a454c41d3be19d6fd992cd9c6ca03eb8214dd01ecd2c3f0dc2b2117d85b8136",
+      "chainHash": "a182118932fd6c77962190f29609059c570491309fbe22c1b0d48e098047da34",
+      "signature": "9/9tm7Vc6lSWTvR5FtwAT/t5kcDTX2OfI9aX6EKcOOpvpdyfb3Sb+mn8iTP8jhTzcq7FW8eJOj3Sa2l8PuUNCw==",
+      "signerKeyId": "key_d84573ecdad85d5b51a52f59"
+    },
+    {
+      "v": 1,
+      "id": "evt_841fcaa8-4d87-4132-9e25-84abd2c89fd2",
+      "at": "2026-01-20T10:18:32.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "EXECUTION_COMPLETED",
+      "actor": {
+        "type": "robot",
+        "id": "rob_demo_delivery"
+      },
+      "payload": {
+        "report": {
+          "durationSeconds": 32
+        },
+        "deliveredTo": "room_412"
+      },
+      "payloadHash": "553b26ad8acf1452c6c67307b0b9e7e6eef1cc96a337248d51baa16a432a0bc2",
+      "prevChainHash": "a182118932fd6c77962190f29609059c570491309fbe22c1b0d48e098047da34",
+      "chainHash": "a75e1049a4d70dae98d04aad5967b94af138d0991264bd1e4b5a7249af035134",
+      "signature": "1wiVxrW7AYxPaIcqmcy1v8qZDMcHIKSnXTM0k4+goyR1PCgUF4AQL3LxTple+YzWd77pqOdn23JTGw8toyHKBw==",
+      "signerKeyId": "key_d84573ecdad85d5b51a52f59"
+    },
+    {
+      "v": 1,
+      "id": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e",
+      "at": "2026-01-20T10:19:32.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "SETTLED",
+      "actor": {
+        "type": "system",
+        "id": "proxy"
+      },
+      "payload": {
+        "settlement": "demo"
+      },
+      "payloadHash": "b51cbb8e236adf30cfcc5698f8d62d07f56e0d0cf1b782e2ee03872f588751d3",
+      "prevChainHash": "a75e1049a4d70dae98d04aad5967b94af138d0991264bd1e4b5a7249af035134",
+      "chainHash": "4ec2e9fd91cc7cbd8eb6013197ed88583e6f2708123ddd837fa7cdc633fd8967",
+      "signature": "ktfoeKzuoU8QtHVPK0RBTGFMHLJHbnISHvYV7kjP++VF11gJb63gsg0pOzB2iosKk/BGyG6mfGUwCBgFW63lBg==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_47efe13c-a5e5-43ce-9bf3-ebd43e97f524",
+      "at": "2026-01-20T10:19:32.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "OPERATOR_COST_RECORDED",
+      "actor": {
+        "type": "accounting",
+        "id": "job_accounting_v0"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "zoneId": "zone_default",
+        "operatorId": null,
+        "assistSeconds": 0,
+        "rateCentsPerMinute": 0,
+        "costCents": 0,
+        "currency": "USD",
+        "basis": "SHIFT_RATE",
+        "settledEventId": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e"
+      },
+      "payloadHash": "574f9869f40f836a0561e886d739e1e501b56559c79f8acf1f000ac2c9488f0f",
+      "prevChainHash": "4ec2e9fd91cc7cbd8eb6013197ed88583e6f2708123ddd837fa7cdc633fd8967",
+      "chainHash": "a94baf8290f498921ba86ef4566f51f52716c89c31ccdf7e0750b08f7aa385f3",
+      "signature": "79OFQzgpxXKExl6Sm6iVLOqONuC8/pc6xQx3nhLsKRwrNmpjkGdZQ1b1AoofcPPhw509i2c+PUJlUMqrvdgLAQ==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_b6aa4f97-8332-4d44-ba4a-75b197b14fac",
+      "at": "2026-01-20T10:19:32.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "SLA_BREACH_DETECTED",
+      "actor": {
+        "type": "accounting",
+        "id": "job_accounting_v0"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "detectedAt": "2026-01-20T10:19:32.000Z",
+        "settledEventId": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e",
+        "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+        "window": {
+          "startAt": "2026-01-20T10:00:00.000Z",
+          "endAt": "2026-01-20T10:15:00.000Z"
+        },
+        "policy": {
+          "slaVersion": 1,
+          "mustStartWithinWindow": true,
+          "maxStallMs": 600000,
+          "maxExecutionMs": 5400000
+        },
+        "breaches": [
+          {
+            "type": "START_LATE",
+            "startedAt": "2026-01-20T10:18:00.000Z",
+            "windowStartAt": "2026-01-20T10:00:00.000Z",
+            "windowEndAt": "2026-01-20T10:15:00.000Z",
+            "latenessMs": 180000
+          },
+          {
+            "type": "COMPLETE_LATE",
+            "completedAt": "2026-01-20T10:18:32.000Z",
+            "windowEndAt": "2026-01-20T10:15:00.000Z",
+            "latenessMs": 212000
+          }
+        ]
+      },
+      "payloadHash": "55e06fd534dc8c0e476645d3ffe943892d4d39f56e54f6bfcd51e9729c120dbb",
+      "prevChainHash": "a94baf8290f498921ba86ef4566f51f52716c89c31ccdf7e0750b08f7aa385f3",
+      "chainHash": "b54d12115a00d4e5d8e6b340af3278b39d846620dc516f877f15014bd7495685",
+      "signature": "Fg1tThO1hH9pH82gIZ8wzT2cWLs2PIn8q/vRzyCgmQEL8Xsr78LsJIxzqD0Dv/vbfpqxgdiFnMhkasrQqjbBAQ==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    },
+    {
+      "v": 1,
+      "id": "evt_0a857f2c-0210-4203-84e1-9c4621226171",
+      "at": "2026-01-20T10:19:32.000Z",
+      "streamId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+      "type": "SLA_CREDIT_ISSUED",
+      "actor": {
+        "type": "accounting",
+        "id": "job_accounting_v0"
+      },
+      "payload": {
+        "jobId": "job_f505d48c-dc86-4162-a6d3-d5c801d2bc96",
+        "creditId": "cred_e5062ae7-fcee-4d13-ac62-ecc38a0833f0",
+        "issuedAt": "2026-01-20T10:19:32.000Z",
+        "amountCents": 1250,
+        "currency": "USD",
+        "reason": "SLA_BREACH",
+        "settledEventId": "evt_b7f34029-1e65-4904-93b6-ad18b966c13e",
+        "policyHash": "90fdc1e9a8aa5bae49ba423f966a9d190043fcd358987c20a48f0663655af1c0",
+        "trigger": {
+          "type": "SLA_BREACH",
+          "breachEventId": "evt_b6aa4f97-8332-4d44-ba4a-75b197b14fac",
+          "detectedAt": "2026-01-20T10:19:32.000Z",
+          "window": {
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z"
+          },
+          "policy": {
+            "slaVersion": 1,
+            "mustStartWithinWindow": true,
+            "maxStallMs": 600000,
+            "maxExecutionMs": 5400000
+          },
+          "breaches": [
+            {
+              "type": "START_LATE",
+              "startedAt": "2026-01-20T10:18:00.000Z",
+              "windowStartAt": "2026-01-20T10:00:00.000Z",
+              "windowEndAt": "2026-01-20T10:15:00.000Z",
+              "latenessMs": 180000
+            },
+            {
+              "type": "COMPLETE_LATE",
+              "completedAt": "2026-01-20T10:18:32.000Z",
+              "windowEndAt": "2026-01-20T10:15:00.000Z",
+              "latenessMs": 212000
+            }
+          ]
+        }
+      },
+      "payloadHash": "b1b48af80a924bb3be0a32e5f2e65f04a3db69ab8e1f935a06b3dfd6d48dd69b",
+      "prevChainHash": "b54d12115a00d4e5d8e6b340af3278b39d846620dc516f877f15014bd7495685",
+      "chainHash": "bfe1c8459cce0f77a99164548ba53745f44e0be5f39333fcfdcc71ab5cf954d8",
+      "signature": "AEXkgWNJ4lG/P0yCs7a56vlfwjUOvQ/FKo3QH6CFHo7PtIvNcs1/p5a857nCeyqjdJ4jdGGFJgdYDc0Vt0ZOCA==",
+      "signerKeyId": "key_f9126a305774ac7fdd96aa05"
+    }
+  ],
+  "ledgerEntries": [
+    {
+      "id": "jnl_evt_2d3c328b-850e-43cc-bd29-ade8be40f8f7",
+      "at": "2026-01-20T09:50:00.000Z",
+      "memo": "job:job_f505d48c-dc86-4162-a6d3-d5c801d2bc96 BOOKED",
+      "postings": [
+        {
+          "accountId": "acct_cash",
+          "amountCents": 12500
+        },
+        {
+          "accountId": "acct_customer_escrow",
+          "amountCents": -12500
+        }
+      ]
+    },
+    {
+      "id": "jnl_evt_2d3c328b-850e-43cc-bd29-ade8be40f8f7_coverage_fee",
+      "at": "2026-01-20T09:50:00.000Z",
+      "memo": "job:job_f505d48c-dc86-4162-a6d3-d5c801d2bc96 BOOKED coverage fee",
+      "postings": [
+        {
+          "accountId": "acct_customer_escrow",
+          "amountCents": 1650
+        },
+        {
+          "accountId": "acct_coverage_unearned",
+          "amountCents": -1650
+        }
+      ]
+    },
+    {
+      "id": "jnl_evt_b7f34029-1e65-4904-93b6-ad18b966c13e",
+      "at": "2026-01-20T10:19:32.000Z",
+      "memo": "job:job_f505d48c-dc86-4162-a6d3-d5c801d2bc96 SETTLED",
+      "postings": [
+        {
+          "accountId": "acct_customer_escrow",
+          "amountCents": 10850
+        },
+        {
+          "accountId": "acct_platform_revenue",
+          "amountCents": -2170
+        },
+        {
+          "accountId": "acct_owner_payable",
+          "amountCents": -8463
+        },
+        {
+          "accountId": "acct_insurance_reserve",
+          "amountCents": -217
+        }
+      ]
+    },
+    {
+      "id": "jnl_evt_b7f34029-1e65-4904-93b6-ad18b966c13e_coverage_recognize",
+      "at": "2026-01-20T10:19:32.000Z",
+      "memo": "job:job_f505d48c-dc86-4162-a6d3-d5c801d2bc96 SETTLED coverage recognize",
+      "postings": [
+        {
+          "accountId": "acct_coverage_unearned",
+          "amountCents": 1650
+        },
+        {
+          "accountId": "acct_coverage_revenue",
+          "amountCents": -1650
+        }
+      ]
+    },
+    {
+      "id": "jnl_evt_b7f34029-1e65-4904-93b6-ad18b966c13e_coverage_reserve_fund",
+      "at": "2026-01-20T10:19:32.000Z",
+      "memo": "job:job_f505d48c-dc86-4162-a6d3-d5c801d2bc96 SETTLED coverage reserve fund",
+      "postings": [
+        {
+          "accountId": "acct_coverage_payout_expense",
+          "amountCents": 1650
+        },
+        {
+          "accountId": "acct_coverage_reserve",
+          "amountCents": -1650
+        }
+      ]
+    },
+    {
+      "id": "jnl_evt_0a857f2c-0210-4203-84e1-9c4621226171",
+      "at": "2026-01-20T10:19:32.000Z",
+      "memo": "job:job_f505d48c-dc86-4162-a6d3-d5c801d2bc96 SLA_CREDIT_ISSUED",
+      "postings": [
+        {
+          "accountId": "acct_sla_credits_expense",
+          "amountCents": 1250
+        },
+        {
+          "accountId": "acct_customer_credits_payable",
+          "amountCents": -1250
+        }
+      ]
+    }
+  ],
+  "ledgerBalances": {
+    "acct_cash": 12500,
+    "acct_customer_escrow": 0,
+    "acct_platform_revenue": -2170,
+    "acct_owner_payable": -8463,
+    "acct_operator_payable": 0,
+    "acct_developer_royalty_payable": 0,
+    "acct_insurance_reserve": -217,
+    "acct_coverage_reserve": -1650,
+    "acct_coverage_unearned": 0,
+    "acct_coverage_revenue": -1650,
+    "acct_coverage_payout_expense": 1650,
+    "acct_insurer_receivable": 0,
+    "acct_operator_chargeback_receivable": 0,
+    "acct_claims_expense": 0,
+    "acct_claims_payable": 0,
+    "acct_operator_labor_expense": 0,
+    "acct_operator_cost_accrued": 0,
+    "acct_sla_credits_expense": 1250,
+    "acct_customer_credits_payable": -1250
+  }
+}

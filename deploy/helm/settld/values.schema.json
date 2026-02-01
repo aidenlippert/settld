@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "image": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "minLength": 1 },
+        "pullPolicy": { "type": "string", "minLength": 1 }
+      },
+      "required": ["repository", "tag"]
+    },
+    "buildId": { "type": "string" },
+    "store": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mode": { "type": "string", "enum": ["pg", "memory"] },
+        "pgSchema": { "type": "string", "minLength": 1 },
+        "migrateOnStartup": { "type": "boolean" },
+        "databaseUrlSecret": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "name": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          },
+          "required": ["key"]
+        }
+      },
+      "required": ["mode", "pgSchema", "migrateOnStartup", "databaseUrlSecret"]
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "exportDestinationsJson": { "type": "string" }
+      }
+    },
+    "extraSecretMounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "secretName": { "type": "string", "minLength": 1 },
+          "mountPath": { "type": "string", "minLength": 1 },
+          "items": { "type": "array" }
+        },
+        "required": ["name", "secretName", "mountPath"]
+      }
+    },
+    "maintenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "intervalSeconds": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["enabled"]
+    },
+    "receiver": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ackUrl": { "type": "string" },
+        "tenantId": { "type": "string", "minLength": 1 },
+        "destinationId": { "type": "string", "minLength": 1 },
+        "dedupeDbPath": { "type": "string", "minLength": 1 },
+        "allowInlineSecrets": { "type": "boolean" },
+        "hmacSecretRef": { "type": "string" },
+        "s3": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "endpoint": { "type": "string" },
+            "region": { "type": "string" },
+            "bucket": { "type": "string" },
+            "prefix": { "type": "string" },
+            "forcePathStyle": { "type": "boolean" },
+            "accessKeyIdRef": { "type": "string" },
+            "secretAccessKeyRef": { "type": "string" }
+          }
+        }
+      },
+      "required": ["enabled", "tenantId", "destinationId", "dedupeDbPath", "allowInlineSecrets", "hmacSecretRef", "s3"]
+    }
+  },
+  "required": ["image", "store", "maintenance", "receiver"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "store": { "properties": { "mode": { "const": "pg" } } }
+        }
+      },
+      "then": {
+        "properties": {
+          "store": {
+            "properties": {
+              "databaseUrlSecret": {
+                "properties": { "name": { "type": "string", "minLength": 1 } },
+                "required": ["name"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "maintenance": { "properties": { "enabled": { "const": true } } } } },
+      "then": {
+        "properties": {
+          "store": { "properties": { "mode": { "const": "pg" } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "receiver": { "properties": { "enabled": { "const": true } } } } },
+      "then": {
+        "properties": {
+          "receiver": {
+            "required": ["ackUrl", "hmacSecretRef", "s3"],
+            "properties": {
+              "ackUrl": { "type": "string", "minLength": 1 },
+              "hmacSecretRef": { "type": "string", "minLength": 1 },
+              "s3": {
+                "required": ["endpoint", "bucket", "accessKeyIdRef", "secretAccessKeyRef"],
+                "properties": {
+                  "endpoint": { "type": "string", "minLength": 1 },
+                  "bucket": { "type": "string", "minLength": 1 },
+                  "accessKeyIdRef": { "type": "string", "minLength": 1 },
+                  "secretAccessKeyRef": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,75 @@
+{{- if .Values.maintenance.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "settld.fullname" . }}-maintenance
+  labels:
+    {{- include "settld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: maintenance
+spec:
+  replicas: {{ .Values.maintenance.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "settld.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: maintenance
+  template:
+    metadata:
+      labels:
+        {{- include "settld.labels" . | nindent 8 }}
+        app.kubernetes.io/component: maintenance
+      annotations:
+        {{- toYaml .Values.maintenance.podAnnotations | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.maintenance.podSecurityContext | nindent 8 }}
+      containers:
+        - name: maintenance
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["src/api/maintenance.js"]
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PROXY_PG_SCHEMA
+              value: {{ .Values.store.pgSchema | quote }}
+            - name: PROXY_MAINTENANCE_INTERVAL_SECONDS
+              value: "{{ .Values.maintenance.intervalSeconds }}"
+            {{- if .Values.buildId }}
+            - name: PROXY_BUILD
+              value: {{ .Values.buildId | quote }}
+            {{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "store.databaseUrlSecret.name is required for maintenance" .Values.store.databaseUrlSecret.name }}
+                  key: {{ .Values.store.databaseUrlSecret.key }}
+            {{- range $k, $v := .Values.maintenance.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.maintenance.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- range .Values.extraSecretMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.maintenance.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- range .Values.extraSecretMounts }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+            {{- if .items }}
+            items:
+              {{- toYaml .items | nindent 14 }}
+            {{- end }}
+        {{- end }}
+{{- end }}

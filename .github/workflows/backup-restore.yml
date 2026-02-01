@@ -1,0 +1,55 @@
+name: backup-restore
+
+on:
+  schedule:
+    # Weekly on Sunday 04:00 UTC
+    - cron: "0 4 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  backup_restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install postgres client tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Create source + restore databases
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="test"
+          psql -h 127.0.0.1 -U postgres -d postgres -c "DROP DATABASE IF EXISTS settld_src;"
+          psql -h 127.0.0.1 -U postgres -d postgres -c "DROP DATABASE IF EXISTS settld_restore;"
+          psql -h 127.0.0.1 -U postgres -d postgres -c "CREATE DATABASE settld_src;"
+          psql -h 127.0.0.1 -U postgres -d postgres -c "CREATE DATABASE settld_restore;"
+      - name: Run backup/restore drill
+        run: ./scripts/backup-restore-test.sh
+        env:
+          DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/settld_src
+          RESTORE_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/settld_restore
+          STORE: pg
+          NODE_ENV: production
+          PROXY_MIGRATE_ON_STARTUP: "1"
+          PROXY_PG_SCHEMA: br_ci
+          TENANT_ID: tenant_default
+          MONTH: "2026-01"
+          JOBS: "10"
+

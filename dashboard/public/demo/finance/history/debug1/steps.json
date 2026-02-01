@@ -1,0 +1,3560 @@
+{
+  "steps": [
+    {
+      "name": "robot.register",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "robot": {
+          "id": "rob_demo_delivery",
+          "tenantId": "tenant_default",
+          "name": null,
+          "ownerId": null,
+          "capabilities": {},
+          "trustScore": 0.5,
+          "signerKeyId": "key_11d527437c641225cc41a7c7",
+          "homeZoneId": null,
+          "currentZoneId": null,
+          "status": "active",
+          "quarantine": {
+            "status": "none",
+            "reason": null,
+            "quarantinedAt": null,
+            "until": null,
+            "manualClearRequired": null,
+            "incidentId": null,
+            "jobId": null,
+            "notes": null,
+            "clearedAt": null,
+            "clearedReason": null,
+            "clearedNotes": null,
+            "maintenanceId": null
+          },
+          "maintenance": {
+            "status": "none",
+            "maintenanceId": null,
+            "requestedAt": null,
+            "requestReason": null,
+            "requestNotes": null,
+            "completedAt": null,
+            "checklist": null,
+            "completedNotes": null
+          },
+          "availability": [],
+          "lastHeartbeat": null,
+          "revision": 0,
+          "registeredAt": "2026-01-20T09:50:00.000Z",
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "46ba864eb23d4ae5698d75e0e568243634740ca506bce38b96182a96fe9ce70e",
+          "lastEventId": "evt_det_00000004"
+        },
+        "keyId": "key_11d527437c641225cc41a7c7"
+      }
+    },
+    {
+      "name": "robot.availability",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000007",
+          "at": "2026-01-20T09:50:00.000Z",
+          "streamId": "rob_demo_delivery",
+          "type": "ROBOT_AVAILABILITY_SET",
+          "actor": {
+            "type": "system",
+            "id": "proxy"
+          },
+          "payload": {
+            "robotId": "rob_demo_delivery",
+            "availability": [
+              {
+                "startAt": "2026-01-01T00:00:00.000Z",
+                "endAt": "2026-03-01T00:00:00.000Z"
+              }
+            ]
+          },
+          "payloadHash": "737828a144805a488f2edd486851639d12b34b74b9226ff93d149c74e9e166f9",
+          "prevChainHash": "46ba864eb23d4ae5698d75e0e568243634740ca506bce38b96182a96fe9ce70e",
+          "chainHash": "303e03b8708497507bde49703cc3bbcffcc1eb84b8a8c57565302bd595fb5d8d",
+          "signature": "75Fc1OH7e2S1fBST7b55qYwEcxYX8F5RcmGc7bHREY+JXsgkmzdrcIiSooMqtLXjBLCzyDeUoJmXoI0ThGXQBQ==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "robot": {
+          "id": "rob_demo_delivery",
+          "tenantId": "tenant_default",
+          "name": null,
+          "ownerId": null,
+          "capabilities": {},
+          "trustScore": 0.5,
+          "signerKeyId": "key_11d527437c641225cc41a7c7",
+          "homeZoneId": null,
+          "currentZoneId": null,
+          "status": "active",
+          "quarantine": {
+            "status": "none",
+            "reason": null,
+            "quarantinedAt": null,
+            "until": null,
+            "manualClearRequired": null,
+            "incidentId": null,
+            "jobId": null,
+            "notes": null,
+            "clearedAt": null,
+            "clearedReason": null,
+            "clearedNotes": null,
+            "maintenanceId": null
+          },
+          "maintenance": {
+            "status": "none",
+            "maintenanceId": null,
+            "requestedAt": null,
+            "requestReason": null,
+            "requestNotes": null,
+            "completedAt": null,
+            "checklist": null,
+            "completedNotes": null
+          },
+          "availability": [
+            {
+              "startAt": "2026-01-01T00:00:00.000Z",
+              "endAt": "2026-03-01T00:00:00.000Z"
+            }
+          ],
+          "lastHeartbeat": null,
+          "revision": 1,
+          "registeredAt": "2026-01-20T09:50:00.000Z",
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "availabilityUpdatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "303e03b8708497507bde49703cc3bbcffcc1eb84b8a8c57565302bd595fb5d8d",
+          "lastEventId": "evt_det_00000007"
+        }
+      }
+    },
+    {
+      "name": "ops.contracts.create",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "contract": {
+          "tenantId": "tenant_default",
+          "contractId": "c_demo_delivery",
+          "contractVersion": 1,
+          "name": "Demo Contract (delivery)",
+          "customerId": null,
+          "siteId": null,
+          "templateId": null,
+          "isDefault": false,
+          "policies": {
+            "slaOverridesByEnvironmentTier": {},
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "claimPolicy": {
+              "currency": "USD",
+              "autoApproveThresholdCents": 0,
+              "maxPayoutCents": 0,
+              "reservePercent": 0
+            },
+            "coveragePolicy": {
+              "required": false,
+              "coverageTierId": null,
+              "feeModel": "PER_JOB",
+              "feeCentsPerJob": 0,
+              "creditFundingModel": "PLATFORM_EXPENSE",
+              "reserveFundPercent": 100,
+              "insurerId": null,
+              "recoverablePercent": 100,
+              "recoverableTerms": null,
+              "responseSlaSeconds": 0,
+              "includedAssistSeconds": 0,
+              "overageRateCentsPerMinute": 0
+            }
+          },
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "jobs.create",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": null,
+          "customerPolicyHash": null,
+          "customerCompilerId": null,
+          "operatorContractHash": null,
+          "operatorPolicyHash": null,
+          "operatorCompilerId": null,
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "CREATED",
+          "revision": 0,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "df2d542441eb217c269ff0e06835d731635d94026fd8eb89cc1b72338630ea13",
+          "lastEventId": "evt_det_00000013",
+          "quote": null,
+          "booking": null,
+          "cancellation": null,
+          "match": null,
+          "reservation": null,
+          "accessPlan": null,
+          "access": {
+            "status": "none",
+            "accessPlanId": null,
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        }
+      }
+    },
+    {
+      "name": "jobs.quote",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000016",
+          "at": "2026-01-20T09:50:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "QUOTE_PROPOSED",
+          "actor": {
+            "type": "pricing",
+            "id": "pricing_v0"
+          },
+          "payload": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "payloadHash": "108fa29f945ef6104ca5acd89667b0a29651d2c2a5aaa4d50987bdc4a36656f9",
+          "prevChainHash": "df2d542441eb217c269ff0e06835d731635d94026fd8eb89cc1b72338630ea13",
+          "chainHash": "2d8add6d63354a9db28fa40c77824d586356ed3fbc20ae6c5c899e347fe3e475",
+          "signature": "ESxfwkCteTzbTwDMtFpN9B5cWrfq1dtKs+qgw3+iIEA0k/9GKrafhOhlN+CXCrI0580VayZMwf1pjYpXR/CvBw==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": null,
+          "customerPolicyHash": null,
+          "customerCompilerId": null,
+          "operatorContractHash": null,
+          "operatorPolicyHash": null,
+          "operatorCompilerId": null,
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "QUOTED",
+          "revision": 2,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "c4bb5c4b3215ad09e0618b51782c29abb544efa7ddd4d36e502491a89bf8b633",
+          "lastEventId": "evt_det_00000017",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": null,
+          "cancellation": null,
+          "match": null,
+          "reservation": null,
+          "accessPlan": null,
+          "access": {
+            "status": "none",
+            "accessPlanId": null,
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.book",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000020",
+          "at": "2026-01-20T09:50:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "BOOKED",
+          "actor": {
+            "type": "requester",
+            "id": "requester_demo"
+          },
+          "payload": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "payloadHash": "f1d7fa1ee3b7009ee59416b44fac033ff21a537dcaa3d2bb511b62ee77eb501d",
+          "prevChainHash": "c4bb5c4b3215ad09e0618b51782c29abb544efa7ddd4d36e502491a89bf8b633",
+          "chainHash": "7c872f6b873c4a6e09bc9a42bc9a1ca88b8d9369198261483bcbf81b145324d6",
+          "signature": "n2HEb9Numat1T1TX33ogUvBRRJ2EgGMKCFGQSUB2gNA7vtB3ORnJtPhICFVaz7FRUgyb1Mh6wtQPIe+INp8fDQ==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": null,
+          "operatorPolicyHash": null,
+          "operatorCompilerId": null,
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "BOOKED",
+          "revision": 5,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "364c2675e4c687fea2de15029e0cc452ecefce44a7334e199e04d953736bd2d2",
+          "lastEventId": "evt_det_00000022",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": null,
+          "reservation": null,
+          "accessPlan": null,
+          "access": {
+            "status": "none",
+            "accessPlanId": null,
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": "jnl_evt_det_00000020",
+        "ledgerEntryIds": [
+          "jnl_evt_det_00000020"
+        ],
+        "dispatchRequestedEventId": "evt_det_00000022"
+      }
+    },
+    {
+      "name": "jobs.events.MATCHED",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000025",
+          "at": "2026-01-20T09:50:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "MATCHED",
+          "actor": {
+            "type": "system",
+            "id": "proxy"
+          },
+          "payload": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "payloadHash": "9030978522bf7a89e41389c765c48ad7e2e628fe214987d6786c1777216bcb29",
+          "prevChainHash": "364c2675e4c687fea2de15029e0cc452ecefce44a7334e199e04d953736bd2d2",
+          "chainHash": "f0b35852d7b2eef6ee56f5715771c990a834f0f0bf99fc2f9ad1843e6f1c343c",
+          "signature": "iw1KWK5DZKpWo4hPypy13EXUOXO2mo4Ft241m1CUPDZP/tBuFarsPEl0oQLmeo3W1ubh0vFPabFVTmXtdLl/CA==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "MATCHED",
+          "revision": 6,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "f0b35852d7b2eef6ee56f5715771c990a834f0f0bf99fc2f9ad1843e6f1c343c",
+          "lastEventId": "evt_det_00000025",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": null,
+          "accessPlan": null,
+          "access": {
+            "status": "none",
+            "accessPlanId": null,
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.RESERVED",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000028",
+          "at": "2026-01-20T09:50:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "RESERVED",
+          "actor": {
+            "type": "system",
+            "id": "proxy"
+          },
+          "payload": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "payloadHash": "a200e789b55a03764ebd1b63a6b7c05a637dc3597cf3db6fa0a2d8ff39b2080d",
+          "prevChainHash": "f0b35852d7b2eef6ee56f5715771c990a834f0f0bf99fc2f9ad1843e6f1c343c",
+          "chainHash": "fa7f6a2c956c8a4c7c5e6caff7e6d839240a1860791ee0a5a5b54868eaec5b64",
+          "signature": "vAClNcwqAirSXnG6QYoa8OmcR3v7i4nyXbri0uVyuRo/AGV/bHsu3hxsdfqfGQ6SNKE/WaXo327sWIOl1EnyAA==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "RESERVED",
+          "revision": 7,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "fa7f6a2c956c8a4c7c5e6caff7e6d839240a1860791ee0a5a5b54868eaec5b64",
+          "lastEventId": "evt_det_00000028",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": null,
+          "access": {
+            "status": "none",
+            "accessPlanId": null,
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.ACCESS_PLAN_ISSUED",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000031",
+          "at": "2026-01-20T09:50:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "ACCESS_PLAN_ISSUED",
+          "actor": {
+            "type": "system",
+            "id": "proxy"
+          },
+          "payload": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "payloadHash": "f85b02205127c2f85bdaa3f5f454b547748b48f2398e43b0d58ac68d943accce",
+          "prevChainHash": "fa7f6a2c956c8a4c7c5e6caff7e6d839240a1860791ee0a5a5b54868eaec5b64",
+          "chainHash": "f7560d3f97d8c61df1f20e94ec943ecf41ab8b27590f388f3bef423eef74e9cc",
+          "signature": "bYF99gcvtaB1m0yYZvqbw/c5HRbpZlMZrHZL2wHlAYvp/bfHOCNSgOYpEdO9btS5iiRLzfSLFNDv/+I62ZWRBw==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "RESERVED",
+          "revision": 8,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:50:00.000Z",
+          "lastChainHash": "f7560d3f97d8c61df1f20e94ec943ecf41ab8b27590f388f3bef423eef74e9cc",
+          "lastEventId": "evt_det_00000031",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "access": {
+            "status": "planned",
+            "accessPlanId": "ap_job_det_00000012",
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.EN_ROUTE.robot",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000033",
+          "at": "2026-01-20T09:58:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "EN_ROUTE",
+          "actor": {
+            "type": "robot",
+            "id": "rob_demo_delivery"
+          },
+          "payload": {
+            "etaSeconds": 60
+          },
+          "payloadHash": "47129f06043a02b4921f6e33d140d7021867a812beb9e54d0abcfdf6a7acc22f",
+          "prevChainHash": "f7560d3f97d8c61df1f20e94ec943ecf41ab8b27590f388f3bef423eef74e9cc",
+          "chainHash": "a70b54fc7718b1ae1d450a050a1dbca6acdb3d0ed2cdebe63acd86aab0aacaca",
+          "signature": "ju/XZpKGSCg8DgAzgYYhL72iztd12g/Acw9vQJ0jsaf61cy86rq9d7j21lvf0bmdxPrzxP12mnW4xEGL1TppCw==",
+          "signerKeyId": "key_11d527437c641225cc41a7c7"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "EN_ROUTE",
+          "revision": 9,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T09:58:00.000Z",
+          "lastChainHash": "a70b54fc7718b1ae1d450a050a1dbca6acdb3d0ed2cdebe63acd86aab0aacaca",
+          "lastEventId": "evt_det_00000033",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "access": {
+            "status": "planned",
+            "accessPlanId": "ap_job_det_00000012",
+            "grantedAt": null,
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.ACCESS_GRANTED.robot",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000036",
+          "at": "2026-01-20T10:01:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "ACCESS_GRANTED",
+          "actor": {
+            "type": "robot",
+            "id": "rob_demo_delivery"
+          },
+          "payload": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING"
+          },
+          "payloadHash": "bcc19503c22aff60a8c80c8e61ebe8c64f60be81379d7b1ada6bd3c2762ffaa9",
+          "prevChainHash": "a70b54fc7718b1ae1d450a050a1dbca6acdb3d0ed2cdebe63acd86aab0aacaca",
+          "chainHash": "0dfeba914508f8484ace3a00d8e57c3306090fce200fa6c73e57014a3ff5260c",
+          "signature": "TTV6gFQiGAB8HXJNSO5XDJEuEKTzJb5JOF2SBAozrYb17DILXb/yFNuyNir6HC0vi6QsRpuuQ9lXGIXbkFfNBg==",
+          "signerKeyId": "key_11d527437c641225cc41a7c7"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "ACCESS_GRANTED",
+          "revision": 10,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T10:01:00.000Z",
+          "lastChainHash": "0dfeba914508f8484ace3a00d8e57c3306090fce200fa6c73e57014a3ff5260c",
+          "lastEventId": "evt_det_00000036",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "access": {
+            "status": "granted",
+            "accessPlanId": "ap_job_det_00000012",
+            "grantedAt": "2026-01-20T10:01:00.000Z",
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": null,
+            "robotId": null,
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.EXECUTION_STARTED.robot",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000039",
+          "at": "2026-01-20T10:18:00.000Z",
+          "streamId": "job_det_00000012",
+          "type": "EXECUTION_STARTED",
+          "actor": {
+            "type": "robot",
+            "id": "rob_demo_delivery"
+          },
+          "payload": {
+            "plan": [
+              "deliver"
+            ],
+            "destination": "room_412"
+          },
+          "payloadHash": "6ae78e261bc88a4f51a9e2738bfd8b859f2077dedd46c4d018f6b4adff7f8129",
+          "prevChainHash": "0dfeba914508f8484ace3a00d8e57c3306090fce200fa6c73e57014a3ff5260c",
+          "chainHash": "74b6e9197e8630ef77f8409046ffbc7ed6812d0c740a5e83653aadf581d17c11",
+          "signature": "XMvZP2EA225dFALLhbFXS59klQIEWW0S0L8QU+jfi8UVe+RZqXZnOjiQfTRdb7ZLlFJXq3bOGxzBeUHji0AKBg==",
+          "signerKeyId": "key_11d527437c641225cc41a7c7"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "EXECUTING",
+          "revision": 11,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T10:18:00.000Z",
+          "lastChainHash": "74b6e9197e8630ef77f8409046ffbc7ed6812d0c740a5e83653aadf581d17c11",
+          "lastEventId": "evt_det_00000039",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "access": {
+            "status": "granted",
+            "accessPlanId": "ap_job_det_00000012",
+            "grantedAt": "2026-01-20T10:01:00.000Z",
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": "2026-01-20T10:18:00.000Z",
+            "robotId": "rob_demo_delivery",
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": null,
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.EXECUTION_COMPLETED.robot",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000042",
+          "at": "2026-01-20T10:18:32.000Z",
+          "streamId": "job_det_00000012",
+          "type": "EXECUTION_COMPLETED",
+          "actor": {
+            "type": "robot",
+            "id": "rob_demo_delivery"
+          },
+          "payload": {
+            "report": {
+              "durationSeconds": 32
+            },
+            "deliveredTo": "room_412"
+          },
+          "payloadHash": "8a875762373be72085a1289079b533f770feb480245966dcbd8647d8e9b79c95",
+          "prevChainHash": "74b6e9197e8630ef77f8409046ffbc7ed6812d0c740a5e83653aadf581d17c11",
+          "chainHash": "49e55dfbf352ef41c1a47686fba2dbd7f8470c578e30e1d9ac3deb9d3064df22",
+          "signature": "SEd7GSFKLy2Q4DoXPpjmNN+ZY8wZZIZzqzu/fK7LOncP3vrGcirsMo3KC3/cUCUHPWHHzQp2Tay4n458ieJxAA==",
+          "signerKeyId": "key_11d527437c641225cc41a7c7"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "COMPLETED",
+          "revision": 12,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T10:18:32.000Z",
+          "lastChainHash": "49e55dfbf352ef41c1a47686fba2dbd7f8470c578e30e1d9ac3deb9d3064df22",
+          "lastEventId": "evt_det_00000042",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "access": {
+            "status": "granted",
+            "accessPlanId": "ap_job_det_00000012",
+            "grantedAt": "2026-01-20T10:01:00.000Z",
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": "2026-01-20T10:18:00.000Z",
+            "robotId": "rob_demo_delivery",
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": "2026-01-20T10:18:32.000Z",
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": null,
+        "ledgerEntryIds": []
+      }
+    },
+    {
+      "name": "jobs.events.SETTLED",
+      "statusCode": 201,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000046",
+          "at": "2026-01-20T10:19:32.000Z",
+          "streamId": "job_det_00000012",
+          "type": "SETTLED",
+          "actor": {
+            "type": "system",
+            "id": "proxy"
+          },
+          "payload": {
+            "settlement": "demo"
+          },
+          "payloadHash": "dbb84088beb25fd04ccc293723c01d328ddf44a5effd4895341380dd4f640418",
+          "prevChainHash": "49e55dfbf352ef41c1a47686fba2dbd7f8470c578e30e1d9ac3deb9d3064df22",
+          "chainHash": "0a907235a972b3ce007293ef65b1a335e85fe5227d176334e4e355880392890a",
+          "signature": "x5HNNdfNW6NG9Htt5bJb2kC3QUx2HtCTV8BqqlzHES5hwdqQS9JDptmGcV+EgLEWMdKtnfooliIiIaOuq5KRAw==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        },
+        "job": {
+          "id": "job_det_00000012",
+          "tenantId": "tenant_default",
+          "customerId": "cust_demo",
+          "siteId": "site_demo",
+          "contractId": "c_demo_delivery",
+          "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "customerPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "customerCompilerId": "contract_compiler.v1",
+          "operatorContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+          "operatorPolicyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+          "operatorCompilerId": "contract_compiler.v1",
+          "templateId": "reset_standard",
+          "constraints": {},
+          "status": "SETTLED",
+          "revision": 13,
+          "createdAt": "2026-01-20T09:50:00.000Z",
+          "updatedAt": "2026-01-20T10:19:32.000Z",
+          "lastChainHash": "0a907235a972b3ce007293ef65b1a335e85fe5227d176334e4e355880392890a",
+          "lastEventId": "evt_det_00000046",
+          "quote": {
+            "pricingVersion": 1,
+            "currency": "USD",
+            "amountCents": 10850,
+            "breakdown": {
+              "baseCents": 9500,
+              "riskPremiumCents": 400,
+              "operatorCoverageCents": 0,
+              "surgeCents": 950,
+              "coverageFeeCents": 0,
+              "totalCents": 10850
+            },
+            "supplySnapshot": {
+              "availableRobots": 1,
+              "activeOperators": 0
+            },
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "inputs": {
+              "startAt": "2026-01-20T10:00:00.000Z",
+              "endAt": "2026-01-20T10:15:00.000Z",
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "customerId": "cust_demo",
+              "siteId": "site_demo",
+              "contractId": "c_demo_delivery",
+              "zoneId": "zone_default",
+              "contractVersion": 1
+            }
+          },
+          "booking": {
+            "paymentHoldId": "hold_job_det_00000012",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "environmentTier": "ENV_HOSPITALITY",
+            "requiresOperatorCoverage": false,
+            "zoneId": "zone_default",
+            "sla": {
+              "slaVersion": 1,
+              "mustStartWithinWindow": true,
+              "maxStallMs": 600000,
+              "maxExecutionMs": 5400000
+            },
+            "customerId": "cust_demo",
+            "siteId": "site_demo",
+            "contractId": "c_demo_delivery",
+            "contractVersion": 1,
+            "customerContractHash": "87dbd432542ec5914a1b3ac55f73a04f3546b16a57c1426e03f944baaf7bdf7e",
+            "customerCompilerId": "contract_compiler.v1",
+            "creditPolicy": {
+              "enabled": true,
+              "defaultAmountCents": 1250,
+              "maxAmountCents": 1250,
+              "currency": "USD"
+            },
+            "evidencePolicy": {
+              "retentionDays": 30
+            },
+            "policySnapshot": {
+              "schemaVersion": "PolicySnapshot.v1",
+              "contractId": "c_demo_delivery",
+              "contractVersion": 1,
+              "environmentTier": "ENV_HOSPITALITY",
+              "requiresOperatorCoverage": false,
+              "sla": {
+                "slaVersion": 1,
+                "mustStartWithinWindow": true,
+                "maxStallMs": 600000,
+                "maxExecutionMs": 5400000
+              },
+              "creditPolicy": {
+                "enabled": true,
+                "defaultAmountCents": 1250,
+                "maxAmountCents": 1250,
+                "currency": "USD"
+              },
+              "evidencePolicy": {
+                "retentionDays": 30
+              },
+              "claimPolicy": {
+                "currency": "USD",
+                "autoApproveThresholdCents": 0,
+                "maxPayoutCents": 0,
+                "reservePercent": 0
+              },
+              "coveragePolicy": {
+                "required": false,
+                "coverageTierId": null,
+                "feeModel": "PER_JOB",
+                "feeCentsPerJob": 0,
+                "creditFundingModel": "PLATFORM_EXPENSE",
+                "reserveFundPercent": 100,
+                "insurerId": null,
+                "recoverablePercent": 100,
+                "recoverableTerms": null,
+                "responseSlaSeconds": 0,
+                "includedAssistSeconds": 0,
+                "overageRateCentsPerMinute": 0
+              }
+            },
+            "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d"
+          },
+          "cancellation": null,
+          "match": {
+            "robotId": "rob_demo_delivery",
+            "operatorPartyId": "pty_operator_demo"
+          },
+          "reservation": {
+            "robotId": "rob_demo_delivery",
+            "startAt": "2026-01-20T10:00:00.000Z",
+            "endAt": "2026-01-20T10:15:00.000Z",
+            "reservationId": "rsv_job_det_00000012"
+          },
+          "accessPlan": {
+            "jobId": "job_det_00000012",
+            "accessPlanId": "ap_job_det_00000012",
+            "method": "DOCKED_IN_BUILDING",
+            "credentialRef": "vault://access/ap_job_det_00000012/v1",
+            "scope": {
+              "areas": [
+                "LOADING_DOCK"
+              ],
+              "noGo": []
+            },
+            "validFrom": "2026-01-20T10:00:00.000Z",
+            "validTo": "2026-01-20T10:45:00.000Z",
+            "revocable": true,
+            "requestedBy": "system"
+          },
+          "access": {
+            "status": "granted",
+            "accessPlanId": "ap_job_det_00000012",
+            "grantedAt": "2026-01-20T10:01:00.000Z",
+            "deniedAt": null,
+            "revokedAt": null,
+            "expiredAt": null
+          },
+          "execution": {
+            "startedAt": "2026-01-20T10:18:00.000Z",
+            "robotId": "rob_demo_delivery",
+            "stage": null,
+            "lastHeartbeatAt": null,
+            "lastHeartbeatStage": null,
+            "lastHeartbeatProgress": null,
+            "lastHeartbeatAssistRequested": null,
+            "stalledAt": null,
+            "stallReason": null,
+            "resumedAt": null,
+            "completedAt": "2026-01-20T10:18:32.000Z",
+            "abortedAt": null
+          },
+          "operatorCoverage": {
+            "status": "none",
+            "reservationId": null,
+            "operatorId": null,
+            "startAt": null,
+            "endAt": null,
+            "reservedAt": null,
+            "releasedAt": null
+          },
+          "assist": {
+            "status": "none",
+            "queueId": null,
+            "operatorId": null,
+            "queuedAt": null,
+            "assignedAt": null,
+            "acceptedAt": null,
+            "declinedAt": null
+          },
+          "skillLicenses": [],
+          "skillUses": [],
+          "operatorCosts": [],
+          "slaBreaches": [],
+          "slaCredits": [],
+          "riskScores": [
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "QUOTE",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000016",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": null,
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            },
+            {
+              "at": "2026-01-20T09:50:00.000Z",
+              "payload": {
+                "jobId": "job_det_00000012",
+                "basis": "BOOK",
+                "scoredAt": "2026-01-20T09:50:00.000Z",
+                "sourceEventId": "evt_det_00000020",
+                "modelVersion": 1,
+                "riskScore": 70,
+                "expectedAssistSeconds": 240,
+                "expectedIncidentProbabilityBps": 1150,
+                "expectedCreditBurnRateCents": 50,
+                "currency": "USD",
+                "policyHash": "a83f25a04d86987c480af5cbcb1e44d95dbd5e02fb7e87470d3c05e4654abe4d",
+                "features": {
+                  "templateId": "reset_standard",
+                  "environmentTier": "ENV_HOSPITALITY",
+                  "requiresOperatorCoverage": false,
+                  "zoneId": "zone_default",
+                  "siteId": "site_demo",
+                  "customerId": "cust_demo",
+                  "availableRobots": 1,
+                  "activeOperators": 0,
+                  "avgAvailableRobotTrustScoreBps": 5000,
+                  "historyWindowDays": 30,
+                  "historySampleJobs": 0,
+                  "historyIncidentRateBps": 0,
+                  "historyStallRateBps": 0,
+                  "historyAvgAssistSeconds": 0,
+                  "historyAvgCreditCents": 0,
+                  "historyAvgClaimsPaidCents": 0
+                }
+              },
+              "actor": {
+                "type": "risk",
+                "id": "risk_v1"
+              }
+            }
+          ],
+          "incidents": [],
+          "evidence": [],
+          "claims": []
+        },
+        "ledgerEntryId": "jnl_evt_det_00000046",
+        "ledgerEntryIds": [
+          "jnl_evt_det_00000046"
+        ]
+      }
+    },
+    {
+      "name": "tick.jobAccounting",
+      "result": {
+        "processed": [
+          {
+            "jobId": "job_det_00000012",
+            "status": "recorded",
+            "events": [
+              "OPERATOR_COST_RECORDED",
+              "SLA_BREACH_DETECTED",
+              "SLA_CREDIT_ISSUED"
+            ]
+          }
+        ],
+        "cursor": 18
+      }
+    },
+    {
+      "name": "tick.artifacts",
+      "result": {
+        "processed": [
+          {
+            "artifactId": "cert_job_det_00000012_evt_det_00000046",
+            "artifactType": "WorkCertificate.v1",
+            "deliveriesCreated": 0
+          },
+          {
+            "artifactId": "settlement_job_det_00000012_evt_det_00000046",
+            "artifactType": "SettlementStatement.v1",
+            "deliveriesCreated": 0
+          },
+          {
+            "artifactId": "credit_job_det_00000012_cred_det_00000050",
+            "artifactType": "CreditMemo.v1",
+            "deliveriesCreated": 0
+          },
+          {
+            "artifactId": "settlement_job_det_00000012_evt_det_00000051",
+            "artifactType": "SettlementStatement.v1",
+            "deliveriesCreated": 0
+          }
+        ],
+        "cursor": 18
+      }
+    },
+    {
+      "name": "ops.finance.account-map.put",
+      "statusCode": 200,
+      "code": null,
+      "body": {
+        "ok": true,
+        "mappingHash": "d4fb7c052a90cef72a34f92e86d4ae39f75bc392d785b94934c759c9cb889ef4"
+      }
+    },
+    {
+      "name": "ops.month-close.request",
+      "statusCode": 202,
+      "code": null,
+      "body": {
+        "event": {
+          "v": 1,
+          "id": "evt_det_00000056",
+          "at": "2026-01-20T10:19:32.000Z",
+          "streamId": "month_close_2026-01_settledAt",
+          "type": "MONTH_CLOSE_REQUESTED",
+          "actor": {
+            "type": "ops",
+            "id": "auth:sk_test_det_00000001"
+          },
+          "payload": {
+            "tenantId": "tenant_default",
+            "month": "2026-01",
+            "basis": "settledAt",
+            "requestedAt": "2026-01-20T10:19:32.000Z"
+          },
+          "payloadHash": "cdc5eb2e9ed5077fe84999903d4e000c33aae321972d291fca40d477d208d6a3",
+          "prevChainHash": null,
+          "chainHash": "7c55c72c90780689bb8c7c504ac34252063c2b2313d1920cf840391d98f06fe1",
+          "signature": "Yga9vjIkO1yRvM0v5Jezlp/5AHQZr+xxIKa3lXw4xbKYCadWQPnMm39yUwYZwKHHqROHBX1gIbaY8wTbZf54Aw==",
+          "signerKeyId": "key_194af022ebdc840a1ff22836"
+        }
+      }
+    },
+    {
+      "name": "tick.monthClose",
+      "result": {
+        "processed": [
+          {
+            "month": "2026-01",
+            "status": "closed",
+            "statementArtifactId": "stmt_tenant_default_2026-01_evt_det_00000056",
+            "statementArtifactHash": "88a07a890f3e8d5fee3a2715d8e77c14fd0659909d4b6dd8920a029f1f77fbd8"
+          }
+        ],
+        "cursor": 19
+      }
+    },
+    {
+      "name": "ops.finance.gl-batch.get",
+      "statusCode": 200,
+      "code": null,
+      "body": {
+        "artifact": {
+          "schemaVersion": "GLBatch.v1",
+          "artifactType": "GLBatch.v1",
+          "artifactId": "gl_tenant_default_2026-01_evt_det_00000056",
+          "generatedAt": "2026-01-20T10:19:32.000Z",
+          "tenantId": "tenant_default",
+          "period": "2026-01",
+          "basis": "settledAt",
+          "eventProof": {
+            "lastChainHash": "7c55c72c90780689bb8c7c504ac34252063c2b2313d1920cf840391d98f06fe1",
+            "eventCount": 1,
+            "signatures": {
+              "signedEventCount": 1,
+              "signerKeyIds": [
+                "key_194af022ebdc840a1ff22836"
+              ]
+            }
+          },
+          "batch": {
+            "type": "GLBatchBody.v1",
+            "tenantId": "tenant_default",
+            "period": "2026-01",
+            "basis": "settledAt",
+            "generatedAt": "2026-01-20T10:19:32.000Z",
+            "monthClose": {
+              "month": "2026-01",
+              "basis": "settledAt",
+              "monthCloseEventId": "evt_det_00000056",
+              "monthlyStatementArtifactHash": "88a07a890f3e8d5fee3a2715d8e77c14fd0659909d4b6dd8920a029f1f77fbd8"
+            },
+            "totals": {
+              "totalCents": 0,
+              "totalsByAccountId": {
+                "acct_cash": 10850,
+                "acct_customer_credits_payable": -1250,
+                "acct_customer_escrow": 0,
+                "acct_insurance_reserve": -217,
+                "acct_owner_payable": -8463,
+                "acct_platform_revenue": -2170,
+                "acct_sla_credits_expense": 1250
+              },
+              "totalsByPartyId": {
+                "pty_customer:cust_demo": -1250,
+                "pty_operator": -8463,
+                "pty_platform": 9713
+              }
+            },
+            "lines": [
+              {
+                "lineId": "jnl_evt_det_00000020:p0:pty_platform",
+                "entryId": "jnl_evt_det_00000020",
+                "postingId": "p0",
+                "at": "2026-01-20T09:50:00.000Z",
+                "memo": "job:job_det_00000012 BOOKED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_cash",
+                "partyId": "pty_platform",
+                "partyRole": "platform",
+                "currency": "USD",
+                "amountCents": 10850
+              },
+              {
+                "lineId": "jnl_evt_det_00000020:p1:pty_customer:cust_demo",
+                "entryId": "jnl_evt_det_00000020",
+                "postingId": "p1",
+                "at": "2026-01-20T09:50:00.000Z",
+                "memo": "job:job_det_00000012 BOOKED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_customer_escrow",
+                "partyId": "pty_customer:cust_demo",
+                "partyRole": "customer",
+                "currency": "USD",
+                "amountCents": -10850
+              },
+              {
+                "lineId": "jnl_evt_det_00000046:p0:pty_customer:cust_demo",
+                "entryId": "jnl_evt_det_00000046",
+                "postingId": "p0",
+                "at": "2026-01-20T10:19:32.000Z",
+                "memo": "job:job_det_00000012 SETTLED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_customer_escrow",
+                "partyId": "pty_customer:cust_demo",
+                "partyRole": "customer",
+                "currency": "USD",
+                "amountCents": 10850
+              },
+              {
+                "lineId": "jnl_evt_det_00000046:p1:pty_platform",
+                "entryId": "jnl_evt_det_00000046",
+                "postingId": "p1",
+                "at": "2026-01-20T10:19:32.000Z",
+                "memo": "job:job_det_00000012 SETTLED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_platform_revenue",
+                "partyId": "pty_platform",
+                "partyRole": "platform",
+                "currency": "USD",
+                "amountCents": -2170
+              },
+              {
+                "lineId": "jnl_evt_det_00000046:p2:pty_operator",
+                "entryId": "jnl_evt_det_00000046",
+                "postingId": "p2",
+                "at": "2026-01-20T10:19:32.000Z",
+                "memo": "job:job_det_00000012 SETTLED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_owner_payable",
+                "partyId": "pty_operator",
+                "partyRole": "operator",
+                "currency": "USD",
+                "amountCents": -8463
+              },
+              {
+                "lineId": "jnl_evt_det_00000046:p3:pty_platform",
+                "entryId": "jnl_evt_det_00000046",
+                "postingId": "p3",
+                "at": "2026-01-20T10:19:32.000Z",
+                "memo": "job:job_det_00000012 SETTLED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_insurance_reserve",
+                "partyId": "pty_platform",
+                "partyRole": "platform",
+                "currency": "USD",
+                "amountCents": -217
+              },
+              {
+                "lineId": "jnl_evt_det_00000051:p0:pty_platform",
+                "entryId": "jnl_evt_det_00000051",
+                "postingId": "p0",
+                "at": "2026-01-20T10:19:32.000Z",
+                "memo": "job:job_det_00000012 SLA_CREDIT_ISSUED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_sla_credits_expense",
+                "partyId": "pty_platform",
+                "partyRole": "platform",
+                "currency": "USD",
+                "amountCents": 1250
+              },
+              {
+                "lineId": "jnl_evt_det_00000051:p1:pty_customer:cust_demo",
+                "entryId": "jnl_evt_det_00000051",
+                "postingId": "p1",
+                "at": "2026-01-20T10:19:32.000Z",
+                "memo": "job:job_det_00000012 SLA_CREDIT_ISSUED",
+                "jobId": "job_det_00000012",
+                "accountId": "acct_customer_credits_payable",
+                "partyId": "pty_customer:cust_demo",
+                "partyRole": "customer",
+                "currency": "USD",
+                "amountCents": -1250
+              }
+            ]
+          },
+          "sourceEventId": "evt_det_00000056",
+          "atChainHash": "7c55c72c90780689bb8c7c504ac34252063c2b2313d1920cf840391d98f06fe1",
+          "artifactHash": "3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6"
+        }
+      }
+    },
+    {
+      "name": "ops.finance.gl-batch.csv.get",
+      "statusCode": 200,
+      "code": null,
+      "body": "schemaVersion,tenantId,period,basis,glBatchArtifactHash,entryId,postingId,at,partyId,partyRole,accountId,externalAccount,debitCents,creditCents,currency,jobId,memo\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000020,p0,2026-01-20T09:50:00.000Z,pty_platform,platform,acct_cash,1000,10850,0,USD,job_det_00000012,job:job_det_00000012 BOOKED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000020,p1,2026-01-20T09:50:00.000Z,pty_customer:cust_demo,customer,acct_customer_escrow,2100,0,10850,USD,job_det_00000012,job:job_det_00000012 BOOKED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000046,p0,2026-01-20T10:19:32.000Z,pty_customer:cust_demo,customer,acct_customer_escrow,2100,10850,0,USD,job_det_00000012,job:job_det_00000012 SETTLED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000046,p1,2026-01-20T10:19:32.000Z,pty_platform,platform,acct_platform_revenue,4000,0,2170,USD,job_det_00000012,job:job_det_00000012 SETTLED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000046,p2,2026-01-20T10:19:32.000Z,pty_operator,operator,acct_owner_payable,2000,0,8463,USD,job_det_00000012,job:job_det_00000012 SETTLED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000046,p3,2026-01-20T10:19:32.000Z,pty_platform,platform,acct_insurance_reserve,2150,0,217,USD,job_det_00000012,job:job_det_00000012 SETTLED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000051,p0,2026-01-20T10:19:32.000Z,pty_platform,platform,acct_sla_credits_expense,4900,1250,0,USD,job_det_00000012,job:job_det_00000012 SLA_CREDIT_ISSUED\nJournalCsv.v1,tenant_default,2026-01,settledAt,3a69d9a858f690f50f9d7a94f15c77952eb783d686fdc4faced865f74c636cb6,jnl_evt_det_00000051,p1,2026-01-20T10:19:32.000Z,pty_customer:cust_demo,customer,acct_customer_credits_payable,2110,0,1250,USD,job_det_00000012,job:job_det_00000012 SLA_CREDIT_ISSUED\n"
+    }
+  ]
+}

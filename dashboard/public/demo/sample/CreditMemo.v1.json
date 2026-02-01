@@ -1,0 +1,12 @@
+{
+  "artifactType": "CreditMemo.v1",
+  "artifactId": "credit_demo",
+  "artifactHash": "demo_hash",
+  "jobId": "job_demo",
+  "generatedAt": "2026-01-20T10:51:00.000Z",
+  "credit": {
+    "amountCents": 1250,
+    "currency": "USD",
+    "reason": "SLA_BREACH"
+  }
+}

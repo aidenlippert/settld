@@ -1,0 +1,48 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  npm_audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: npm audit (fail on critical)
+        run: npm audit --audit-level=critical
+
+  trivy_fs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan (fail on critical)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          scan-type: fs
+          ignore-unfixed: true
+          severity: CRITICAL
+          exit-code: "1"
+
+  trivy_image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t settld:ci --build-arg GIT_SHA=${{ github.sha }} --build-arg SETTLD_VERSION=ci .
+      - name: Trivy image scan (fail on critical)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: settld:ci
+          ignore-unfixed: true
+          severity: CRITICAL
+          exit-code: "1"
+

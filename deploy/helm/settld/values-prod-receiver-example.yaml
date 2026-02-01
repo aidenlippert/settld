@@ -1,0 +1,31 @@
+# Production-ish example with the reference receiver enabled.
+store:
+  mode: pg
+  databaseUrlSecret:
+    name: settld-db
+
+maintenance:
+  enabled: true
+
+receiver:
+  enabled: true
+  ackUrl: http://settld-api:3000/exports/ack
+  hmacSecretRef: file:/var/run/secrets/receiver_hmac
+  s3:
+    endpoint: http://minio:9000
+    bucket: proxy-artifacts
+    accessKeyIdRef: file:/var/run/secrets/s3_access_key_id
+    secretAccessKeyRef: file:/var/run/secrets/s3_secret_access_key
+
+extraSecretMounts:
+  - name: receiver-secrets
+    secretName: settld-receiver-secrets
+    mountPath: /var/run/secrets
+    items:
+      - key: receiver_hmac
+        path: receiver_hmac
+      - key: s3_access_key_id
+        path: s3_access_key_id
+      - key: s3_secret_access_key
+        path: s3_secret_access_key
+

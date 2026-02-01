@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "CreditMemo.v1",
+  "artifactType": "CreditMemo.v1",
+  "artifactId": "credit_job_da3ca907-5b1a-4542-b986-79ea0d10845d_cred_4d1f5f3b-76f3-4d1b-844f-28721434bf25",
+  "generatedAt": "2026-01-20T10:19:32.000Z",
+  "tenantId": "tenant_default",
+  "jobId": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+  "jobVersion": 19,
+  "policyHash": "194fb7ef04a079d777f5168c934fe1e33bee876297c97a88b94c55ab30841ade",
+  "eventProof": {
+    "lastChainHash": "dd8118375946f790b7ddbd55ec521e46256dfd2dde5256037bf9421f9beeaa15",
+    "eventCount": 19,
+    "signatures": {
+      "signedEventCount": 19,
+      "signerKeyIds": [
+        "key_86c809caa9e68d0d2161e9a4",
+        "key_a96890b50c4aadbd158430b3"
+      ]
+    }
+  },
+  "credit": {
+    "creditId": "cred_4d1f5f3b-76f3-4d1b-844f-28721434bf25",
+    "type": "SLA",
+    "amountCents": 1250,
+    "currency": "USD",
+    "issuedAt": "2026-01-20T10:19:32.000Z",
+    "reason": "SLA_BREACH",
+    "trigger": {
+      "type": "SLA_BREACH",
+      "breachEventId": "evt_c124f55a-b861-493d-927d-3fe79db8408a",
+      "detectedAt": "2026-01-20T10:19:32.000Z",
+      "window": {
+        "startAt": "2026-01-20T10:00:00.000Z",
+        "endAt": "2026-01-20T10:15:00.000Z"
+      },
+      "policy": {
+        "slaVersion": 1,
+        "mustStartWithinWindow": true,
+        "maxStallMs": 600000,
+        "maxExecutionMs": 5400000
+      },
+      "breaches": [
+        {
+          "type": "START_LATE",
+          "startedAt": "2026-01-20T10:18:00.000Z",
+          "windowStartAt": "2026-01-20T10:00:00.000Z",
+          "windowEndAt": "2026-01-20T10:15:00.000Z",
+          "latenessMs": 180000
+        },
+        {
+          "type": "COMPLETE_LATE",
+          "completedAt": "2026-01-20T10:18:32.000Z",
+          "windowEndAt": "2026-01-20T10:15:00.000Z",
+          "latenessMs": 212000
+        }
+      ]
+    },
+    "settledEventId": "evt_8314e46f-4a7c-4f33-9da9-86332280d55a",
+    "funding": {
+      "model": "PLATFORM_EXPENSE",
+      "insurerId": null,
+      "recoverablePercent": null,
+      "recoverableCents": null,
+      "receivableRefId": null
+    }
+  },
+  "job": {
+    "templateId": "reset_standard",
+    "customerId": "cust_demo",
+    "siteId": "site_demo",
+    "contractId": "c_demo_delivery",
+    "zoneId": "zone_default",
+    "environmentTier": "ENV_HOSPITALITY"
+  },
+  "sourceEventId": "evt_b538626d-6190-4d86-aa7a-6b910ecb39e4",
+  "atChainHash": "dd8118375946f790b7ddbd55ec521e46256dfd2dde5256037bf9421f9beeaa15",
+  "artifactHash": "871fcfff4501c11ca014b921df395899d8f1ccdfea2792901a2af6e26a3a26e4"
+}

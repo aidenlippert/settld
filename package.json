@@ -1,0 +1,35 @@
+{
+  "name": "settld",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "node src/api/server.js",
+    "dev:maintenance": "node src/api/maintenance.js",
+    "dev:receiver": "node services/receiver/src/server.js",
+    "dev:finance-sink": "node services/finance-sink/src/server.js",
+    "start:prod": "NODE_ENV=production node src/api/server.js",
+    "start:maintenance": "NODE_ENV=production node src/api/maintenance.js",
+    "start:receiver": "NODE_ENV=production node services/receiver/src/server.js",
+    "start:finance-sink": "NODE_ENV=production node services/finance-sink/src/server.js",
+    "agent:sim": "node src/agent/agent-sim.js",
+    "chaos": "node scripts/chaos.js",
+    "load:ingest": "k6 run scripts/load/ingest-burst.k6.js",
+    "load:deliveries": "node scripts/load/run-delivery-load.js",
+    "acceptance:full-stack": "bash scripts/acceptance/full-stack.sh",
+    "demo:delivery": "node scripts/demo/delivery-robot/generate.mjs",
+    "demo:ui:prep": "node scripts/demo/delivery-robot/export-ui-fixture.mjs",
+    "demo:ui": "cd dashboard && npm run dev",
+    "demo:build": "cd dashboard && npm run build",
+    "pilot:finance-pack": "PROXY_DETERMINISTIC_IDS=1 node scripts/pilot/finance-pack.mjs",
+    "finance:bundle": "node scripts/finance-pack/bundle.mjs",
+    "proof:job": "node scripts/proof-bundle/job.mjs",
+    "proof:month": "node scripts/proof-bundle/month.mjs",
+    "governance:export": "node scripts/governance/export.mjs",
+    "openapi:write": "node scripts/openapi/write.mjs",
+    "sdk:smoke": "node scripts/sdk/smoke.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "pg": "^8.11.5"
+  }
+}

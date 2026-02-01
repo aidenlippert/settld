@@ -1,0 +1,69 @@
+name: load-baseline
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Nightly baseline (keeps signal without making PR CI flaky)
+    - cron: "0 3 * * *"
+
+jobs:
+  ingest_burst:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Start Settld API (pg mode)
+        run: |
+          set -euo pipefail
+          STORE=pg \
+          NODE_ENV=production \
+          DATABASE_URL="postgres://postgres:test@127.0.0.1:5432/postgres" \
+          PROXY_PG_SCHEMA="load_ci" \
+          PROXY_MIGRATE_ON_STARTUP=1 \
+          PROXY_OPS_TOKENS="ops_ci:ops_read,ops_write,finance_read,finance_write,audit_read" \
+          PORT=3000 \
+          node src/api/server.js &
+          echo $! > /tmp/settld_pid
+      - name: Wait for readiness
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3000/healthz" >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not become ready" >&2
+          exit 1
+      - name: Run k6 ingest burst (short)
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: scripts/load/ingest-burst.k6.js
+        env:
+          BASE_URL: http://127.0.0.1:3000
+          OPS_TOKEN: ops_ci
+          TENANTS: "3"
+          ROBOTS_PER_TENANT: "2"
+          JOBS_PER_MIN_PER_TENANT: "10"
+          DURATION: "30s"
+      - name: Stop server
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -f /tmp/settld_pid ]]; then kill "$(cat /tmp/settld_pid)" || true; fi
+

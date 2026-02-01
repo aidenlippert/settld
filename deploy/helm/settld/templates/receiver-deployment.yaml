@@ -1,0 +1,105 @@
+{{- if .Values.receiver.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "settld.fullname" . }}-receiver
+  labels:
+    {{- include "settld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: receiver
+spec:
+  replicas: {{ .Values.receiver.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "settld.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: receiver
+  template:
+    metadata:
+      labels:
+        {{- include "settld.labels" . | nindent 8 }}
+        app.kubernetes.io/component: receiver
+      annotations:
+        {{- toYaml .Values.receiver.podAnnotations | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.receiver.podSecurityContext | nindent 8 }}
+      containers:
+        - name: receiver
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["services/receiver/src/server.js"]
+          ports:
+            - name: http
+              containerPort: 4000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: RECEIVER_PORT
+              value: "{{ .Values.receiver.service.port }}"
+            - name: RECEIVER_TENANT_ID
+              value: {{ .Values.receiver.tenantId | quote }}
+            - name: RECEIVER_DESTINATION_ID
+              value: {{ .Values.receiver.destinationId | quote }}
+            - name: RECEIVER_ACK_URL
+              value: {{ required "receiver.ackUrl is required when receiver.enabled=true" .Values.receiver.ackUrl | quote }}
+            - name: RECEIVER_ALLOW_INLINE_SECRETS
+              value: {{ ternary "1" "0" .Values.receiver.allowInlineSecrets | quote }}
+            - name: RECEIVER_DEDUPE_DB_PATH
+              value: {{ .Values.receiver.dedupeDbPath | quote }}
+            - name: RECEIVER_HMAC_SECRET_REF
+              value: {{ required "receiver.hmacSecretRef is required when receiver.enabled=true" .Values.receiver.hmacSecretRef | quote }}
+            - name: RECEIVER_S3_ENDPOINT
+              value: {{ required "receiver.s3.endpoint is required" .Values.receiver.s3.endpoint | quote }}
+            - name: RECEIVER_S3_REGION
+              value: {{ .Values.receiver.s3.region | quote }}
+            - name: RECEIVER_S3_BUCKET
+              value: {{ required "receiver.s3.bucket is required" .Values.receiver.s3.bucket | quote }}
+            - name: RECEIVER_S3_PREFIX
+              value: {{ .Values.receiver.s3.prefix | quote }}
+            - name: RECEIVER_S3_FORCE_PATH_STYLE
+              value: {{ ternary "1" "0" .Values.receiver.s3.forcePathStyle | quote }}
+            - name: RECEIVER_S3_ACCESS_KEY_ID_REF
+              value: {{ required "receiver.s3.accessKeyIdRef is required" .Values.receiver.s3.accessKeyIdRef | quote }}
+            - name: RECEIVER_S3_SECRET_ACCESS_KEY_REF
+              value: {{ required "receiver.s3.secretAccessKeyRef is required" .Values.receiver.s3.secretAccessKeyRef | quote }}
+          securityContext:
+            {{- toYaml .Values.receiver.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+            {{- range .Values.extraSecretMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              readOnly: true
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.receiver.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        {{- range .Values.extraSecretMounts }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+            {{- if .items }}
+            items:
+              {{- toYaml .items | nindent 14 }}
+            {{- end }}
+        {{- end }}
+{{- end }}

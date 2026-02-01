@@ -1,0 +1,17 @@
+{
+  "copied": [
+    "run.json",
+    "steps.json",
+    "WorkCertificate.v1.json",
+    "SettlementStatement.v1.json",
+    "CreditMemo.v1.json",
+    "GLBatch.v1.json",
+    "GLBatch.v1.csv",
+    "JournalCsv.v1.json",
+    "JournalCsv.v1.csv",
+    "JobProofBundle.v1.zip",
+    "MonthProofBundle.v1.zip",
+    "FinancePackBundle.v1.zip",
+    "reconcile.json"
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "copiedRuns": [
+    {
+      "runId": "20260130T011854028Z",
+      "copied": [
+        "run.json",
+        "timeline.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "CreditMemo.v1.json"
+      ]
+    },
+    {
+      "runId": "20260130T011925614Z",
+      "copied": [
+        "run.json",
+        "timeline.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "CreditMemo.v1.json"
+      ]
+    },
+    {
+      "runId": "20260130T012128864Z",
+      "copied": [
+        "run.json",
+        "timeline.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "CreditMemo.v1.json"
+      ]
+    },
+    {
+      "runId": "20260130T192156749Z",
+      "copied": [
+        "run.json",
+        "timeline.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "CreditMemo.v1.json"
+      ]
+    },
+    {
+      "runId": "20260130T203615573Z",
+      "copied": [
+        "run.json",
+        "timeline.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "CreditMemo.v1.json"
+      ]
+    },
+    {
+      "runId": "20260130T210524567Z",
+      "copied": [
+        "run.json",
+        "timeline.json",
+        "WorkCertificate.v1.json",
+        "SettlementStatement.v1.json",
+        "CreditMemo.v1.json"
+      ]
+    }
+  ],
+  "latestRunId": "20260130T210524567Z"
+}

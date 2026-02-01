@@ -1,0 +1,128 @@
+image:
+  repository: ghcr.io/settld/settld
+  tag: "0.0.0"
+  pullPolicy: IfNotPresent
+
+# Optional: surfaced as PROXY_BUILD and x-settld-build.
+buildId: ""
+
+api:
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  podAnnotations: {}
+  env: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  volumes:
+    tmp:
+      enabled: true
+    data:
+      enabled: true
+      mountPath: /data
+
+maintenance:
+  enabled: true
+  replicas: 1
+  intervalSeconds: 300
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  podAnnotations: {}
+  env: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+store:
+  mode: pg
+  pgSchema: public
+  migrateOnStartup: true
+  databaseUrlSecret:
+    name: settld-db # required when store.mode=pg
+    key: DATABASE_URL
+
+# Non-secret config env (e.g. export destinations) stored as a ConfigMap key.
+config:
+  exportDestinationsJson: "" # e.g. {"tenant_default":[{"destinationId":"dst","kind":"webhook","url":"https://...","secretRef":"file:/var/run/secrets/webhook_secret"}]}
+
+# Mount extra secrets to support file:/... refs in config.
+extraSecretMounts: []
+# - name: webhook-secret
+#   secretName: settld-webhook-secret
+#   mountPath: /var/run/secrets
+#   items:
+#     - key: webhook_secret
+#       path: webhook_secret
+
+receiver:
+  enabled: false
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 4000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  podAnnotations: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  tenantId: tenant_default
+  destinationId: receiver_v1
+  ackUrl: "" # e.g. http://settld-api:3000/exports/ack (required when enabled)
+  dedupeDbPath: /data/receiver-dedupe.jsonl
+  allowInlineSecrets: false
+  hmacSecretRef: "" # file:/var/run/secrets/receiver_hmac
+  s3:
+    endpoint: ""
+    region: us-east-1
+    bucket: ""
+    prefix: settld/
+    forcePathStyle: true
+    accessKeyIdRef: ""
+    secretAccessKeyRef: ""

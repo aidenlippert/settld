@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+npm-debug.log
+acceptance_artifacts
+deploy
+docs
+test
+scripts/load
+scripts/acceptance
+*.md

@@ -1,0 +1,72 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": null,
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum(outbox_pending_gauge)", "legendFormat": "outbox_pending_total", "refId": "A" }
+      ],
+      "title": "Outbox Pending (Total)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "deliveries_pending_gauge{state=\"pending\"}", "legendFormat": "pending", "refId": "A" },
+        { "expr": "deliveries_pending_gauge{state=\"failed\"}", "legendFormat": "failed", "refId": "B" }
+      ],
+      "title": "Deliveries Pending/Failed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "delivery_dlq_pending_total_gauge", "legendFormat": "delivery_dlq_total", "refId": "A" }
+      ],
+      "title": "Delivery DLQ (Total)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "ingest_rejected_gauge", "legendFormat": "ingest_rejected", "refId": "A" }
+      ],
+      "title": "Ingest Rejected (Backlog)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["settld"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "Settld (Pilot Ops)",
+  "version": 1
+}
+

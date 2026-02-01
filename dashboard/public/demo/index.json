@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-01-30T21:05:32.398Z",
+  "history": {
+    "delivery": {
+      "runs": 6,
+      "latestRunId": "20260130T210524567Z"
+    },
+    "finance": {
+      "runs": 3,
+      "latestRunId": "finance_pack_v1"
+    }
+  },
+  "scenarios": [
+    {
+      "id": "delivery",
+      "title": "SLA Credit (Delivery)",
+      "subtitle": "Facts in → breach → CreditMemo + SettlementStatement",
+      "emoji": "🚚"
+    },
+    {
+      "id": "finance",
+      "title": "Finance Pack (Month Close)",
+      "subtitle": "Statements → GLBatch + JournalCsv + bundles",
+      "emoji": "📚",
+      "available": true
+    }
+  ]
+}

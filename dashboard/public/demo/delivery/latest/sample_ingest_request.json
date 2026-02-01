@@ -1,0 +1,24 @@
+{
+  "source": "demo_dispatch",
+  "siteId": "site_demo",
+  "correlationKey": "ext_delivery_412",
+  "events": [
+    {
+      "externalEventId": "ext_evt_dispatch_eval_1",
+      "type": "DISPATCH_EVALUATED",
+      "at": "2026-01-20T10:05:00.000Z",
+      "payload": {
+        "jobId": "job_da3ca907-5b1a-4542-b986-79ea0d10845d",
+        "evaluatedAt": "2026-01-20T10:05:00.000Z",
+        "window": {
+          "startAt": "2026-01-20T10:00:00.000Z",
+          "endAt": "2026-01-20T10:15:00.000Z"
+        },
+        "zoneId": "default",
+        "requiresOperatorCoverage": false,
+        "candidates": [],
+        "selected": null
+      }
+    }
+  ]
+}

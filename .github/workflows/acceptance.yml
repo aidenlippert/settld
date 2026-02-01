@@ -1,0 +1,27 @@
+name: acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  full_stack_acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Full-stack acceptance (docker compose)
+        run: npm run acceptance:full-stack
+        env:
+          ACCEPTANCE_ARTIFACT_DIR: acceptance_artifacts
+      - name: Upload acceptance artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance_artifacts
+          path: acceptance_artifacts

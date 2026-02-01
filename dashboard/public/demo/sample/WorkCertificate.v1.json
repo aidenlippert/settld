@@ -1,0 +1,16 @@
+{
+  "artifactType": "WorkCertificate.v1",
+  "artifactId": "cert_demo",
+  "artifactHash": "demo_hash",
+  "jobId": "job_demo",
+  "generatedAt": "2026-01-20T10:50:00.000Z",
+  "job": {
+    "customerPolicyHash": "policyHash_demo",
+    "status": "COMPLETED"
+  },
+  "eventProof": {
+    "lastChainHash": "chain_demo",
+    "eventCount": 10
+  }
+}
+

@@ -1,0 +1,22 @@
+# Production-ish example (pg + maintenance; receiver disabled).
+store:
+  mode: pg
+  databaseUrlSecret:
+    name: settld-db
+
+maintenance:
+  enabled: true
+
+# Example export destinations that use file:/ secret refs (never inline secrets in production).
+config:
+  exportDestinationsJson: >-
+    {"tenant_default":[{"destinationId":"receiver_v1","kind":"webhook","url":"https://receiver.example/deliveries/settld","secretRef":"file:/var/run/secrets/webhook_hmac"}]}
+
+extraSecretMounts:
+  - name: webhook-hmac
+    secretName: settld-webhook-hmac
+    mountPath: /var/run/secrets
+    items:
+      - key: webhook_hmac
+        path: webhook_hmac
+

@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: proxy
+      POSTGRES_PASSWORD: proxy
+      POSTGRES_DB: proxy
+    volumes:
+      - proxy_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxy -d proxy"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  api:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      NODE_ENV: development
+      STORE: pg
+      DATABASE_URL: postgres://proxy:proxy@postgres:5432/proxy
+      PROXY_PG_SCHEMA: ${PROXY_PG_SCHEMA:-public}
+      PROXY_AUTOTICK: "1"
+      PROXY_AUTOTICK_INTERVAL_MS: "250"
+      PROXY_AUTOTICK_MAX_MESSAGES: "100"
+      # Local bootstrap ops token for dev compose.
+      PROXY_OPS_TOKENS: "dev:ops_read,ops_write,finance_read,finance_write,audit_read"
+      PROXY_ALLOW_INLINE_SECRETS: "1"
+      PROXY_EVIDENCE_STORE: "s3"
+      PROXY_EVIDENCE_S3_ENDPOINT: "http://minio:9000"
+      PROXY_EVIDENCE_S3_REGION: "us-east-1"
+      PROXY_EVIDENCE_S3_BUCKET: "proxy-evidence"
+      PROXY_EVIDENCE_S3_FORCE_PATH_STYLE: "1"
+      PROXY_EVIDENCE_S3_ACCESS_KEY_ID: "proxy"
+      PROXY_EVIDENCE_S3_SECRET_ACCESS_KEY: "proxysecret"
+      PROXY_EXPORT_DESTINATIONS: >
+        {"tenant_default":[{"destinationId":"receiver_v1","kind":"webhook","url":"http://receiver:4000/deliveries/settld","secret":"receiversecret"},{"destinationId":"finance_sink_v1","kind":"webhook","url":"http://finance-sink:4100/deliveries/settld","secret":"financesinksecret","artifactTypes":["JournalCsv.v1","FinancePackBundle.v1"]}]}
+    ports:
+      - "${PROXY_API_PORT:-3000}:3000"
+
+  maintenance:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["src/api/maintenance.js"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://proxy:proxy@postgres:5432/proxy
+      PROXY_PG_SCHEMA: ${PROXY_PG_SCHEMA:-public}
+      PROXY_MAINTENANCE_INTERVAL_SECONDS: "300"
+
+  receiver:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      api:
+        condition: service_started
+      minio:
+        condition: service_started
+    command: ["services/receiver/src/server.js"]
+    environment:
+      NODE_ENV: development
+      RECEIVER_PORT: "4000"
+      RECEIVER_TENANT_ID: "tenant_default"
+      RECEIVER_DESTINATION_ID: "receiver_v1"
+      RECEIVER_ACK_URL: "http://api:3000/exports/ack"
+      RECEIVER_ALLOW_INLINE_SECRETS: "1"
+      RECEIVER_HMAC_SECRET: "receiversecret"
+      RECEIVER_S3_ENDPOINT: "http://minio:9000"
+      RECEIVER_S3_REGION: "us-east-1"
+      RECEIVER_S3_BUCKET: "proxy-artifacts"
+      RECEIVER_S3_PREFIX: "settld/"
+      RECEIVER_S3_FORCE_PATH_STYLE: "1"
+      RECEIVER_S3_ACCESS_KEY_ID: "proxy"
+      RECEIVER_S3_SECRET_ACCESS_KEY: "proxysecret"
+      RECEIVER_DEDUPE_DB_PATH: "/data/receiver-dedupe.jsonl"
+    ports:
+      - "${PROXY_RECEIVER_PORT:-4000}:4000"
+    volumes:
+      - proxy_receiver_data:/data
+
+  finance-sink:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      api:
+        condition: service_started
+      minio:
+        condition: service_started
+    command: ["services/finance-sink/src/server.js"]
+    environment:
+      NODE_ENV: development
+      FINANCE_SINK_PORT: "4100"
+      FINANCE_SINK_TENANT_ID: "tenant_default"
+      FINANCE_SINK_DESTINATION_ID: "finance_sink_v1"
+      FINANCE_SINK_ACK_URL: "http://api:3000/exports/ack"
+      FINANCE_SINK_ALLOW_INLINE_SECRETS: "1"
+      FINANCE_SINK_HMAC_SECRET: "financesinksecret"
+      FINANCE_SINK_S3_ENDPOINT: "http://minio:9000"
+      FINANCE_SINK_S3_REGION: "us-east-1"
+      FINANCE_SINK_S3_BUCKET: "proxy-finance"
+      FINANCE_SINK_S3_PREFIX: "finance/"
+      FINANCE_SINK_S3_FORCE_PATH_STYLE: "1"
+      FINANCE_SINK_S3_ACCESS_KEY_ID: "proxy"
+      FINANCE_SINK_S3_SECRET_ACCESS_KEY: "proxysecret"
+      FINANCE_SINK_DEDUPE_DB_PATH: "/data/finance-sink-dedupe.jsonl"
+    ports:
+      - "${PROXY_FINANCE_SINK_PORT:-4100}:4100"
+    volumes:
+      - proxy_finance_sink_data:/data
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: proxy
+      MINIO_ROOT_PASSWORD: proxysecret
+    command: server /data --console-address ":9001"
+    ports:
+      - "${PROXY_MINIO_PORT:-9000}:9000"
+      - "${PROXY_MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - proxy_minio_data:/data
+
+  minio-init:
+    profiles: ["init"]
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: ["sh", "-ec"]
+    # NOTE: Compose will split a plain-string `command` on whitespace when converting
+    # to Docker's JSON-array `Cmd`. Use a single-arg list so the shell receives one script.
+    command:
+      - |
+        # MinIO can be "started" before it is ready to accept connections.
+        # Retry quietly until the alias can be initialized.
+        until mc alias set local http://minio:9000 proxy proxysecret >/dev/null 2>&1; do sleep 1; done
+        mc mb -p local/proxy-evidence || true
+        mc mb -p local/proxy-artifacts || true
+        mc mb -p local/proxy-finance || true
+
+volumes:
+  proxy_pgdata:
+  proxy_minio_data:
+  proxy_receiver_data:
+  proxy_finance_sink_data:

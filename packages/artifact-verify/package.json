@@ -1,0 +1,13 @@
+{
+  "name": "settld-artifact-verify",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "settld-verify": "./bin/settld-verify.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  }
+}
+

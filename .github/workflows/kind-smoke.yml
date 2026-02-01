@@ -1,0 +1,170 @@
+name: kind-smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/helm/**"
+      - "deploy/kind/**"
+      - "scripts/smoke/**"
+      - ".github/workflows/kind-smoke.yml"
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+      - "deploy/kind/**"
+      - "scripts/smoke/**"
+      - ".github/workflows/kind-smoke.yml"
+
+jobs:
+  smoke_deploy_and_upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          version: v0.22.0
+
+      - name: Compute base ref (upgrade test)
+        id: base
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+          if [[ "${BASE_SHA}" =~ ^0+$ ]]; then
+            BASE_SHA="$(git rev-parse HEAD~1)"
+          fi
+          echo "sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out base into worktree
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ steps.base.outputs.sha }}"
+          echo "base sha: ${BASE_SHA}"
+          git worktree add /tmp/settld_base "${BASE_SHA}"
+
+      - name: Build images (base + current)
+        run: |
+          set -euo pipefail
+          docker build -t settld:base --build-arg GIT_SHA="${{ steps.base.outputs.sha }}" --build-arg SETTLD_VERSION=base /tmp/settld_base
+          docker build -t settld:current --build-arg GIT_SHA="${{ github.sha }}" --build-arg SETTLD_VERSION=ci .
+
+      - name: Load images into kind
+        run: |
+          set -euo pipefail
+          kind load docker-image settld:base
+          kind load docker-image settld:current
+
+      - name: Create namespace + Postgres + DB secret
+        run: |
+          set -euo pipefail
+          kubectl create namespace smoke
+          kubectl apply -n smoke -f deploy/kind/postgres.yaml
+          kubectl rollout status -n smoke deploy/postgres --timeout=180s
+          kubectl create secret generic settld-db -n smoke --from-literal=DATABASE_URL='postgres://proxy:proxy@postgres:5432/proxy'
+
+      - name: Install base chart (smoke)
+        run: |
+          set -euo pipefail
+          cat >/tmp/values.base.yaml <<'YAML'
+          image:
+            repository: settld
+            tag: base
+          store:
+            mode: pg
+            pgSchema: public
+            migrateOnStartup: true
+            databaseUrlSecret:
+              name: settld-db
+              key: DATABASE_URL
+          maintenance:
+            enabled: true
+          api:
+            env:
+              PROXY_OPS_TOKENS: "dev:ops_read,ops_write,finance_read,finance_write,audit_read"
+              PROXY_AUTOTICK: "1"
+              PROXY_AUTOTICK_INTERVAL_MS: "100"
+              PROXY_AUTOTICK_MAX_MESSAGES: "200"
+          YAML
+          helm upgrade --install settld /tmp/settld_base/deploy/helm/settld -n smoke -f /tmp/values.base.yaml --wait --timeout 5m
+
+      - name: Smoke lifecycle (base)
+        run: |
+          set -euo pipefail
+          PORT="$(node -e \"require('net').createServer().listen(0,'127.0.0.1',function(){console.log(this.address().port); this.close();});\")"
+          kubectl -n smoke port-forward svc/settld-settld-api "${PORT}:3000" >/tmp/pf.base.log 2>&1 &
+          PF_PID=$!
+          trap 'kill ${PF_PID} || true' EXIT
+          SMOKE_API_BASE_URL="http://127.0.0.1:${PORT}" SMOKE_TENANT_ID="tenant_default" SMOKE_OPS_TOKEN="dev" SMOKE_PROTOCOL="1.0" \
+            node scripts/smoke/k8s-smoke.mjs
+          SLO_API_BASE_URL="http://127.0.0.1:${PORT}" node scripts/slo/check.mjs
+          kill "${PF_PID}" || true
+          trap - EXIT
+
+      - name: Upgrade to current chart + image (migrations on startup)
+        run: |
+          set -euo pipefail
+          cat >/tmp/values.current.yaml <<'YAML'
+          image:
+            repository: settld
+            tag: current
+          store:
+            mode: pg
+            pgSchema: public
+            migrateOnStartup: true
+            databaseUrlSecret:
+              name: settld-db
+              key: DATABASE_URL
+          maintenance:
+            enabled: true
+          api:
+            env:
+              PROXY_OPS_TOKENS: "dev:ops_read,ops_write,finance_read,finance_write,audit_read"
+              PROXY_AUTOTICK: "1"
+              PROXY_AUTOTICK_INTERVAL_MS: "100"
+              PROXY_AUTOTICK_MAX_MESSAGES: "200"
+          YAML
+          helm upgrade settld deploy/helm/settld -n smoke -f /tmp/values.current.yaml --wait --timeout 5m
+
+      - name: Smoke lifecycle (current)
+        run: |
+          set -euo pipefail
+          PORT="$(node -e \"require('net').createServer().listen(0,'127.0.0.1',function(){console.log(this.address().port); this.close();});\")"
+          kubectl -n smoke port-forward svc/settld-settld-api "${PORT}:3000" >/tmp/pf.current.log 2>&1 &
+          PF_PID=$!
+          trap 'kill ${PF_PID} || true' EXIT
+          SMOKE_API_BASE_URL="http://127.0.0.1:${PORT}" SMOKE_TENANT_ID="tenant_default" SMOKE_OPS_TOKEN="dev" SMOKE_PROTOCOL="1.0" \
+            node scripts/smoke/k8s-smoke.mjs
+          SLO_API_BASE_URL="http://127.0.0.1:${PORT}" node scripts/slo/check.mjs
+          kill "${PF_PID}" || true
+          trap - EXIT
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n smoke get all
+          kubectl -n smoke describe deploy/settld-settld-api || true
+          kubectl -n smoke logs deploy/settld-settld-api --tail=200 || true
+          kubectl -n smoke logs deploy/settld-settld-maintenance --tail=200 || true

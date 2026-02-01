@@ -1,0 +1,31 @@
+# Node / JS
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.pnp.*
+
+# Env / secrets
+.env
+.env.*
+
+# OS
+.DS_Store
+
+# Builds / artifacts
+dist/
+build/
+coverage/
+.nyc_output/
+
+# Dashboard build output
+dashboard/dist/
+
+# Demo generated outputs
+demo/**/output/
+
+# Misc
+*.tmp
+*.swp
