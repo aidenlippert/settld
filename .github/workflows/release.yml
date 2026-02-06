@@ -271,10 +271,18 @@ jobs:
           ls .artifacts/python/settld_api_sdk_python-${VERSION}-*.whl >/dev/null
           test -f .artifacts/python/python-SHA256SUMS
 
+      - name: Prepare publish-only dist directory
+        run: |
+          set -euo pipefail
+          rm -rf .artifacts/python-publish
+          mkdir -p .artifacts/python-publish
+          cp .artifacts/python/*.whl .artifacts/python/*.tar.gz .artifacts/python-publish/
+          ls -la .artifacts/python-publish
+
       - name: Publish Python package to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: .artifacts/python
+          packages-dir: .artifacts/python-publish
           skip-existing: true
 
   conformance_pack:
