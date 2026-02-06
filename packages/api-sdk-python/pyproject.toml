@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "settld-api-sdk-python"
-version = "0.0.0"
+version = "0.1.0b1"
 description = "Settld API SDK (Python)"
 readme = "README.md"
 requires-python = ">=3.9"
