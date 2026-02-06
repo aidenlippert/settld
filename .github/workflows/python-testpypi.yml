@@ -1,11 +1,7 @@
 name: python-testpypi
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Python package version to publish (e.g. 0.3.1)"
-        required: true
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -21,7 +17,7 @@ jobs:
       - name: Compute version
         id: v
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="$(sed -n 's/^version = \"\\(.*\\)\"$/\\1/p' packages/api-sdk-python/pyproject.toml | head -n1)"
           if [[ -z "${VERSION}" ]]; then
             echo "missing version" >&2
             exit 1
@@ -31,16 +27,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Assert pyproject version matches workflow input
-        run: |
-          set -euo pipefail
-          EXPECTED="${{ steps.v.outputs.version }}"
-          ACTUAL="$(python3 -c 'import pathlib,tomllib; data=tomllib.loads(pathlib.Path(\"packages/api-sdk-python/pyproject.toml\").read_text(encoding=\"utf-8\")); print(str(data.get(\"project\", {}).get(\"version\", \"\")).strip())')"
-          if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
-            echo "pyproject version mismatch: expected ${EXPECTED}, got ${ACTUAL}" >&2
-            exit 1
-          fi
 
       - name: Build Python distribution artifacts (TestPyPI candidate)
         run: |
@@ -77,7 +63,7 @@ jobs:
       - name: Compute version
         id: v
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="$(sed -n 's/^version = \"\\(.*\\)\"$/\\1/p' packages/api-sdk-python/pyproject.toml | head -n1)"
           if [[ -z "${VERSION}" ]]; then
             echo "missing version" >&2
             exit 1
