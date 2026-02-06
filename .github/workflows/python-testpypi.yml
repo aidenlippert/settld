@@ -11,13 +11,15 @@ jobs:
   build_python:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Compute version
         id: v
         run: |
-          VERSION="$(sed -n 's/^version = \"\\(.*\\)\"$/\\1/p' packages/api-sdk-python/pyproject.toml | head -n1)"
+          VERSION="$(awk -F'=' '/^[[:space:]]*version[[:space:]]*=/{gsub(/[[:space:]\"]/, \"\", $2); print $2; exit}' packages/api-sdk-python/pyproject.toml)"
           if [[ -z "${VERSION}" ]]; then
             echo "missing version" >&2
             exit 1
@@ -60,25 +62,15 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Compute version
-        id: v
-        run: |
-          VERSION="$(sed -n 's/^version = \"\\(.*\\)\"$/\\1/p' packages/api-sdk-python/pyproject.toml | head -n1)"
-          if [[ -z "${VERSION}" ]]; then
-            echo "missing version" >&2
-            exit 1
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@v4
         with:
-          name: python-testpypi-artifacts-${{ steps.v.outputs.version }}
+          name: python-testpypi-artifacts-${{ needs.build_python.outputs.version }}
           path: /tmp/python-artifacts
 
       - name: Assert TestPyPI artifacts exist
         run: |
           set -euo pipefail
-          VERSION="${{ steps.v.outputs.version }}"
+          VERSION="${{ needs.build_python.outputs.version }}"
           ls -la /tmp/python-artifacts
           ls /tmp/python-artifacts/settld_api_sdk_python-${VERSION}.tar.gz >/dev/null
           ls /tmp/python-artifacts/settld_api_sdk_python-${VERSION}-*.whl >/dev/null
