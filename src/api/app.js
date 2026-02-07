@@ -1,5 +1,7 @@
+import crypto from "node:crypto";
+
 import { createStore } from "./store.js";
-import { readJsonBody, sendError, sendJson, sendText } from "./http.js";
+import { readJsonBody, readRawBody, sendError, sendJson, sendText } from "./http.js";
 import { createId } from "../core/ids.js";
 import { appendChainedEvent, createChainedEvent, verifyChainedEvents } from "../core/event-chain.js";
 import { keyIdFromPublicKeyPem, sha256Hex, signHashHexEd25519, verifyHashHexEd25519 } from "../core/crypto.js";
@@ -243,7 +245,9 @@ export function createApi({
   protocol = null,
   moneyRailMode = null,
   moneyRailProviderConfigs = null,
-  moneyRailDefaultProviderId = null
+  moneyRailDefaultProviderId = null,
+  billingStripeWebhookSecret = null,
+  billingStripeWebhookToleranceSeconds = null
 } = {}) {
   const apiStartedAtMs = Date.now();
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
@@ -530,6 +534,16 @@ export function createApi({
     typeof process !== "undefined" && typeof process.env.PROXY_EVIDENCE_REQUIRE_SIZE_BYTES === "string" && process.env.PROXY_EVIDENCE_REQUIRE_SIZE_BYTES === "1";
 
   const evidenceMaxSizeBytes = parseNonNegativeIntEnv("PROXY_EVIDENCE_MAX_SIZE_BYTES", 0);
+  const effectiveBillingStripeWebhookSecret =
+    billingStripeWebhookSecret !== null && billingStripeWebhookSecret !== undefined
+      ? String(billingStripeWebhookSecret).trim() || null
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_WEBHOOK_SECRET === "string" && process.env.PROXY_BILLING_STRIPE_WEBHOOK_SECRET.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_WEBHOOK_SECRET.trim()
+        : null;
+  const effectiveBillingStripeWebhookToleranceSeconds =
+    billingStripeWebhookToleranceSeconds !== null && billingStripeWebhookToleranceSeconds !== undefined
+      ? Number(billingStripeWebhookToleranceSeconds)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_WEBHOOK_TOLERANCE_SECONDS", 300);
 
   function parseOpsTokens(raw) {
     if (raw === null || raw === undefined) return new Map();
@@ -2047,6 +2061,35 @@ export function createApi({
     const normalized = normalizeTenant(tenantId);
     if (typeof store.getConfig === "function") return store.getConfig(normalized);
     return store.config;
+  }
+
+  async function getTenantBillingConfig(tenantId) {
+    const cfg = getTenantConfig(tenantId) ?? {};
+    const fallback = cfg?.billing && typeof cfg.billing === "object" && !Array.isArray(cfg.billing) ? cfg.billing : {};
+    if (typeof store.getTenantBillingConfig !== "function") return fallback;
+    try {
+      const persisted = await store.getTenantBillingConfig({ tenantId: normalizeTenant(tenantId) });
+      if (persisted && typeof persisted === "object" && !Array.isArray(persisted)) {
+        cfg.billing = persisted;
+        return persisted;
+      }
+    } catch {
+      // Fall back to in-memory config when store-specific read fails.
+    }
+    return fallback;
+  }
+
+  async function putTenantBillingConfig(tenantId, billing) {
+    if (!billing || typeof billing !== "object" || Array.isArray(billing)) {
+      throw new TypeError("billing config is required");
+    }
+    if (typeof store.putTenantBillingConfig === "function") {
+      await store.putTenantBillingConfig({ tenantId: normalizeTenant(tenantId), billing });
+      return;
+    }
+    const cfg = getTenantConfig(tenantId);
+    if (!cfg || typeof cfg !== "object") throw new TypeError("tenant config unavailable");
+    cfg.billing = billing;
   }
 
   function countOpenJobsForTenant(tenantId) {
@@ -6101,6 +6144,165 @@ export function createApi({
       deduped.push(text);
     }
     return deduped;
+  }
+
+  function parseStripeSignatureHeader(value) {
+    if (value === null || value === undefined || String(value).trim() === "") {
+      throw new TypeError("stripe-signature header is required");
+    }
+    const pairs = String(value)
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    let timestamp = null;
+    const signatures = [];
+    for (const pair of pairs) {
+      const eq = pair.indexOf("=");
+      if (eq <= 0) continue;
+      const key = pair.slice(0, eq).trim();
+      const val = pair.slice(eq + 1).trim();
+      if (!key || !val) continue;
+      if (key === "t") {
+        const n = Number(val);
+        if (!Number.isSafeInteger(n) || n <= 0) throw new TypeError("stripe-signature timestamp is invalid");
+        timestamp = n;
+      } else if (key === "v1") {
+        signatures.push(val.toLowerCase());
+      }
+    }
+    if (!Number.isSafeInteger(timestamp) || timestamp <= 0) throw new TypeError("stripe-signature missing timestamp");
+    if (signatures.length === 0) throw new TypeError("stripe-signature missing v1 signature");
+    return { timestamp, signatures };
+  }
+
+  function timingSafeEqualHexHex(a, b) {
+    if (typeof a !== "string" || typeof b !== "string") return false;
+    const ax = a.trim().toLowerCase();
+    const bx = b.trim().toLowerCase();
+    if (!/^[0-9a-f]+$/.test(ax) || !/^[0-9a-f]+$/.test(bx)) return false;
+    if (ax.length !== bx.length) return false;
+    if (ax.length % 2 !== 0) return false;
+    const aBuf = Buffer.from(ax, "hex");
+    const bBuf = Buffer.from(bx, "hex");
+    if (aBuf.length !== bBuf.length) return false;
+    return crypto.timingSafeEqual(aBuf, bBuf);
+  }
+
+  function verifyStripeWebhookSignature({
+    signatureHeader,
+    rawBody,
+    secret,
+    toleranceSeconds = 300,
+    nowAt = nowIso()
+  } = {}) {
+    const { timestamp, signatures } = parseStripeSignatureHeader(signatureHeader);
+    const payload = `${String(timestamp)}.${String(rawBody ?? "")}`;
+    const expected = crypto.createHmac("sha256", String(secret)).update(payload, "utf8").digest("hex");
+    const matched = signatures.some((candidate) => timingSafeEqualHexHex(candidate, expected));
+    if (!matched) throw new TypeError("stripe-signature digest mismatch");
+    const tolerance = Number(toleranceSeconds);
+    if (Number.isFinite(tolerance) && tolerance > 0) {
+      const nowSeconds = Math.floor(Date.parse(nowAt) / 1000);
+      if (!Number.isFinite(nowSeconds)) throw new TypeError("invalid clock");
+      if (Math.abs(nowSeconds - timestamp) > tolerance) {
+        throw new TypeError("stripe-signature timestamp outside tolerance window");
+      }
+    }
+    return true;
+  }
+
+  async function applyStripeBillingProviderEvent({ tenantId, body }) {
+    const cfg = getTenantConfig(tenantId);
+    if (!cfg || typeof cfg !== "object") {
+      const err = new Error("tenant config unavailable");
+      err.code = "TENANT_CONFIG_UNAVAILABLE";
+      throw err;
+    }
+
+    const billingCfg = await getTenantBillingConfig(tenantId);
+    const existingBilling =
+      billingCfg && typeof billingCfg === "object" && !Array.isArray(billingCfg)
+        ? { ...billingCfg }
+        : {
+            plan: BILLING_PLAN_ID.FREE,
+            planOverrides: null,
+            hardLimitEnforced: true
+          };
+
+    const parsed = normalizeStripeSubscriptionWebhookEvent(body);
+    const dedupKey = `stripe:${parsed.eventId}`;
+    const dedupList = normalizeBillingProviderEventDedupList(existingBilling.providerEventDedupKeys ?? []);
+
+    if (dedupList.includes(dedupKey)) {
+      return {
+        tenantId,
+        provider: "stripe",
+        duplicate: true,
+        eventId: parsed.eventId,
+        eventType: parsed.eventType,
+        occurredAt: parsed.occurredAt,
+        subscription: normalizeBillingSubscriptionRecord(existingBilling.subscription ?? null, {
+          allowNull: true,
+          strictPlan: false
+        }),
+        resolvedPlan: resolveTenantBillingPlan({ tenantId })
+      };
+    }
+
+    if (!parsed.eventType.startsWith("customer.subscription.")) {
+      const nextBilling = {
+        ...existingBilling,
+        providerEventDedupKeys: normalizeBillingProviderEventDedupList([...dedupList, dedupKey]).slice(-500)
+      };
+      await putTenantBillingConfig(tenantId, nextBilling);
+      return {
+        tenantId,
+        provider: "stripe",
+        duplicate: false,
+        ignored: true,
+        eventId: parsed.eventId,
+        eventType: parsed.eventType,
+        occurredAt: parsed.occurredAt,
+        reason: "unsupported_event_type",
+        subscription: normalizeBillingSubscriptionRecord(nextBilling.subscription ?? null, {
+          allowNull: true,
+          strictPlan: false
+        }),
+        resolvedPlan: resolveTenantBillingPlan({ tenantId })
+      };
+    }
+
+    const previousPlan = normalizeBillingPlanId(existingBilling.plan ?? BILLING_PLAN_ID.FREE, {
+      allowNull: false,
+      defaultPlan: BILLING_PLAN_ID.FREE
+    });
+    const nextPlan = parsed.subscription.plan ?? previousPlan;
+    const nextBilling = {
+      ...existingBilling,
+      plan: nextPlan,
+      subscription: parsed.subscription,
+      providerEventDedupKeys: normalizeBillingProviderEventDedupList([...dedupList, dedupKey]).slice(-500)
+    };
+    await putTenantBillingConfig(tenantId, nextBilling);
+
+    const planChanged = previousPlan !== nextPlan;
+
+    return {
+      tenantId,
+      provider: "stripe",
+      duplicate: false,
+      ignored: false,
+      eventId: parsed.eventId,
+      eventType: parsed.eventType,
+      occurredAt: parsed.occurredAt,
+      applied: {
+        planChanged,
+        previousPlan,
+        nextPlan
+      },
+      subscription: parsed.subscription,
+      resolvedPlan: resolveTenantBillingPlan({ tenantId })
+    };
   }
 
   async function listBillableUsageEventsAll({
@@ -11109,6 +11311,32 @@ export function createApi({
           });
         }
 
+        async function appendBillingProviderIngestAudit(applied) {
+          if (typeof store.appendOpsAudit !== "function") return;
+          if (!applied || typeof applied !== "object") return;
+          if (applied.duplicate === true) return;
+          await store.appendOpsAudit({
+            tenantId,
+            audit: makeOpsAudit({
+              action: "BILLING_PROVIDER_EVENT_INGEST",
+              targetType: "billing_provider_event",
+              targetId: applied.eventId ?? null,
+              details: {
+                provider: applied.provider ?? "stripe",
+                eventType: applied.eventType ?? null,
+                duplicate: false,
+                ignored: applied.ignored === true,
+                planChanged: applied?.applied?.planChanged === true,
+                previousPlan: applied?.applied?.previousPlan ?? null,
+                nextPlan: applied?.applied?.nextPlan ?? null,
+                subscriptionId: applied?.subscription?.subscriptionId ?? null,
+                customerId: applied?.subscription?.customerId ?? null,
+                status: applied?.subscription?.status ?? null
+              }
+            })
+          });
+        }
+
         function readIdempotency({ method, requestPath, expectedPrevChainHash, body }) {
           const idempotencyKey = req.headers["x-idempotency-key"] ? String(req.headers["x-idempotency-key"]) : null;
           if (!idempotencyKey) return { idempotencyKey: null, idemStoreKey: null, idemRequestHash: null };
@@ -12752,8 +12980,7 @@ export function createApi({
             if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
               return sendError(res, 403, "forbidden");
             }
-            const cfg = getTenantConfig(tenantId) ?? {};
-            const billingCfg = cfg?.billing && typeof cfg.billing === "object" && !Array.isArray(cfg.billing) ? cfg.billing : {};
+            const billingCfg = await getTenantBillingConfig(tenantId);
             const resolvedPlan = resolveTenantBillingPlan({ tenantId });
             return sendJson(res, 200, {
               tenantId,
@@ -12781,14 +13008,14 @@ export function createApi({
               body?.hardLimitEnforced === undefined || body?.hardLimitEnforced === null
                 ? true
                 : body.hardLimitEnforced === true;
-            const cfg = getTenantConfig(tenantId);
-            if (!cfg || typeof cfg !== "object") return sendError(res, 500, "tenant config unavailable");
+            const existingBilling = await getTenantBillingConfig(tenantId);
             const nextBilling = {
+              ...existingBilling,
               plan,
               planOverrides: planOverrides === undefined ? null : planOverrides,
               hardLimitEnforced
             };
-            cfg.billing = nextBilling;
+            await putTenantBillingConfig(tenantId, nextBilling);
             if (typeof store.appendOpsAudit === "function") {
               await store.appendOpsAudit({
                 tenantId,
@@ -12815,8 +13042,7 @@ export function createApi({
             if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
               return sendError(res, 403, "forbidden");
             }
-            const cfg = getTenantConfig(tenantId) ?? {};
-            const billingCfg = cfg?.billing && typeof cfg.billing === "object" && !Array.isArray(cfg.billing) ? cfg.billing : {};
+            const billingCfg = await getTenantBillingConfig(tenantId);
             const subscription = normalizeBillingSubscriptionRecord(billingCfg.subscription ?? null, { allowNull: true, strictPlan: false });
             return sendJson(res, 200, {
               tenantId,
@@ -12836,9 +13062,7 @@ export function createApi({
 
             let nextSubscription = null;
             let explicitPlan = null;
-            const cfg = getTenantConfig(tenantId);
-            if (!cfg || typeof cfg !== "object") return sendError(res, 500, "tenant config unavailable");
-            const existingBilling = cfg.billing && typeof cfg.billing === "object" && !Array.isArray(cfg.billing) ? cfg.billing : {};
+            const existingBilling = await getTenantBillingConfig(tenantId);
 
             try {
               nextSubscription = shouldUpdateSubscription
@@ -12856,7 +13080,7 @@ export function createApi({
               plan,
               subscription: nextSubscription
             };
-            cfg.billing = nextBilling;
+            await putTenantBillingConfig(tenantId, nextBilling);
 
             if (typeof store.appendOpsAudit === "function") {
               await store.appendOpsAudit({
@@ -12892,106 +13116,155 @@ export function createApi({
             req.method === "POST"
           ) {
             if (!requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE)) return sendError(res, 403, "forbidden");
-            const body = (await readJsonBody(req)) ?? {};
-
-            const cfg = getTenantConfig(tenantId);
-            if (!cfg || typeof cfg !== "object") return sendError(res, 500, "tenant config unavailable");
-            if (!cfg.billing || typeof cfg.billing !== "object" || Array.isArray(cfg.billing)) {
-              cfg.billing = {
-                plan: BILLING_PLAN_ID.FREE,
-                planOverrides: null,
-                hardLimitEnforced: true
-              };
+            const rawBody = await readRawBody(req);
+            const rawText = String(rawBody ?? "");
+            let body = {};
+            if (rawText.trim() !== "") {
+              try {
+                body = JSON.parse(rawText);
+              } catch (err) {
+                return sendError(res, 400, "invalid stripe event", { message: "invalid JSON body" }, { code: "SCHEMA_INVALID" });
+              }
+            }
+            if (!body || typeof body !== "object" || Array.isArray(body)) {
+              return sendError(res, 400, "invalid stripe event", { message: "stripe event payload must be an object" }, { code: "SCHEMA_INVALID" });
             }
 
-            let parsed;
+            if (effectiveBillingStripeWebhookSecret) {
+              try {
+                verifyStripeWebhookSignature({
+                  signatureHeader: req.headers["stripe-signature"] ?? null,
+                  rawBody: rawText,
+                  secret: effectiveBillingStripeWebhookSecret,
+                  toleranceSeconds: effectiveBillingStripeWebhookToleranceSeconds,
+                  nowAt: nowIso()
+                });
+              } catch (err) {
+                if (typeof store.appendOpsAudit === "function") {
+                  await store.appendOpsAudit({
+                    tenantId,
+                    audit: makeOpsAudit({
+                      action: "BILLING_PROVIDER_EVENT_REJECTED",
+                      targetType: "billing_provider_event",
+                      targetId: body?.id ?? null,
+                      details: {
+                        provider: "stripe",
+                        reason: "signature_verification_failed",
+                        message: err?.message ?? null
+                      }
+                    })
+                  });
+                }
+                return sendError(res, 400, "invalid stripe signature", { message: err?.message ?? null }, { code: "SCHEMA_INVALID" });
+              }
+            }
+
             try {
-              parsed = normalizeStripeSubscriptionWebhookEvent(body);
+              const applied = await applyStripeBillingProviderEvent({ tenantId, body });
+              await appendBillingProviderIngestAudit(applied);
+              return sendJson(res, 200, applied);
             } catch (err) {
               return sendError(res, 400, "invalid stripe event", { message: err?.message }, { code: "SCHEMA_INVALID" });
             }
+          }
 
-            const dedupKey = `stripe:${parsed.eventId}`;
-            const dedupList = normalizeBillingProviderEventDedupList(cfg.billing.providerEventDedupKeys ?? []);
-            if (dedupList.includes(dedupKey)) {
-              const currentSubscription = normalizeBillingSubscriptionRecord(cfg.billing.subscription ?? null, { allowNull: true, strictPlan: false });
-              return sendJson(res, 200, {
-                tenantId,
-                provider: "stripe",
-                duplicate: true,
-                eventId: parsed.eventId,
-                eventType: parsed.eventType,
-                subscription: currentSubscription,
-                resolvedPlan: resolveTenantBillingPlan({ tenantId })
-              });
+          if (
+            parts[1] === "finance" &&
+            parts[2] === "billing" &&
+            parts[3] === "providers" &&
+            parts[4] === "stripe" &&
+            parts[5] === "reconcile" &&
+            parts.length === 6 &&
+            req.method === "POST"
+          ) {
+            if (!requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE)) return sendError(res, 403, "forbidden");
+            const body = (await readJsonBody(req)) ?? {};
+            const events = Array.isArray(body?.events) ? body.events : null;
+            if (!events || events.length === 0) {
+              return sendError(res, 400, "events[] is required", null, { code: "SCHEMA_INVALID" });
             }
-
-            if (!parsed.eventType.startsWith("customer.subscription.")) {
-              const nextDedupList = normalizeBillingProviderEventDedupList([...dedupList, dedupKey]).slice(-500);
-              cfg.billing.providerEventDedupKeys = nextDedupList;
-              return sendJson(res, 200, {
-                tenantId,
-                provider: "stripe",
-                duplicate: false,
-                ignored: true,
-                eventId: parsed.eventId,
-                eventType: parsed.eventType,
-                reason: "unsupported_event_type"
-              });
+            const results = [];
+            for (const event of events) {
+              try {
+                // eslint-disable-next-line no-await-in-loop
+                const applied = await applyStripeBillingProviderEvent({ tenantId, body: event });
+                // eslint-disable-next-line no-await-in-loop
+                await appendBillingProviderIngestAudit(applied);
+                results.push({
+                  ok: true,
+                  eventId: applied?.eventId ?? null,
+                  eventType: applied?.eventType ?? null,
+                  duplicate: applied?.duplicate === true,
+                  ignored: applied?.ignored === true
+                });
+              } catch (err) {
+                results.push({
+                  ok: false,
+                  eventId: event?.id ?? null,
+                  eventType: event?.type ?? null,
+                  error: err?.message ?? "unknown error"
+                });
+              }
             }
-
-            const existingBilling = cfg.billing && typeof cfg.billing === "object" && !Array.isArray(cfg.billing) ? cfg.billing : {};
-            const previousPlan = normalizeBillingPlanId(existingBilling.plan ?? BILLING_PLAN_ID.FREE, {
-              allowNull: false,
-              defaultPlan: BILLING_PLAN_ID.FREE
-            });
-            const nextPlan = parsed.subscription.plan ?? previousPlan;
-            const nextDedupList = normalizeBillingProviderEventDedupList([...dedupList, dedupKey]).slice(-500);
-
-            cfg.billing = {
-              ...existingBilling,
-              plan: nextPlan,
-              subscription: parsed.subscription,
-              providerEventDedupKeys: nextDedupList
-            };
-
-            const planChanged = previousPlan !== nextPlan;
-
-            if (typeof store.appendOpsAudit === "function") {
-              await store.appendOpsAudit({
-                tenantId,
-                audit: makeOpsAudit({
-                  action: "BILLING_PROVIDER_EVENT_INGEST",
-                  targetType: "billing_provider_event",
-                  targetId: parsed.eventId,
-                  details: {
-                    provider: "stripe",
-                    eventType: parsed.eventType,
-                    planChanged,
-                    previousPlan,
-                    nextPlan,
-                    subscriptionId: parsed.subscription.subscriptionId ?? null,
-                    customerId: parsed.subscription.customerId ?? null,
-                    status: parsed.subscription.status ?? null
-                  }
-                })
-              });
-            }
-
+            const appliedCount = results.filter((row) => row.ok === true && row.duplicate !== true && row.ignored !== true).length;
+            const duplicateCount = results.filter((row) => row.ok === true && row.duplicate === true).length;
+            const ignoredCount = results.filter((row) => row.ok === true && row.ignored === true).length;
+            const failedCount = results.filter((row) => row.ok !== true).length;
             return sendJson(res, 200, {
               tenantId,
               provider: "stripe",
-              duplicate: false,
-              eventId: parsed.eventId,
-              eventType: parsed.eventType,
-              occurredAt: parsed.occurredAt,
-              applied: {
-                planChanged,
-                previousPlan,
-                nextPlan
+              summary: {
+                total: results.length,
+                applied: appliedCount,
+                duplicate: duplicateCount,
+                ignored: ignoredCount,
+                failed: failedCount
               },
-              subscription: parsed.subscription,
-              resolvedPlan: resolveTenantBillingPlan({ tenantId })
+              results
+            });
+          }
+
+          if (
+            parts[1] === "finance" &&
+            parts[2] === "billing" &&
+            parts[3] === "providers" &&
+            parts[4] === "stripe" &&
+            parts[5] === "reconcile" &&
+            parts[6] === "report" &&
+            parts.length === 7 &&
+            req.method === "GET"
+          ) {
+            if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
+              return sendError(res, 403, "forbidden");
+            }
+            if (typeof store.listOpsAudit !== "function") {
+              return sendError(res, 501, "ops audit not supported for this store");
+            }
+            const { limit, offset } = parsePagination({
+              limitRaw: url.searchParams.get("limit"),
+              offsetRaw: url.searchParams.get("offset"),
+              defaultLimit: 200,
+              maxLimit: 1000
+            });
+            const audits = await store.listOpsAudit({ tenantId, limit, offset });
+            const rows = (Array.isArray(audits) ? audits : []).filter((row) => {
+              const action = String(row?.action ?? "");
+              return action === "BILLING_PROVIDER_EVENT_INGEST" || action === "BILLING_PROVIDER_EVENT_REJECTED";
+            });
+            const counts = {
+              ingested: rows.filter((row) => String(row?.action ?? "") === "BILLING_PROVIDER_EVENT_INGEST").length,
+              rejected: rows.filter((row) => String(row?.action ?? "") === "BILLING_PROVIDER_EVENT_REJECTED").length
+            };
+            const billingCfg = await getTenantBillingConfig(tenantId);
+            const subscription = normalizeBillingSubscriptionRecord(billingCfg?.subscription ?? null, { allowNull: true, strictPlan: false });
+            const dedupCount = normalizeBillingProviderEventDedupList(billingCfg?.providerEventDedupKeys ?? []).length;
+            return sendJson(res, 200, {
+              tenantId,
+              provider: "stripe",
+              counts,
+              dedupeKeyCount: dedupCount,
+              subscription,
+              recent: rows
             });
           }
 

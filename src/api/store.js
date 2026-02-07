@@ -321,6 +321,29 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.configByTenant.get(tenantId);
   };
 
+  store.getTenantBillingConfig = async function getTenantBillingConfig({ tenantId = DEFAULT_TENANT_ID } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    store.ensureTenant(tenantId);
+    const cfg = store.configByTenant.get(tenantId);
+    const billing = cfg?.billing ?? null;
+    return billing && typeof billing === "object" && !Array.isArray(billing) ? JSON.parse(JSON.stringify(billing)) : null;
+  };
+
+  store.putTenantBillingConfig = async function putTenantBillingConfig({ tenantId = DEFAULT_TENANT_ID, billing, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    store.ensureTenant(tenantId);
+    if (!billing || typeof billing !== "object" || Array.isArray(billing)) {
+      throw new TypeError("billing config is required");
+    }
+    const normalizedBilling = JSON.parse(JSON.stringify(billing));
+    const cfg = store.configByTenant.get(tenantId);
+    cfg.billing = normalizedBilling;
+    if (audit) {
+      await store.appendOpsAudit({ tenantId, audit });
+    }
+    return normalizedBilling;
+  };
+
   store.getFinanceAccountMap = async function getFinanceAccountMap({ tenantId = DEFAULT_TENANT_ID } = {}) {
     tenantId = normalizeTenantId(tenantId);
     store.ensureTenant(tenantId);

@@ -72,6 +72,18 @@ export async function readJsonBody(req, { maxBytes = defaultMaxBodyBytes() } = {
   const isJson = contentType.includes("application/json") || contentType.includes("+json");
   if (!isJson) return null;
 
+  const rawBody = await readRawBody(req, { maxBytes });
+  const raw = String(rawBody ?? "").trim();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new RequestBodyError(400, "invalid JSON body", { cause: err });
+  }
+}
+
+export async function readRawBody(req, { maxBytes = defaultMaxBodyBytes() } = {}) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new TypeError("maxBytes must be a positive safe integer");
 
   const chunks = [];
@@ -84,14 +96,7 @@ export async function readJsonBody(req, { maxBytes = defaultMaxBodyBytes() } = {
     }
     chunks.push(buf);
   }
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    throw new RequestBodyError(400, "invalid JSON body", { cause: err });
-  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export function sendJson(res, statusCode, body) {

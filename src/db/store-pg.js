@@ -273,6 +273,42 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     }
   }
 
+  async function refreshTenantBillingConfigs() {
+    try {
+      const res = await pool.query("SELECT tenant_id, billing_json FROM tenant_billing_config ORDER BY tenant_id ASC");
+      for (const row of res.rows) {
+        const tenantId = normalizeTenantId(row?.tenant_id ?? DEFAULT_TENANT_ID);
+        const billing = row?.billing_json ?? null;
+        if (!billing || typeof billing !== "object" || Array.isArray(billing)) continue;
+        store.ensureTenant(tenantId);
+        const cfg = store.getConfig(tenantId);
+        if (!cfg || typeof cfg !== "object") continue;
+        cfg.billing = JSON.parse(JSON.stringify(billing));
+      }
+    } catch (err) {
+      if (err?.code === "42P01") return;
+      throw err;
+    }
+  }
+
+  async function persistTenantBillingConfig(client, { tenantId = DEFAULT_TENANT_ID, billing } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!billing || typeof billing !== "object" || Array.isArray(billing)) {
+      throw new TypeError("billing config is required");
+    }
+    const normalizedBilling = JSON.parse(JSON.stringify(billing));
+    await client.query(
+      `
+        INSERT INTO tenant_billing_config (tenant_id, billing_json, updated_at)
+        VALUES ($1,$2, now())
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          billing_json = EXCLUDED.billing_json,
+          updated_at = now()
+      `,
+      [tenantId, JSON.stringify(normalizedBilling)]
+    );
+  }
+
   function parseIsoOrNull(value) {
     if (value === null || value === undefined || String(value).trim() === "") return null;
     const ms = Date.parse(String(value));
@@ -1475,6 +1511,7 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
   await refreshIdempotency();
   await refreshLedgerBalances();
   await refreshContracts();
+  await refreshTenantBillingConfigs();
   await refreshMarketplaceTasks();
   await refreshMarketplaceTaskBids();
   await refreshTenantSettlementPolicies();
@@ -2372,6 +2409,7 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     await refreshIdempotency();
     await refreshLedgerBalances();
     await refreshContracts();
+    await refreshTenantBillingConfigs();
     await refreshMarketplaceTasks();
     await refreshMarketplaceTaskBids();
     await refreshTenantSettlementPolicies();
@@ -4059,6 +4097,30 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     const res = await pool.query("SELECT mapping_json FROM finance_account_maps WHERE tenant_id = $1 LIMIT 1", [tenantId]);
     if (!res.rows.length) return null;
     return res.rows[0].mapping_json ?? null;
+  };
+
+  store.getTenantBillingConfig = async function getTenantBillingConfig({ tenantId = DEFAULT_TENANT_ID } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    store.ensureTenant(tenantId);
+    const cfg = store.getConfig(tenantId);
+    const billing = cfg?.billing ?? null;
+    return billing && typeof billing === "object" && !Array.isArray(billing) ? JSON.parse(JSON.stringify(billing)) : null;
+  };
+
+  store.putTenantBillingConfig = async function putTenantBillingConfig({ tenantId = DEFAULT_TENANT_ID, billing, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!billing || typeof billing !== "object" || Array.isArray(billing)) {
+      throw new TypeError("billing config is required");
+    }
+    const normalizedBilling = JSON.parse(JSON.stringify(billing));
+    await withTx(async (client) => {
+      await persistTenantBillingConfig(client, { tenantId, billing: normalizedBilling });
+      if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+    });
+    store.ensureTenant(tenantId);
+    const cfg = store.getConfig(tenantId);
+    cfg.billing = normalizedBilling;
+    return normalizedBilling;
   };
 
   store.putFinanceAccountMap = async function putFinanceAccountMap({ tenantId = DEFAULT_TENANT_ID, mapping, audit = null } = {}) {
