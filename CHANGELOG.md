@@ -14,3 +14,4 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 - Tenant isolation fuzz-style regression test (`test/tenant-isolation-fuzz.test.js`)
 - Ops runbook (`docs/RUNBOOK.md`)
 - Deprecation policy (`docs/DEPRECATION.md`)
+- Ops command-center API: `GET /ops/network/command-center` with reliability, determinism, settlement/dispute, trust, and fee-estimate summaries, plus end-to-end coverage in `test/api-e2e-ops-command-center.test.js`.
