@@ -38,6 +38,8 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - name: Assert repo/tool version consistency
+        run: node scripts/ci/check-version-consistency.mjs
       - name: Run unit tests (includes PG-backed tests)
         run: npm test
         env:

@@ -218,6 +218,19 @@
       }
     },
     {
+      "id": "invoicebundle_strict_fail_pricing_matrix_signature_payload_mismatch",
+      "kind": "invoice-bundle",
+      "path": "invoicebundle/strict-fail-pricing-altered",
+      "strict": true,
+      "expected": {
+        "exitCode": 1,
+        "ok": false,
+        "verificationOk": false,
+        "errorCodes": ["PRICING_MATRIX_SIGNATURE_PAYLOAD_MISMATCH"],
+        "warningCodes": []
+      }
+    },
+    {
       "id": "invoicebundle_strict_fail_missing_verification_report",
       "kind": "invoice-bundle",
       "path": "invoicebundle/strict-fail-missing-verification-report",

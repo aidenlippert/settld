@@ -1,0 +1,1 @@
+{"actor":{"id":"proxy","type":"system"},"at":"2026-02-02T00:00:00.000Z","id":"evt_job_created","payload":{"jobId":"job_fixture_1"},"streamId":"job_fixture_1","type":"JOB_CREATED","v":1}

@@ -49,7 +49,7 @@ test("bundle fixture generator output matches committed fixtures", async () => {
     const proc = spawnSync(process.execPath, [script, "--out", tmpRoot], { encoding: "utf8" });
     assert.equal(proc.status, 0, proc.stderr || proc.stdout || "fixture generator failed");
 
-    const surfaces = ["jobproof", "monthproof", "financepack", "trust.json"];
+    const surfaces = ["jobproof", "monthproof", "financepack", "invoicebundle", "closepack", "trust.json"];
     for (const s of surfaces) {
       // eslint-disable-next-line no-await-in-loop
       const committed = path.join(committedRoot, s);
@@ -83,4 +83,3 @@ test("bundle fixture generator output matches committed fixtures", async () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 });
-

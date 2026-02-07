@@ -1,0 +1,1 @@
+{"artifacts":[],"compiledPolicies":[],"eventChain":{"ok":true},"generatedAt":"2026-02-02T00:00:00.000Z","kind":"JobProofBundle.v1","schemaVersion":"ProofBundleVerifyReport.v1","scope":{"jobId":"job_fixture_1"},"settlementProofRefs":{"checked":0,"errors":[],"ok":true},"tenantId":"tenant_fixture"}
