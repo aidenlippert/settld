@@ -6134,6 +6134,25 @@ export function createApi({
     });
   }
 
+  async function emitBillableUsageEventBestEffort(input, { context = null } = {}) {
+    try {
+      return await emitBillableUsageEvent(input);
+    } catch (err) {
+      logger.warn("billing.event.emit_failed", {
+        tenantId: input?.tenantId ?? null,
+        eventType: input?.eventType ?? null,
+        eventKey: input?.eventKey ?? null,
+        runId: input?.runId ?? null,
+        settlementId: input?.settlementId ?? null,
+        disputeId: input?.disputeId ?? null,
+        arbitrationCaseId: input?.arbitrationCaseId ?? null,
+        context,
+        err
+      });
+      return null;
+    }
+  }
+
   function normalizePercentIntOrNull(value) {
     if (value === null || value === undefined) return null;
     const n = Number(value);
@@ -18396,8 +18415,8 @@ export function createApi({
         }
 
         await commitTx(ops);
-        try {
-          await emitBillableUsageEvent({
+        await emitBillableUsageEventBestEffort(
+          {
             tenantId,
             eventKey: `verified_run:${runId}:${String(runFailedEvent?.id ?? cancellationId)}`,
             eventType: BILLABLE_USAGE_EVENT_TYPE.VERIFIED_RUN,
@@ -18415,22 +18434,23 @@ export function createApi({
               actorAgentId: cancelledByAgentId,
               runStatus: runAfter?.status ?? AGENT_RUN_STATUS.FAILED
             }
-          });
-        } catch {
-          // Best-effort billing event emission.
-        }
-        try {
-          const releasedAmountCentsRaw =
-            settlement?.releasedAmountCents ??
-            (String(settlement?.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
-          const releasedAmountCents = Number.isSafeInteger(Number(releasedAmountCentsRaw)) ? Number(releasedAmountCentsRaw) : 0;
-          await emitBillableUsageEvent({
+          },
+          { context: "agreement_cancellation.verified_run" }
+        );
+        const releasedAmountCentsRawForBilling =
+          settlement?.releasedAmountCents ??
+          (String(settlement?.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
+        const releasedAmountCentsForBilling = Number.isSafeInteger(Number(releasedAmountCentsRawForBilling))
+          ? Number(releasedAmountCentsRawForBilling)
+          : 0;
+        await emitBillableUsageEventBestEffort(
+          {
             tenantId,
             eventKey: `settled_volume:${String(settlement?.settlementId ?? runId)}:${String(settlement?.resolutionEventId ?? cancellationId)}`,
             eventType: BILLABLE_USAGE_EVENT_TYPE.SETTLED_VOLUME,
             occurredAt: settlement?.resolvedAt ?? settledAt,
             quantity: 1,
-            amountCents: Math.max(0, releasedAmountCents),
+            amountCents: Math.max(0, releasedAmountCentsForBilling),
             currency: settlement?.currency ?? "USD",
             runId,
             settlementId: settlement?.settlementId ?? null,
@@ -18444,10 +18464,9 @@ export function createApi({
               actorAgentId: cancelledByAgentId,
               settlementStatus: settlement?.status ?? null
             }
-          });
-        } catch {
-          // Best-effort billing event emission.
-        }
+          },
+          { context: "agreement_cancellation.settled_volume" }
+        );
         try {
           await emitMarketplaceLifecycleArtifact({
             tenantId,
@@ -18793,12 +18812,12 @@ export function createApi({
               });
             }
             await commitTx(ops);
-            try {
-              const releasedAmountCentsRaw =
-                settlement?.releasedAmountCents ??
-                (String(settlement?.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
-              const releasedAmountCents = Number.isSafeInteger(Number(releasedAmountCentsRaw)) ? Number(releasedAmountCentsRaw) : 0;
-              await emitBillableUsageEvent({
+            const releasedAmountCentsRaw =
+              settlement?.releasedAmountCents ??
+              (String(settlement?.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
+            const releasedAmountCents = Number.isSafeInteger(Number(releasedAmountCentsRaw)) ? Number(releasedAmountCentsRaw) : 0;
+            await emitBillableUsageEventBestEffort(
+              {
                 tenantId,
                 eventKey: `settled_volume:${String(settlement?.settlementId ?? runId)}:${String(settlement?.resolutionEventId ?? `manual_${runId}`)}`,
                 eventType: BILLABLE_USAGE_EVENT_TYPE.SETTLED_VOLUME,
@@ -18821,10 +18840,9 @@ export function createApi({
                       : null,
                   settlementStatus: settlement?.status ?? null
                 }
-              });
-            } catch {
-              // Best-effort billing event emission.
-            }
+              },
+              { context: "manual_settlement_resolution.released" }
+            );
             try {
               await emitMarketplaceLifecycleArtifact({
                 tenantId,
@@ -18933,8 +18951,8 @@ export function createApi({
             });
           }
           await commitTx(ops);
-          try {
-            await emitBillableUsageEvent({
+          await emitBillableUsageEventBestEffort(
+            {
               tenantId,
               eventKey: `settled_volume:${String(settlement?.settlementId ?? runId)}:${String(settlement?.resolutionEventId ?? `manual_${runId}`)}`,
               eventType: BILLABLE_USAGE_EVENT_TYPE.SETTLED_VOLUME,
@@ -18957,10 +18975,9 @@ export function createApi({
                     : null,
                 settlementStatus: settlement?.status ?? null
               }
-            });
-          } catch {
-            // Best-effort billing event emission.
-          }
+            },
+            { context: "manual_settlement_resolution.refunded" }
+          );
           try {
             await emitMarketplaceLifecycleArtifact({
               tenantId,
@@ -19155,8 +19172,8 @@ export function createApi({
             ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } });
           }
           await commitTx(ops);
-          try {
-            await emitBillableUsageEvent({
+          await emitBillableUsageEventBestEffort(
+            {
               tenantId,
               eventKey: `arbitration_usage:${String(caseId)}:case`,
               eventType: BILLABLE_USAGE_EVENT_TYPE.ARBITRATION_USAGE,
@@ -19175,10 +19192,9 @@ export function createApi({
                 action: "open",
                 arbiterAgentId: arbitrationCase?.arbiterAgentId ?? null
               }
-            });
-          } catch {
-            // Best-effort billing event emission.
-          }
+            },
+            { context: "arbitration_case.open" }
+          );
           let arbitrationCaseArtifact = null;
           try {
             arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase, at: nowAt });
@@ -19653,8 +19669,8 @@ export function createApi({
             ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } });
           }
           await commitTx(ops);
-          try {
-            await emitBillableUsageEvent({
+          await emitBillableUsageEventBestEffort(
+            {
               tenantId,
               eventKey: `arbitration_usage:${String(caseId)}:case`,
               eventType: BILLABLE_USAGE_EVENT_TYPE.ARBITRATION_USAGE,
@@ -19673,10 +19689,9 @@ export function createApi({
                 action: "appeal",
                 parentCaseId
               }
-            });
-          } catch {
-            // Best-effort billing event emission.
-          }
+            },
+            { context: "arbitration_case.appeal" }
+          );
           let arbitrationCaseArtifact = null;
           try {
             arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: appealCase, at: nowAt });
@@ -20003,8 +20018,8 @@ export function createApi({
         }
         await commitTx(ops);
         if (action === "close" && signedArbitrationVerdict) {
-          try {
-            await emitBillableUsageEvent({
+          await emitBillableUsageEventBestEffort(
+            {
               tenantId,
               eventKey: `arbitration_usage:${String(signedArbitrationVerdict.caseId ?? settlement?.disputeId ?? runId)}:case`,
               eventType: BILLABLE_USAGE_EVENT_TYPE.ARBITRATION_USAGE,
@@ -20023,10 +20038,9 @@ export function createApi({
                 action: "close",
                 arbiterAgentId: signedArbitrationVerdict.arbiterAgentId ?? null
               }
-            });
-          } catch {
-            // Best-effort billing event emission.
-          }
+            },
+            { context: "arbitration_verdict.close" }
+          );
         }
         let verdictArtifact = null;
         let arbitrationCaseArtifact = null;
@@ -20753,8 +20767,8 @@ export function createApi({
             }
             await commitTx(ops);
             if (run.status === "completed" || run.status === "failed") {
-              try {
-                await emitBillableUsageEvent({
+              await emitBillableUsageEventBestEffort(
+                {
                   tenantId,
                   eventKey: `verified_run:${runId}:${String(event?.id ?? run?.lastEventId ?? run?.status ?? "terminal")}`,
                   eventType: BILLABLE_USAGE_EVENT_TYPE.VERIFIED_RUN,
@@ -20773,18 +20787,17 @@ export function createApi({
                     runStatus: run.status,
                     verificationStatus: computeAgentRunVerification({ run, events: nextEvents }).verificationStatus
                   }
-                });
-              } catch {
-                // Best-effort billing event emission.
-              }
+                },
+                { context: "agent_run_event.verified_run" }
+              );
             }
             if (settlement && settlement.status !== AGENT_RUN_SETTLEMENT_STATUS.LOCKED) {
-              try {
-                const releasedAmountCentsRaw =
-                  settlement?.releasedAmountCents ??
-                  (String(settlement.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
-                const releasedAmountCents = Number.isSafeInteger(Number(releasedAmountCentsRaw)) ? Number(releasedAmountCentsRaw) : 0;
-                await emitBillableUsageEvent({
+              const releasedAmountCentsRaw =
+                settlement?.releasedAmountCents ??
+                (String(settlement.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
+              const releasedAmountCents = Number.isSafeInteger(Number(releasedAmountCentsRaw)) ? Number(releasedAmountCentsRaw) : 0;
+              await emitBillableUsageEventBestEffort(
+                {
                   tenantId,
                   eventKey: `settled_volume:${String(settlement?.settlementId ?? runId)}:${String(settlement?.resolutionEventId ?? event?.id ?? settlement?.status ?? "resolved")}`,
                   eventType: BILLABLE_USAGE_EVENT_TYPE.SETTLED_VOLUME,
@@ -20804,10 +20817,9 @@ export function createApi({
                     actorAgentId: agentId,
                     settlementStatus: settlement?.status ?? null
                   }
-                });
-              } catch {
-                // Best-effort billing event emission.
-              }
+                },
+                { context: "agent_run_event.settled_volume" }
+              );
             }
             if (settlement && settlement.status !== AGENT_RUN_SETTLEMENT_STATUS.LOCKED) {
               try {
