@@ -258,7 +258,7 @@
       "strict": true,
       "failOnWarnings": false,
       "hashConcurrency": 8,
-      "invariantIds": ["INV-003", "INV-004", "INV-007", "INV-009", "INV-010", "INV-011", "INV-014", "INV-017"],
+      "invariantIds": ["INV-003", "INV-004", "INV-007", "INV-009", "INV-010", "INV-011", "INV-014", "INV-017", "INV-020", "INV-021"],
       "expectedFile": "expected/closepack_strict_pass.json"
     },
     {

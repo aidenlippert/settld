@@ -652,6 +652,148 @@ test("API e2e: dispute evidence submissions and escalation transitions are persi
   assert.equal(closeDispute.json?.settlement?.disputeResolution?.closedByAgentId, "agt_market_dispute_ctx_operator");
 });
 
+test("API e2e: dispute close rejects verdicts with invalid arbiter signature", async () => {
+  const api = createApi();
+  const arbiterKeypair = createEd25519Keypair();
+  const invalidSigner = createEd25519Keypair();
+
+  await registerAgent(api, "agt_market_dispute_sig_poster");
+  await registerAgent(api, "agt_market_dispute_sig_bidder");
+  const arbiterRegistration = await registerAgent(api, "agt_market_dispute_sig_operator", {
+    publicKeyPem: arbiterKeypair.publicKeyPem
+  });
+  await creditWallet(api, {
+    agentId: "agt_market_dispute_sig_poster",
+    amountCents: 5000,
+    idempotencyKey: "wallet_credit_market_dispute_sig_poster_1"
+  });
+
+  const createTask = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks",
+    headers: { "x-idempotency-key": "market_dispute_sig_task_create_1" },
+    body: {
+      taskId: "task_dispute_sig_1",
+      title: "Dispute signature task",
+      capability: "translate",
+      posterAgentId: "agt_market_dispute_sig_poster",
+      budgetCents: 2200,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+
+  const bid = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_dispute_sig_1/bids",
+    headers: { "x-idempotency-key": "market_dispute_sig_bid_create_1" },
+    body: {
+      bidId: "bid_dispute_sig_1",
+      bidderAgentId: "agt_market_dispute_sig_bidder",
+      amountCents: 1800,
+      currency: "USD",
+      etaSeconds: 900
+    }
+  });
+  assert.equal(bid.statusCode, 201);
+
+  const accept = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_dispute_sig_1/accept",
+    headers: { "x-idempotency-key": "market_dispute_sig_accept_1" },
+    body: {
+      bidId: "bid_dispute_sig_1",
+      acceptedByAgentId: "agt_market_dispute_sig_operator",
+      disputeWindowDays: 2
+    }
+  });
+  assert.equal(accept.statusCode, 200);
+  const runId = accept.json?.run?.runId;
+  assert.ok(typeof runId === "string" && runId.length > 0);
+
+  const complete = await request(api, {
+    method: "POST",
+    path: `/agents/agt_market_dispute_sig_bidder/runs/${encodeURIComponent(runId)}/events`,
+    headers: {
+      "x-proxy-expected-prev-chain-hash": accept.json?.run?.lastChainHash,
+      "x-idempotency-key": "market_dispute_sig_complete_1"
+    },
+    body: {
+      type: "RUN_COMPLETED",
+      payload: {
+        outputRef: `evidence://${runId}/output.json`,
+        metrics: { settlementReleaseRatePct: 100 }
+      }
+    }
+  });
+  assert.equal(complete.statusCode, 201);
+
+  const openDispute = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/dispute/open`,
+    headers: { "x-idempotency-key": "market_dispute_sig_open_1" },
+    body: {
+      disputeId: "dsp_market_sig_1",
+      disputeType: "quality",
+      disputePriority: "high",
+      disputeChannel: "counterparty",
+      escalationLevel: "l1_counterparty",
+      openedByAgentId: "agt_market_dispute_sig_operator",
+      reason: "quality mismatch",
+      evidenceRefs: [`evidence://${runId}/output.json`]
+    }
+  });
+  assert.equal(openDispute.statusCode, 200);
+
+  const verdictIssuedAt = "2026-02-06T00:00:00.000Z";
+  const verdictCore = normalizeForCanonicalJson(
+    {
+      schemaVersion: "DisputeVerdict.v1",
+      verdictId: "vrd_market_sig_1",
+      tenantId: "tenant_default",
+      runId,
+      settlementId: complete.json?.settlement?.settlementId,
+      disputeId: "dsp_market_sig_1",
+      arbiterAgentId: "agt_market_dispute_sig_operator",
+      outcome: "accepted",
+      releaseRatePct: 100,
+      rationale: "manual review complete",
+      issuedAt: verdictIssuedAt
+    },
+    { path: "$" }
+  );
+  const verdictHash = sha256Hex(canonicalJsonStringify(verdictCore));
+
+  const closeDispute = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/dispute/close`,
+    headers: { "x-idempotency-key": "market_dispute_sig_close_1" },
+    body: {
+      disputeId: "dsp_market_sig_1",
+      resolution: {
+        outcome: "accepted",
+        escalationLevel: "l2_arbiter",
+        closedByAgentId: "agt_market_dispute_sig_operator",
+        summary: "manual review complete",
+        evidenceRefs: [`evidence://${runId}/output.json`]
+      },
+      verdict: {
+        verdictId: "vrd_market_sig_1",
+        arbiterAgentId: "agt_market_dispute_sig_operator",
+        outcome: "accepted",
+        releaseRatePct: 100,
+        rationale: "manual review complete",
+        issuedAt: verdictIssuedAt,
+        signerKeyId: arbiterRegistration.keyId,
+        signature: signHashHexEd25519(verdictHash, invalidSigner.privateKeyPem)
+      }
+    }
+  });
+  assert.equal(closeDispute.statusCode, 400);
+  assert.equal(closeDispute.json?.error, "invalid dispute verdict");
+  assert.match(String(closeDispute.json?.details?.message ?? ""), /invalid verdict signature/i);
+});
+
 test("API e2e: marketplace supports all interaction directions", async () => {
   const api = createApi();
   await registerAgent(api, "agt_market_dir_poster");

@@ -16,7 +16,38 @@ permissions:
   id-token: write
 
 jobs:
+  release_gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Assert OpenAPI has no drift
+        run: |
+          set -euo pipefail
+          npm run -s openapi:write
+          git diff --exit-code -- openapi/settld.openapi.json
+
+      - name: Run SDK smoke tests (Node + Python)
+        run: |
+          set -euo pipefail
+          npm run -s sdk:smoke
+          npm run -s sdk:smoke:py
+
   docker_image:
+    needs: [release_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -82,6 +113,7 @@ jobs:
         run: cosign sign --yes ${{ env.IMAGE_REPOSITORY }}:${{ steps.v.outputs.version }}
 
   helm_chart:
+    needs: [release_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -135,6 +167,7 @@ jobs:
           path: /tmp/settld-*.tgz
 
   npm_packages:
+    needs: [release_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -174,8 +207,11 @@ jobs:
           done
 
           (cd packages/api-sdk && npm pack --silent --pack-destination "$OUT")
-          (cd packages/executor-sdk && npm pack --silent --pack-destination "$OUT")
+          (cd packages/artifact-produce && npm pack --silent --pack-destination "$OUT")
           (cd packages/artifact-verify && npm pack --silent --pack-destination "$OUT")
+          (cd packages/executor-sdk && npm pack --silent --pack-destination "$OUT")
+          (cd packages/magic-link-cli && npm pack --silent --pack-destination "$OUT")
+          (cd packages/metering-adapter-sdk && npm pack --silent --pack-destination "$OUT")
 
           (cd "$OUT" && ls -la && sha256sum *.tgz | tee npm-SHA256SUMS)
 
@@ -186,6 +222,7 @@ jobs:
           path: /tmp/npm-artifacts
 
   python_package:
+    needs: [release_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -286,6 +323,7 @@ jobs:
           skip-existing: true
 
   conformance_pack:
+    needs: [release_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -328,6 +366,7 @@ jobs:
           path: /tmp/conformance-artifacts
 
   audit_packet:
+    needs: [release_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -412,8 +451,11 @@ jobs:
           test -f /tmp/release-assets/settld-audit-packet-v1.zip.sha256
           # npm tgz artifacts + checksums
           ls /tmp/release-assets/settld-api-sdk-*.tgz >/dev/null
+          ls /tmp/release-assets/settld-artifact-produce-*.tgz >/dev/null
           ls /tmp/release-assets/settld-executor-sdk-*.tgz >/dev/null
           ls /tmp/release-assets/settld-artifact-verify-*.tgz >/dev/null
+          ls /tmp/release-assets/settld-magic-link-cli-*.tgz >/dev/null
+          ls /tmp/release-assets/settld-metering-adapter-sdk-*.tgz >/dev/null
           test -f /tmp/release-assets/npm-SHA256SUMS
           # python distribution artifacts + checksums
           ls /tmp/release-assets/settld_api_sdk_python-*.whl >/dev/null
