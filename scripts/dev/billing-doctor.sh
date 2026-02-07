@@ -29,8 +29,31 @@ fi
 API_AUTH_HEADER="authorization: Bearer $SETTLD_API_KEY"
 PERIOD="$(date -u +%Y-%m)"
 
+api_post_json() {
+  local path="$1"
+  local payload="$2"
+  local response
+  local body
+  local status
+
+  response="$(curl -sS -X POST "$SETTLD_BASE_URL$path" \
+    -H "$API_AUTH_HEADER" \
+    -H "x-proxy-tenant-id: $SETTLD_TENANT_ID" \
+    -H "content-type: application/json" \
+    -d "$payload" \
+    -w $'\n%{http_code}')"
+  body="$(printf "%s" "$response" | sed '$d')"
+  status="$(printf "%s" "$response" | tail -n1)"
+  if [[ ! "$status" =~ ^2 ]]; then
+    echo "Request failed: POST $path (HTTP $status)"
+    echo "$body" | jq . 2>/dev/null || echo "$body"
+    exit 1
+  fi
+  printf "%s" "$body"
+}
+
 echo "[1/5] Running first verified settlement..."
-RUN_JSON="$(cd "$ROOT_DIR" && npm run -s sdk:first-run)"
+RUN_JSON="$(cd "$ROOT_DIR" && SETTLD_SDK_DISPUTE_WINDOW_DAYS=3 npm run -s sdk:first-run)"
 echo "$RUN_JSON" | jq .
 
 RUN_ID="$(echo "$RUN_JSON" | jq -r '.runId')"
@@ -49,19 +72,11 @@ DISPUTE_ID="dispute_doctor_${SUFFIX}"
 CASE_ID="arb_case_doctor_${SUFFIX}"
 
 echo "[2/5] Opening dispute..."
-DISPUTE_JSON="$(curl -sS -X POST "$SETTLD_BASE_URL/runs/$RUN_ID/dispute/open" \
-  -H "$API_AUTH_HEADER" \
-  -H "x-proxy-tenant-id: $SETTLD_TENANT_ID" \
-  -H "content-type: application/json" \
-  -d "{\"disputeId\":\"$DISPUTE_ID\",\"reason\":\"billing doctor validation\",\"openedByAgentId\":\"$PAYER_AGENT_ID\"}")"
+DISPUTE_JSON="$(api_post_json "/runs/$RUN_ID/dispute/open" "{\"disputeId\":\"$DISPUTE_ID\",\"reason\":\"billing doctor validation\",\"openedByAgentId\":\"$PAYER_AGENT_ID\"}")"
 echo "$DISPUTE_JSON" | jq .
 
 echo "[3/5] Opening arbitration case..."
-ARBITRATION_JSON="$(curl -sS -X POST "$SETTLD_BASE_URL/runs/$RUN_ID/arbitration/open" \
-  -H "$API_AUTH_HEADER" \
-  -H "x-proxy-tenant-id: $SETTLD_TENANT_ID" \
-  -H "content-type: application/json" \
-  -d "{\"caseId\":\"$CASE_ID\",\"disputeId\":\"$DISPUTE_ID\",\"arbiterAgentId\":\"$PAYER_AGENT_ID\"}")"
+ARBITRATION_JSON="$(api_post_json "/runs/$RUN_ID/arbitration/open" "{\"caseId\":\"$CASE_ID\",\"disputeId\":\"$DISPUTE_ID\",\"arbiterAgentId\":\"$PAYER_AGENT_ID\"}")"
 echo "$ARBITRATION_JSON" | jq .
 
 echo "[4/5] Reading billable events..."

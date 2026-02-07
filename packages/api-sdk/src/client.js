@@ -411,7 +411,8 @@ export class SettldClient {
       runBody.settlement = {
         payerAgentId: settlementPayerAgentId,
         amountCents: Number(settlementAmountCents),
-        currency: settlementCurrency
+        currency: settlementCurrency,
+        ...(params?.settlement?.disputeWindowDays !== undefined ? { disputeWindowDays: params.settlement.disputeWindowDays } : {})
       };
     }
 

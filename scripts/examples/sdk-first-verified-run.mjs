@@ -29,6 +29,14 @@ async function main() {
 
   const suffix = uniqueSuffix();
   const runId = `run_sdk_${suffix}`;
+  const disputeWindowDaysRaw = process.env.SETTLD_SDK_DISPUTE_WINDOW_DAYS ?? null;
+  const disputeWindowDays =
+    disputeWindowDaysRaw === null || disputeWindowDaysRaw === undefined || String(disputeWindowDaysRaw).trim() === ""
+      ? null
+      : Number(disputeWindowDaysRaw);
+  if (disputeWindowDays !== null && (!Number.isSafeInteger(disputeWindowDays) || disputeWindowDays < 0)) {
+    throw new TypeError("SETTLD_SDK_DISPUTE_WINDOW_DAYS must be a non-negative integer");
+  }
 
   const result = await client.firstVerifiedRun({
     payeeAgent: {
@@ -46,7 +54,11 @@ async function main() {
       publicKeyPem: generatePublicKeyPem()
     },
     payerCredit: { amountCents: 5000, currency: "USD" },
-    settlement: { amountCents: 1250, currency: "USD" },
+    settlement: {
+      amountCents: 1250,
+      currency: "USD",
+      ...(disputeWindowDays !== null ? { disputeWindowDays } : {})
+    },
     run: {
       runId,
       taskType: "translation",

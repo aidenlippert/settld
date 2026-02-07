@@ -37,6 +37,12 @@ source scripts/dev/env.sh
 npm run dev:billing:doctor
 ```
 
+Optional: make `sdk:first-run` create a disputable settlement window:
+
+```sh
+SETTLD_SDK_DISPUTE_WINDOW_DAYS=3 npm run sdk:first-run
+```
+
 ## 1) Start the API with a local ops token
 
 ```sh
