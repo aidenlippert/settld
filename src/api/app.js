@@ -249,7 +249,15 @@ export function createApi({
   billingStripeWebhookSecret = null,
   billingStripeWebhookToleranceSeconds = null,
   billingStripeCheckoutBaseUrl = null,
-  billingStripePortalBaseUrl = null
+  billingStripePortalBaseUrl = null,
+  billingStripeApiBaseUrl = null,
+  billingStripeSecretKey = null,
+  billingStripePriceIdBuilder = null,
+  billingStripePriceIdGrowth = null,
+  billingStripePriceIdEnterprise = null,
+  billingStripeCheckoutSuccessUrl = null,
+  billingStripeCheckoutCancelUrl = null,
+  billingStripePortalReturnUrl = null
 } = {}) {
   const apiStartedAtMs = Date.now();
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
@@ -558,6 +566,54 @@ export function createApi({
       : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_PORTAL_BASE_URL === "string" && process.env.PROXY_BILLING_STRIPE_PORTAL_BASE_URL.trim() !== ""
         ? process.env.PROXY_BILLING_STRIPE_PORTAL_BASE_URL.trim()
         : "https://billing.stripe.local/portal";
+  const effectiveBillingStripeApiBaseUrl =
+    billingStripeApiBaseUrl !== null && billingStripeApiBaseUrl !== undefined
+      ? String(billingStripeApiBaseUrl).trim().replace(/\/+$/, "")
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_API_BASE_URL === "string" && process.env.PROXY_BILLING_STRIPE_API_BASE_URL.trim() !== ""
+        ? String(process.env.PROXY_BILLING_STRIPE_API_BASE_URL).trim().replace(/\/+$/, "")
+        : "https://api.stripe.com";
+  const effectiveBillingStripeSecretKey =
+    billingStripeSecretKey !== null && billingStripeSecretKey !== undefined
+      ? String(billingStripeSecretKey).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_SECRET_KEY === "string" && process.env.PROXY_BILLING_STRIPE_SECRET_KEY.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_SECRET_KEY.trim()
+        : "";
+  const effectiveBillingStripePriceIdBuilder =
+    billingStripePriceIdBuilder !== null && billingStripePriceIdBuilder !== undefined
+      ? String(billingStripePriceIdBuilder).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_PRICE_ID_BUILDER === "string" && process.env.PROXY_BILLING_STRIPE_PRICE_ID_BUILDER.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_PRICE_ID_BUILDER.trim()
+        : "";
+  const effectiveBillingStripePriceIdGrowth =
+    billingStripePriceIdGrowth !== null && billingStripePriceIdGrowth !== undefined
+      ? String(billingStripePriceIdGrowth).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_PRICE_ID_GROWTH === "string" && process.env.PROXY_BILLING_STRIPE_PRICE_ID_GROWTH.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_PRICE_ID_GROWTH.trim()
+        : "";
+  const effectiveBillingStripePriceIdEnterprise =
+    billingStripePriceIdEnterprise !== null && billingStripePriceIdEnterprise !== undefined
+      ? String(billingStripePriceIdEnterprise).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_PRICE_ID_ENTERPRISE === "string" && process.env.PROXY_BILLING_STRIPE_PRICE_ID_ENTERPRISE.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_PRICE_ID_ENTERPRISE.trim()
+        : "";
+  const effectiveBillingStripeCheckoutSuccessUrl =
+    billingStripeCheckoutSuccessUrl !== null && billingStripeCheckoutSuccessUrl !== undefined
+      ? String(billingStripeCheckoutSuccessUrl).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_CHECKOUT_SUCCESS_URL === "string" && process.env.PROXY_BILLING_STRIPE_CHECKOUT_SUCCESS_URL.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_CHECKOUT_SUCCESS_URL.trim()
+        : "";
+  const effectiveBillingStripeCheckoutCancelUrl =
+    billingStripeCheckoutCancelUrl !== null && billingStripeCheckoutCancelUrl !== undefined
+      ? String(billingStripeCheckoutCancelUrl).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_CHECKOUT_CANCEL_URL === "string" && process.env.PROXY_BILLING_STRIPE_CHECKOUT_CANCEL_URL.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_CHECKOUT_CANCEL_URL.trim()
+        : "";
+  const effectiveBillingStripePortalReturnUrl =
+    billingStripePortalReturnUrl !== null && billingStripePortalReturnUrl !== undefined
+      ? String(billingStripePortalReturnUrl).trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_PORTAL_RETURN_URL === "string" && process.env.PROXY_BILLING_STRIPE_PORTAL_RETURN_URL.trim() !== ""
+        ? process.env.PROXY_BILLING_STRIPE_PORTAL_RETURN_URL.trim()
+        : "";
 
   function parseOpsTokens(raw) {
     if (raw === null || raw === undefined) return new Map();
@@ -6222,6 +6278,49 @@ export function createApi({
       u.searchParams.set(String(key), String(rawValue));
     }
     return u.toString();
+  }
+
+  function resolveStripePriceIdForPlanId(planId) {
+    const normalizedPlan = normalizeBillingPlanId(planId, { allowNull: false, defaultPlan: BILLING_PLAN_ID.FREE });
+    if (normalizedPlan === BILLING_PLAN_ID.BUILDER) return effectiveBillingStripePriceIdBuilder || null;
+    if (normalizedPlan === BILLING_PLAN_ID.GROWTH) return effectiveBillingStripePriceIdGrowth || null;
+    if (normalizedPlan === BILLING_PLAN_ID.ENTERPRISE) return effectiveBillingStripePriceIdEnterprise || null;
+    return null;
+  }
+
+  function normalizeStripeApiBaseUrl(value) {
+    const normalized = normalizeOptionalAbsoluteUrl(value, { fieldName: "billingStripeApiBaseUrl" });
+    if (!normalized) throw new TypeError("billingStripeApiBaseUrl must be configured");
+    return normalized.replace(/\/+$/, "");
+  }
+
+  async function stripeApiPostJson({ endpoint, formData }) {
+    if (!effectiveBillingStripeSecretKey) throw new Error("stripe secret key is not configured");
+    const fetchImpl = typeof fetch === "function" ? fetch : null;
+    if (!fetchImpl) throw new Error("global fetch is not available");
+    const target = `${normalizeStripeApiBaseUrl(effectiveBillingStripeApiBaseUrl)}${String(endpoint)}`;
+    const body = new URLSearchParams(formData ?? {});
+    const resp = await fetchImpl(target, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${effectiveBillingStripeSecretKey}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body
+    });
+    const text = await resp.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    if (!resp.ok) {
+      const msg = (json && typeof json.error?.message === "string" && json.error.message) || text || `stripe API request failed (${resp.status})`;
+      throw new Error(msg);
+    }
+    if (!json || typeof json !== "object" || Array.isArray(json)) throw new Error("stripe API returned invalid JSON");
+    return json;
   }
 
   function computeBillableUsageEventDigestRows(events) {
@@ -13272,7 +13371,10 @@ export function createApi({
             }
 
             const existingBilling = await getTenantBillingConfig(tenantId);
-            const existingSubscription = normalizeBillingSubscriptionRecord(existingBilling.subscription ?? null, { allowNull: true, strictPlan: false });
+            const existingSubscription = normalizeBillingSubscriptionRecord(existingBilling.subscription ?? null, {
+              allowNull: true,
+              strictPlan: false
+            });
             let selectedPlan = null;
             let successUrl = null;
             let cancelUrl = null;
@@ -13281,8 +13383,12 @@ export function createApi({
                 body?.plan ?? existingSubscription?.plan ?? existingBilling?.plan ?? BILLING_PLAN_ID.FREE,
                 { allowNull: false, defaultPlan: BILLING_PLAN_ID.FREE }
               );
-              successUrl = normalizeOptionalAbsoluteUrl(body?.successUrl ?? null, { fieldName: "successUrl" });
-              cancelUrl = normalizeOptionalAbsoluteUrl(body?.cancelUrl ?? null, { fieldName: "cancelUrl" });
+              successUrl = normalizeOptionalAbsoluteUrl(body?.successUrl ?? effectiveBillingStripeCheckoutSuccessUrl ?? null, {
+                fieldName: "successUrl"
+              });
+              cancelUrl = normalizeOptionalAbsoluteUrl(body?.cancelUrl ?? effectiveBillingStripeCheckoutCancelUrl ?? null, {
+                fieldName: "cancelUrl"
+              });
             } catch (err) {
               return sendError(res, 400, "invalid stripe checkout payload", { message: err?.message }, { code: "SCHEMA_INVALID" });
             }
@@ -13293,27 +13399,108 @@ export function createApi({
                 : existingSubscription?.customerId ?? null;
             const sessionCreatedAt = nowIso();
             const sessionExpiresAt = new Date(Date.parse(sessionCreatedAt) + 30 * 60 * 1000).toISOString();
-            const sessionId = `cs_test_${createId("stripe_checkout").replace(/^stripe_checkout_/, "")}`;
+            const liveStripeEnabled = Boolean(effectiveBillingStripeSecretKey);
+            const livePriceId = resolveStripePriceIdForPlanId(selectedPlan);
+
+            let sessionId = `cs_test_${createId("stripe_checkout").replace(/^stripe_checkout_/, "")}`;
+            let sessionUrl = buildStripeBillingHostedSessionUrl({
+              baseUrl: effectiveBillingStripeCheckoutBaseUrl,
+              tenantId,
+              sessionId,
+              context: {
+                mode: "stub",
+                plan: selectedPlan,
+                customer_id: customerId ?? null,
+                success_url: successUrl ?? null,
+                cancel_url: cancelUrl ?? null
+              }
+            });
+            let sessionMode = "stub";
+            let subscriptionId = existingSubscription?.subscriptionId ?? null;
+
+            if (liveStripeEnabled) {
+              if (selectedPlan === BILLING_PLAN_ID.FREE) {
+                return sendError(res, 400, "stripe checkout only supports paid plans");
+              }
+              if (!livePriceId) {
+                return sendError(
+                  res,
+                  409,
+                  "stripe price id is not configured for selected plan",
+                  { plan: selectedPlan },
+                  { code: "BILLING_PROVIDER_NOT_CONFIGURED" }
+                );
+              }
+              if (!successUrl || !cancelUrl) {
+                return sendError(
+                  res,
+                  400,
+                  "successUrl and cancelUrl are required when stripe live checkout is enabled",
+                  null,
+                  { code: "SCHEMA_INVALID" }
+                );
+              }
+              let checkoutResponse;
+              try {
+                checkoutResponse = await stripeApiPostJson({
+                  endpoint: "/v1/checkout/sessions",
+                  formData: {
+                    mode: "subscription",
+                    success_url: successUrl,
+                    cancel_url: cancelUrl,
+                    client_reference_id: tenantId,
+                    "line_items[0][price]": livePriceId,
+                    "line_items[0][quantity]": "1",
+                    "metadata[tenantId]": tenantId,
+                    "metadata[settldPlan]": selectedPlan,
+                    ...(customerId ? { customer: customerId } : {})
+                  }
+                });
+              } catch (err) {
+                return sendError(
+                  res,
+                  502,
+                  "stripe checkout session creation failed",
+                  { message: err?.message ?? null },
+                  { code: "BILLING_PROVIDER_UPSTREAM_ERROR" }
+                );
+              }
+              const returnedSessionId =
+                typeof checkoutResponse?.id === "string" && checkoutResponse.id.trim() !== ""
+                  ? checkoutResponse.id.trim()
+                  : null;
+              const returnedSessionUrl =
+                typeof checkoutResponse?.url === "string" && checkoutResponse.url.trim() !== ""
+                  ? checkoutResponse.url.trim()
+                  : null;
+              if (!returnedSessionId || !returnedSessionUrl) {
+                return sendError(
+                  res,
+                  502,
+                  "stripe checkout response missing id or url",
+                  null,
+                  { code: "BILLING_PROVIDER_INVALID_RESPONSE" }
+                );
+              }
+              sessionId = returnedSessionId;
+              sessionUrl = returnedSessionUrl;
+              sessionMode = "live";
+              subscriptionId =
+                typeof checkoutResponse?.subscription === "string" && checkoutResponse.subscription.trim() !== ""
+                  ? checkoutResponse.subscription.trim()
+                  : subscriptionId;
+            }
+
             const checkoutSession = {
               schemaVersion: BILLING_STRIPE_CHECKOUT_SESSION_SCHEMA,
               provider: "stripe",
-              mode: "stub",
+              mode: sessionMode,
               sessionId,
-              sessionUrl: buildStripeBillingHostedSessionUrl({
-                baseUrl: effectiveBillingStripeCheckoutBaseUrl,
-                tenantId,
-                sessionId,
-                context: {
-                  mode: "stub",
-                  plan: selectedPlan,
-                  customer_id: customerId ?? null,
-                  success_url: successUrl ?? null,
-                  cancel_url: cancelUrl ?? null
-                }
-              }),
+              sessionUrl,
               plan: selectedPlan,
+              priceId: livePriceId ?? null,
               customerId,
-              subscriptionId: existingSubscription?.subscriptionId ?? null,
+              subscriptionId,
               createdAt: sessionCreatedAt,
               expiresAt: sessionExpiresAt
             };
@@ -13381,29 +13568,86 @@ export function createApi({
             if (!customerId) return sendError(res, 400, "customerId is required");
             let returnUrl = null;
             try {
-              returnUrl = normalizeOptionalAbsoluteUrl(body?.returnUrl ?? null, { fieldName: "returnUrl" });
+              returnUrl = normalizeOptionalAbsoluteUrl(body?.returnUrl ?? effectiveBillingStripePortalReturnUrl ?? null, {
+                fieldName: "returnUrl"
+              });
             } catch (err) {
               return sendError(res, 400, "invalid stripe portal payload", { message: err?.message }, { code: "SCHEMA_INVALID" });
             }
 
             const sessionCreatedAt = nowIso();
             const sessionExpiresAt = new Date(Date.parse(sessionCreatedAt) + 30 * 60 * 1000).toISOString();
-            const sessionId = `bps_test_${createId("stripe_portal").replace(/^stripe_portal_/, "")}`;
+            const liveStripeEnabled = Boolean(effectiveBillingStripeSecretKey);
+
+            let sessionId = `bps_test_${createId("stripe_portal").replace(/^stripe_portal_/, "")}`;
+            let sessionUrl = buildStripeBillingHostedSessionUrl({
+              baseUrl: effectiveBillingStripePortalBaseUrl,
+              tenantId,
+              sessionId,
+              context: {
+                mode: "stub",
+                customer_id: customerId,
+                return_url: returnUrl ?? null
+              }
+            });
+            let sessionMode = "stub";
+
+            if (liveStripeEnabled) {
+              if (!returnUrl) {
+                return sendError(
+                  res,
+                  400,
+                  "returnUrl is required when stripe live portal is enabled",
+                  null,
+                  { code: "SCHEMA_INVALID" }
+                );
+              }
+              let portalResponse;
+              try {
+                portalResponse = await stripeApiPostJson({
+                  endpoint: "/v1/billing_portal/sessions",
+                  formData: {
+                    customer: customerId,
+                    return_url: returnUrl
+                  }
+                });
+              } catch (err) {
+                return sendError(
+                  res,
+                  502,
+                  "stripe portal session creation failed",
+                  { message: err?.message ?? null },
+                  { code: "BILLING_PROVIDER_UPSTREAM_ERROR" }
+                );
+              }
+              const returnedSessionId =
+                typeof portalResponse?.id === "string" && portalResponse.id.trim() !== ""
+                  ? portalResponse.id.trim()
+                  : null;
+              const returnedSessionUrl =
+                typeof portalResponse?.url === "string" && portalResponse.url.trim() !== ""
+                  ? portalResponse.url.trim()
+                  : null;
+              if (!returnedSessionId || !returnedSessionUrl) {
+                return sendError(
+                  res,
+                  502,
+                  "stripe portal response missing id or url",
+                  null,
+                  { code: "BILLING_PROVIDER_INVALID_RESPONSE" }
+                );
+              }
+              sessionId = returnedSessionId;
+              sessionUrl = returnedSessionUrl;
+              sessionMode = "live";
+            }
+
             const portalSession = {
               schemaVersion: BILLING_STRIPE_PORTAL_SESSION_SCHEMA,
               provider: "stripe",
-              mode: "stub",
+              mode: sessionMode,
               sessionId,
-              sessionUrl: buildStripeBillingHostedSessionUrl({
-                baseUrl: effectiveBillingStripePortalBaseUrl,
-                tenantId,
-                sessionId,
-                context: {
-                  mode: "stub",
-                  customer_id: customerId,
-                  return_url: returnUrl ?? null
-                }
-              }),
+              sessionUrl,
               customerId,
               createdAt: sessionCreatedAt,
               expiresAt: sessionExpiresAt
