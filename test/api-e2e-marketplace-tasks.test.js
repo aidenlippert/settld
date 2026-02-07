@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createApi } from "../src/api/app.js";
+import { authKeyId, authKeySecret, hashAuthKeySecret } from "../src/core/auth.js";
 import { createEd25519Keypair, keyIdFromPublicKeyPem, sha256Hex, signHashHexEd25519 } from "../src/core/crypto.js";
 import { canonicalJsonStringify, normalizeForCanonicalJson } from "../src/core/canonical-json.js";
 import {
@@ -42,6 +43,24 @@ async function creditWallet(api, { agentId, amountCents, idempotencyKey }) {
   });
   assert.equal(response.statusCode, 201);
   return response.json?.wallet;
+}
+
+async function createAuthHeaders(api, { scopes }) {
+  const keyId = authKeyId();
+  const secret = authKeySecret();
+  const secretHash = hashAuthKeySecret(secret);
+  const nowAt = typeof api?.store?.nowIso === "function" ? api.store.nowIso() : new Date().toISOString();
+  await api.store.putAuthKey({
+    tenantId: "tenant_default",
+    authKey: {
+      keyId,
+      secretHash,
+      scopes,
+      status: "active",
+      createdAt: nowAt
+    }
+  });
+  return { authorization: `Bearer ${keyId}.${secret}` };
 }
 
 function buildDelegationLink({
@@ -2834,6 +2853,246 @@ test("API e2e: signed marketplace agreement acceptance supports delegation chain
     agreementRead.json?.acceptanceSignatureVerification?.actingOnBehalfOf?.principalAgentId,
     "agt_market_sig_del_operator"
   );
+});
+
+test("API e2e: ops delegation traces and emergency revoke disable delegated acceptance", async () => {
+  const api = createApi();
+  await registerAgent(api, "agt_market_ops_del_poster");
+  await registerAgent(api, "agt_market_ops_del_bidder");
+  const operatorKeypair = createEd25519Keypair();
+  const delegateKeypair = createEd25519Keypair();
+  const operatorRegistration = await registerAgent(api, "agt_market_ops_del_operator", {
+    publicKeyPem: operatorKeypair.publicKeyPem
+  });
+  const delegateRegistration = await registerAgent(api, "agt_market_ops_del_delegate", {
+    publicKeyPem: delegateKeypair.publicKeyPem
+  });
+  await creditWallet(api, {
+    agentId: "agt_market_ops_del_poster",
+    amountCents: 6000,
+    idempotencyKey: "wallet_credit_market_ops_del_poster_1"
+  });
+
+  const opsHeaders = await createAuthHeaders(api, {
+    scopes: ["ops_read", "ops_write", "finance_write", "audit_read"]
+  });
+
+  const createTask = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks",
+    headers: { "x-idempotency-key": "market_ops_del_task_create_1" },
+    body: {
+      taskId: "task_ops_del_1",
+      title: "Delegation trace task",
+      capability: "translate",
+      posterAgentId: "agt_market_ops_del_poster",
+      budgetCents: 2200,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+
+  const bid = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_ops_del_1/bids",
+    headers: { "x-idempotency-key": "market_ops_del_bid_create_1" },
+    body: {
+      bidId: "bid_ops_del_1",
+      bidderAgentId: "agt_market_ops_del_bidder",
+      amountCents: 1400,
+      currency: "USD",
+      etaSeconds: 600
+    }
+  });
+  assert.equal(bid.statusCode, 201);
+
+  const proposals = normalizeForCanonicalJson(bid.json?.bid?.negotiation?.proposals ?? [], { path: "$" });
+  const latestProposal = proposals[proposals.length - 1];
+  const runId = "run_market_ops_del_1";
+  const signedAt = "2026-03-03T12:00:00.000Z";
+  const delegationLink = buildDelegationLink({
+    tenantId: createTask.json?.task?.tenantId,
+    delegationId: "dlg_ops_del_1",
+    principalAgentId: "agt_market_ops_del_operator",
+    delegateAgentId: "agt_market_ops_del_delegate",
+    scope: "marketplace.agreement.accept",
+    issuedAt: "2026-03-01T00:00:00.000Z",
+    expiresAt: "2026-03-10T00:00:00.000Z",
+    signerKeyId: operatorRegistration.keyId,
+    signerPrivateKeyPem: operatorKeypair.privateKeyPem
+  });
+  const actingOnBehalfOf = buildActingOnBehalfOf({
+    principalAgentId: "agt_market_ops_del_operator",
+    delegateAgentId: "agt_market_ops_del_delegate",
+    delegationChain: [delegationLink]
+  });
+  const acceptanceCore = normalizeForCanonicalJson(
+    {
+      schemaVersion: "MarketplaceAgreementAcceptanceSignature.v1",
+      agreementId: "agr_task_ops_del_1_bid_ops_del_1",
+      tenantId: createTask.json?.task?.tenantId,
+      taskId: "task_ops_del_1",
+      runId,
+      bidId: "bid_ops_del_1",
+      acceptedByAgentId: "agt_market_ops_del_operator",
+      acceptedProposalId: latestProposal?.proposalId ?? null,
+      acceptedRevision: Number.isSafeInteger(Number(latestProposal?.revision)) ? Number(latestProposal.revision) : null,
+      acceptedProposalHash: latestProposal?.proposalHash ?? null,
+      offerChainHash: sha256Hex(canonicalJsonStringify(proposals)),
+      proposalCount: proposals.length,
+      actingOnBehalfOfPrincipalAgentId: "agt_market_ops_del_operator",
+      actingOnBehalfOfDelegateAgentId: "agt_market_ops_del_delegate",
+      actingOnBehalfOfChainHash: actingOnBehalfOf.chainHash
+    },
+    { path: "$" }
+  );
+  const acceptanceHash = sha256Hex(canonicalJsonStringify(acceptanceCore));
+  const signature = signHashHexEd25519(acceptanceHash, delegateKeypair.privateKeyPem);
+
+  const accept = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_ops_del_1/accept",
+    headers: { "x-idempotency-key": "market_ops_del_accept_valid_1" },
+    body: {
+      bidId: "bid_ops_del_1",
+      runId,
+      acceptedByAgentId: "agt_market_ops_del_operator",
+      acceptanceSignature: {
+        signerAgentId: "agt_market_ops_del_delegate",
+        signerKeyId: delegateRegistration.keyId,
+        signedAt,
+        actingOnBehalfOf,
+        signature
+      }
+    }
+  });
+  assert.equal(accept.statusCode, 200);
+
+  const tracesByRun = await request(api, {
+    method: "GET",
+    path: `/ops/delegation/chains?runId=${encodeURIComponent(runId)}`,
+    headers: opsHeaders
+  });
+  assert.equal(tracesByRun.statusCode, 200);
+  assert.equal(tracesByRun.json?.total, 1);
+  assert.equal(tracesByRun.json?.traces?.[0]?.contextType, "agreement_acceptance");
+  assert.equal(tracesByRun.json?.traces?.[0]?.delegationChain?.[0]?.delegationId, "dlg_ops_del_1");
+
+  const chainHash = tracesByRun.json?.traces?.[0]?.chainHash;
+  assert.equal(typeof chainHash, "string");
+  assert.ok(chainHash.length > 0);
+
+  const tracesByChain = await request(api, {
+    method: "GET",
+    path: `/ops/delegation/chains/${encodeURIComponent(chainHash)}`,
+    headers: opsHeaders
+  });
+  assert.equal(tracesByChain.statusCode, 200);
+  assert.equal(tracesByChain.json?.total, 1);
+
+  const revoke = await request(api, {
+    method: "POST",
+    path: "/ops/delegation/emergency-revoke",
+    headers: opsHeaders,
+    body: {
+      delegationId: "dlg_ops_del_1",
+      reason: "delegate compromised"
+    }
+  });
+  assert.equal(revoke.statusCode, 200);
+  assert.equal(revoke.json?.ok, true);
+  assert.equal(revoke.json?.affectedTraceCount, 1);
+  assert.equal(revoke.json?.revoked?.agents?.some((row) => row?.agentId === "agt_market_ops_del_delegate"), true);
+
+  const delegateIdentity = await request(api, {
+    method: "GET",
+    path: "/agents/agt_market_ops_del_delegate"
+  });
+  assert.equal(delegateIdentity.statusCode, 200);
+  assert.equal(delegateIdentity.json?.agentIdentity?.status, "revoked");
+
+  const createTask2 = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks",
+    headers: { "x-idempotency-key": "market_ops_del_task_create_2" },
+    body: {
+      taskId: "task_ops_del_2",
+      title: "Delegation blocked after revoke",
+      capability: "translate",
+      posterAgentId: "agt_market_ops_del_poster",
+      budgetCents: 2100,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask2.statusCode, 201);
+
+  const bid2 = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_ops_del_2/bids",
+    headers: { "x-idempotency-key": "market_ops_del_bid_create_2" },
+    body: {
+      bidId: "bid_ops_del_2",
+      bidderAgentId: "agt_market_ops_del_bidder",
+      amountCents: 1300,
+      currency: "USD",
+      etaSeconds: 600
+    }
+  });
+  assert.equal(bid2.statusCode, 201);
+
+  const proposals2 = normalizeForCanonicalJson(bid2.json?.bid?.negotiation?.proposals ?? [], { path: "$" });
+  const latestProposal2 = proposals2[proposals2.length - 1];
+  const runId2 = "run_market_ops_del_2";
+  const acceptanceCore2 = normalizeForCanonicalJson(
+    {
+      schemaVersion: "MarketplaceAgreementAcceptanceSignature.v1",
+      agreementId: "agr_task_ops_del_2_bid_ops_del_2",
+      tenantId: createTask2.json?.task?.tenantId,
+      taskId: "task_ops_del_2",
+      runId: runId2,
+      bidId: "bid_ops_del_2",
+      acceptedByAgentId: "agt_market_ops_del_operator",
+      acceptedProposalId: latestProposal2?.proposalId ?? null,
+      acceptedRevision: Number.isSafeInteger(Number(latestProposal2?.revision)) ? Number(latestProposal2.revision) : null,
+      acceptedProposalHash: latestProposal2?.proposalHash ?? null,
+      offerChainHash: sha256Hex(canonicalJsonStringify(proposals2)),
+      proposalCount: proposals2.length,
+      actingOnBehalfOfPrincipalAgentId: "agt_market_ops_del_operator",
+      actingOnBehalfOfDelegateAgentId: "agt_market_ops_del_delegate",
+      actingOnBehalfOfChainHash: actingOnBehalfOf.chainHash
+    },
+    { path: "$" }
+  );
+  const acceptanceHash2 = sha256Hex(canonicalJsonStringify(acceptanceCore2));
+  const signature2 = signHashHexEd25519(acceptanceHash2, delegateKeypair.privateKeyPem);
+
+  const blocked = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_ops_del_2/accept",
+    headers: { "x-idempotency-key": "market_ops_del_accept_blocked_2" },
+    body: {
+      bidId: "bid_ops_del_2",
+      runId: runId2,
+      acceptedByAgentId: "agt_market_ops_del_operator",
+      acceptanceSignature: {
+        signerAgentId: "agt_market_ops_del_delegate",
+        signerKeyId: delegateRegistration.keyId,
+        signedAt,
+        actingOnBehalfOf,
+        signature: signature2
+      }
+    }
+  });
+  assert.equal(blocked.statusCode, 400);
+  assert.equal(blocked.json?.error, "invalid acceptance signature");
+
+  const audit = await request(api, {
+    method: "GET",
+    path: "/ops/audit?limit=20",
+    headers: opsHeaders
+  });
+  assert.equal(audit.statusCode, 200);
+  assert.equal(audit.json?.audit?.some((row) => row?.action === "DELEGATION_EMERGENCY_REVOKE"), true);
 });
 
 test("API e2e: counterOfferPolicy enforces proposer role, max revisions, and timeout expiry", async () => {

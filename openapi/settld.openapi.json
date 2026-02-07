@@ -3346,6 +3346,362 @@
           }
         }
       },
+      "DelegationTraceV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chainHash",
+          "tenantId",
+          "runId",
+          "taskId",
+          "agreementId",
+          "contextType",
+          "delegationChain"
+        ],
+        "properties": {
+          "chainHash": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "agreementId": {
+            "type": "string"
+          },
+          "contextType": {
+            "type": "string",
+            "enum": [
+              "agreement_acceptance",
+              "change_order_acceptance",
+              "cancellation_acceptance"
+            ]
+          },
+          "contextId": {
+            "type": "string",
+            "nullable": true
+          },
+          "signedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "signerAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "signerKeyId": {
+            "type": "string",
+            "nullable": true
+          },
+          "acceptedByAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "principalAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "delegateAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "delegationChain": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "delegationId",
+                "tenantId",
+                "principalAgentId",
+                "delegateAgentId",
+                "issuedAt",
+                "signerKeyId",
+                "delegationHash",
+                "signature"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "type": "string",
+                  "enum": [
+                    "AgentDelegationLink.v1"
+                  ]
+                },
+                "delegationId": {
+                  "type": "string"
+                },
+                "tenantId": {
+                  "type": "string"
+                },
+                "principalAgentId": {
+                  "type": "string"
+                },
+                "delegateAgentId": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "issuedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "signerKeyId": {
+                  "type": "string"
+                },
+                "delegationHash": {
+                  "type": "string"
+                },
+                "signature": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "DelegationTraceListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "traces",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "traces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "chainHash",
+                "tenantId",
+                "runId",
+                "taskId",
+                "agreementId",
+                "contextType",
+                "delegationChain"
+              ],
+              "properties": {
+                "chainHash": {
+                  "type": "string"
+                },
+                "tenantId": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string"
+                },
+                "agreementId": {
+                  "type": "string"
+                },
+                "contextType": {
+                  "type": "string",
+                  "enum": [
+                    "agreement_acceptance",
+                    "change_order_acceptance",
+                    "cancellation_acceptance"
+                  ]
+                },
+                "contextId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "signedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "signerAgentId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "signerKeyId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "acceptedByAgentId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "principalAgentId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "delegateAgentId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "delegationChain": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "delegationId",
+                      "tenantId",
+                      "principalAgentId",
+                      "delegateAgentId",
+                      "issuedAt",
+                      "signerKeyId",
+                      "delegationHash",
+                      "signature"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "string",
+                        "enum": [
+                          "AgentDelegationLink.v1"
+                        ]
+                      },
+                      "delegationId": {
+                        "type": "string"
+                      },
+                      "tenantId": {
+                        "type": "string"
+                      },
+                      "principalAgentId": {
+                        "type": "string"
+                      },
+                      "delegateAgentId": {
+                        "type": "string"
+                      },
+                      "scope": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "issuedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                      },
+                      "signerKeyId": {
+                        "type": "string"
+                      },
+                      "delegationHash": {
+                        "type": "string"
+                      },
+                      "signature": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "DelegationEmergencyRevokeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "chainHash": {
+            "type": "string"
+          },
+          "delegationId": {
+            "type": "string"
+          },
+          "signerKeyId": {
+            "type": "string"
+          },
+          "signerAgentId": {
+            "type": "string"
+          },
+          "authKeyId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "includeDelegateAgent": {
+            "type": "boolean",
+            "default": true
+          },
+          "includePrincipalAgent": {
+            "type": "boolean",
+            "default": false
+          },
+          "includeSignerKey": {
+            "type": "boolean",
+            "default": true
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "DelegationEmergencyRevokeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "affectedTraceCount",
+          "revoked",
+          "missing"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "selectors": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "affectedTraceCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revoked": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "missing": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
       "MarketplaceAgreementAcceptanceSignatureV1": {
         "type": "object",
         "additionalProperties": false,
@@ -37550,6 +37906,745 @@
                     "limit": {
                       "type": "integer"
                     }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/delegation/chains": {
+      "get": {
+        "summary": "List delegation chains used in marketplace acceptance flows",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chainHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delegationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "signerKeyId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "signerAgentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "ops_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "traces",
+                    "total",
+                    "limit",
+                    "offset"
+                  ],
+                  "properties": {
+                    "traces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "chainHash",
+                          "tenantId",
+                          "runId",
+                          "taskId",
+                          "agreementId",
+                          "contextType",
+                          "delegationChain"
+                        ],
+                        "properties": {
+                          "chainHash": {
+                            "type": "string"
+                          },
+                          "tenantId": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": "string"
+                          },
+                          "taskId": {
+                            "type": "string"
+                          },
+                          "agreementId": {
+                            "type": "string"
+                          },
+                          "contextType": {
+                            "type": "string",
+                            "enum": [
+                              "agreement_acceptance",
+                              "change_order_acceptance",
+                              "cancellation_acceptance"
+                            ]
+                          },
+                          "contextId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "signedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "signerAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "signerKeyId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "acceptedByAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "principalAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "delegateAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "delegationChain": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "delegationId",
+                                "tenantId",
+                                "principalAgentId",
+                                "delegateAgentId",
+                                "issuedAt",
+                                "signerKeyId",
+                                "delegationHash",
+                                "signature"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "AgentDelegationLink.v1"
+                                  ]
+                                },
+                                "delegationId": {
+                                  "type": "string"
+                                },
+                                "tenantId": {
+                                  "type": "string"
+                                },
+                                "principalAgentId": {
+                                  "type": "string"
+                                },
+                                "delegateAgentId": {
+                                  "type": "string"
+                                },
+                                "scope": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "issuedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "expiresAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "nullable": true
+                                },
+                                "signerKeyId": {
+                                  "type": "string"
+                                },
+                                "delegationHash": {
+                                  "type": "string"
+                                },
+                                "signature": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/delegation/chains/{chainHash}": {
+      "get": {
+        "summary": "Get delegation chain traces by chain hash",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "chainHash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "ops_read"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "chainHash",
+                    "traces",
+                    "total"
+                  ],
+                  "properties": {
+                    "chainHash": {
+                      "type": "string"
+                    },
+                    "traces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "chainHash",
+                          "tenantId",
+                          "runId",
+                          "taskId",
+                          "agreementId",
+                          "contextType",
+                          "delegationChain"
+                        ],
+                        "properties": {
+                          "chainHash": {
+                            "type": "string"
+                          },
+                          "tenantId": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": "string"
+                          },
+                          "taskId": {
+                            "type": "string"
+                          },
+                          "agreementId": {
+                            "type": "string"
+                          },
+                          "contextType": {
+                            "type": "string",
+                            "enum": [
+                              "agreement_acceptance",
+                              "change_order_acceptance",
+                              "cancellation_acceptance"
+                            ]
+                          },
+                          "contextId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "signedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "signerAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "signerKeyId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "acceptedByAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "principalAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "delegateAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "delegationChain": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "delegationId",
+                                "tenantId",
+                                "principalAgentId",
+                                "delegateAgentId",
+                                "issuedAt",
+                                "signerKeyId",
+                                "delegationHash",
+                                "signature"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "AgentDelegationLink.v1"
+                                  ]
+                                },
+                                "delegationId": {
+                                  "type": "string"
+                                },
+                                "tenantId": {
+                                  "type": "string"
+                                },
+                                "principalAgentId": {
+                                  "type": "string"
+                                },
+                                "delegateAgentId": {
+                                  "type": "string"
+                                },
+                                "scope": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "issuedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "expiresAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "nullable": true
+                                },
+                                "signerKeyId": {
+                                  "type": "string"
+                                },
+                                "delegationHash": {
+                                  "type": "string"
+                                },
+                                "signature": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/delegation/emergency-revoke": {
+      "post": {
+        "summary": "Emergency revoke delegated marketplace authority",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "ops_write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "runId": {
+                    "type": "string"
+                  },
+                  "chainHash": {
+                    "type": "string"
+                  },
+                  "delegationId": {
+                    "type": "string"
+                  },
+                  "signerKeyId": {
+                    "type": "string"
+                  },
+                  "signerAgentId": {
+                    "type": "string"
+                  },
+                  "authKeyId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "includeDelegateAgent": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "includePrincipalAgent": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "includeSignerKey": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok",
+                    "affectedTraceCount",
+                    "revoked",
+                    "missing"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "selectors": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "affectedTraceCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "revoked": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "missing": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
                   }
                 }
               }

@@ -852,6 +852,71 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
     }
   };
 
+  const DelegationTraceV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: ["chainHash", "tenantId", "runId", "taskId", "agreementId", "contextType", "delegationChain"],
+    properties: {
+      chainHash: { type: "string" },
+      tenantId: { type: "string" },
+      runId: { type: "string" },
+      taskId: { type: "string" },
+      agreementId: { type: "string" },
+      contextType: { type: "string", enum: ["agreement_acceptance", "change_order_acceptance", "cancellation_acceptance"] },
+      contextId: { type: "string", nullable: true },
+      signedAt: { type: "string", format: "date-time", nullable: true },
+      signerAgentId: { type: "string", nullable: true },
+      signerKeyId: { type: "string", nullable: true },
+      acceptedByAgentId: { type: "string", nullable: true },
+      principalAgentId: { type: "string", nullable: true },
+      delegateAgentId: { type: "string", nullable: true },
+      delegationChain: { type: "array", minItems: 1, items: AgentDelegationLinkV1 }
+    }
+  };
+
+  const DelegationTraceListResponse = {
+    type: "object",
+    additionalProperties: false,
+    required: ["traces", "total", "limit", "offset"],
+    properties: {
+      traces: { type: "array", items: DelegationTraceV1 },
+      total: { type: "integer", minimum: 0 },
+      limit: { type: "integer", minimum: 1 },
+      offset: { type: "integer", minimum: 0 }
+    }
+  };
+
+  const DelegationEmergencyRevokeRequest = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      runId: { type: "string" },
+      chainHash: { type: "string" },
+      delegationId: { type: "string" },
+      signerKeyId: { type: "string" },
+      signerAgentId: { type: "string" },
+      authKeyId: { type: "string" },
+      agentId: { type: "string" },
+      includeDelegateAgent: { type: "boolean", default: true },
+      includePrincipalAgent: { type: "boolean", default: false },
+      includeSignerKey: { type: "boolean", default: true },
+      reason: { type: "string" }
+    }
+  };
+
+  const DelegationEmergencyRevokeResponse = {
+    type: "object",
+    additionalProperties: false,
+    required: ["ok", "affectedTraceCount", "revoked", "missing"],
+    properties: {
+      ok: { type: "boolean" },
+      selectors: { type: "object", additionalProperties: true },
+      affectedTraceCount: { type: "integer", minimum: 0 },
+      revoked: { type: "object", additionalProperties: true },
+      missing: { type: "object", additionalProperties: true }
+    }
+  };
+
   const MarketplaceAgreementAcceptanceSignatureV1 = {
     type: "object",
     additionalProperties: false,
@@ -2171,6 +2236,10 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
         MarketplaceAgreementAcceptanceV1,
         AgentDelegationLinkV1,
         AgentActingOnBehalfOfV1,
+        DelegationTraceV1,
+        DelegationTraceListResponse,
+        DelegationEmergencyRevokeRequest,
+        DelegationEmergencyRevokeResponse,
         MarketplaceAgreementAcceptanceSignatureV1,
         MarketplaceAgreementChangeOrderAcceptanceSignatureV1,
         MarketplaceAgreementCancellationAcceptanceSignatureV1,
@@ -3894,6 +3963,78 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           "x-settld-scopes": ["ops_read", "audit_read"],
           responses: {
             200: { description: "OK", content: { "application/json": { schema: OpsJobsListResponse } } }
+          }
+        }
+      },
+      "/ops/delegation/chains": {
+        get: {
+          summary: "List delegation chains used in marketplace acceptance flows",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "runId", in: "query", required: false, schema: { type: "string" } },
+            { name: "chainHash", in: "query", required: false, schema: { type: "string" } },
+            { name: "delegationId", in: "query", required: false, schema: { type: "string" } },
+            { name: "signerKeyId", in: "query", required: false, schema: { type: "string" } },
+            { name: "signerAgentId", in: "query", required: false, schema: { type: "string" } },
+            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 1000 } },
+            { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          "x-settld-scopes": ["ops_read"],
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: DelegationTraceListResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/ops/delegation/chains/{chainHash}": {
+        get: {
+          summary: "Get delegation chain traces by chain hash",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "chainHash", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          "x-settld-scopes": ["ops_read"],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["chainHash", "traces", "total"],
+                    properties: {
+                      chainHash: { type: "string" },
+                      traces: { type: "array", items: DelegationTraceV1 },
+                      total: { type: "integer", minimum: 0 }
+                    }
+                  }
+                }
+              }
+            },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/ops/delegation/emergency-revoke": {
+        post: {
+          summary: "Emergency revoke delegated marketplace authority",
+          parameters: [TenantHeader, ProtocolHeader, RequestIdHeader],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          "x-settld-scopes": ["ops_write"],
+          requestBody: { required: true, content: { "application/json": { schema: DelegationEmergencyRevokeRequest } } },
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: DelegationEmergencyRevokeResponse } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } }
           }
         }
       },

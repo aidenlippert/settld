@@ -5119,6 +5119,11 @@ export function createApi({
   const MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_ACCEPT = "marketplace.agreement.accept";
   const MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CHANGE_ORDER = "marketplace.agreement.change_order";
   const MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CANCEL = "marketplace.agreement.cancel";
+  const DELEGATION_TRACE_CONTEXT_TYPE = Object.freeze({
+    AGREEMENT_ACCEPTANCE: "agreement_acceptance",
+    CHANGE_ORDER_ACCEPTANCE: "change_order_acceptance",
+    CANCELLATION_ACCEPTANCE: "cancellation_acceptance"
+  });
 
   function parseSettlementPolicyRegistryId(rawValue, { fieldPath = "policyId", allowNull = false } = {}) {
     if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
@@ -5460,6 +5465,184 @@ export function createApi({
       return task;
     }
     return null;
+  }
+
+  function buildDelegationTraceRecord({
+    tenantId,
+    task,
+    agreement,
+    contextType,
+    contextId = null,
+    acceptedByAgentId = null,
+    acceptanceSignature
+  } = {}) {
+    if (!acceptanceSignature || typeof acceptanceSignature !== "object" || Array.isArray(acceptanceSignature)) return null;
+    const actingOnBehalfOf =
+      acceptanceSignature.actingOnBehalfOf &&
+      typeof acceptanceSignature.actingOnBehalfOf === "object" &&
+      !Array.isArray(acceptanceSignature.actingOnBehalfOf)
+        ? acceptanceSignature.actingOnBehalfOf
+        : null;
+    if (!actingOnBehalfOf) return null;
+    const delegationChainRaw = Array.isArray(actingOnBehalfOf.delegationChain) ? actingOnBehalfOf.delegationChain : null;
+    if (!delegationChainRaw || delegationChainRaw.length === 0) return null;
+    const delegationChain = normalizeForCanonicalJson(delegationChainRaw, { path: "$" });
+    const chainHash =
+      typeof actingOnBehalfOf.chainHash === "string" && actingOnBehalfOf.chainHash.trim() !== ""
+        ? actingOnBehalfOf.chainHash.trim()
+        : sha256Hex(canonicalJsonStringify(delegationChain));
+    const runId = String(task?.runId ?? agreement?.runId ?? "");
+    const taskId = String(task?.taskId ?? "");
+    const agreementId = String(agreement?.agreementId ?? "");
+    if (!runId || !taskId || !agreementId) return null;
+    return normalizeForCanonicalJson(
+      {
+        chainHash,
+        tenantId: normalizeTenant(tenantId),
+        runId,
+        taskId,
+        agreementId,
+        contextType,
+        contextId,
+        signedAt:
+          typeof acceptanceSignature.signedAt === "string" && acceptanceSignature.signedAt.trim() !== ""
+            ? acceptanceSignature.signedAt.trim()
+            : null,
+        signerAgentId:
+          typeof acceptanceSignature.signerAgentId === "string" && acceptanceSignature.signerAgentId.trim() !== ""
+            ? acceptanceSignature.signerAgentId.trim()
+            : null,
+        signerKeyId:
+          typeof acceptanceSignature.signerKeyId === "string" && acceptanceSignature.signerKeyId.trim() !== ""
+            ? acceptanceSignature.signerKeyId.trim()
+            : null,
+        acceptedByAgentId:
+          typeof acceptedByAgentId === "string" && acceptedByAgentId.trim() !== "" ? acceptedByAgentId.trim() : null,
+        principalAgentId:
+          typeof actingOnBehalfOf.principalAgentId === "string" && actingOnBehalfOf.principalAgentId.trim() !== ""
+            ? actingOnBehalfOf.principalAgentId.trim()
+            : null,
+        delegateAgentId:
+          typeof actingOnBehalfOf.delegateAgentId === "string" && actingOnBehalfOf.delegateAgentId.trim() !== ""
+            ? actingOnBehalfOf.delegateAgentId.trim()
+            : null,
+        delegationChain
+      },
+      { path: "$" }
+    );
+  }
+
+  function collectDelegationTracesFromTask({ tenantId, task } = {}) {
+    const traces = [];
+    if (!task || typeof task !== "object" || Array.isArray(task)) return traces;
+    const agreement = task?.agreement && typeof task.agreement === "object" && !Array.isArray(task.agreement) ? task.agreement : null;
+    if (!agreement) return traces;
+
+    const agreementTrace = buildDelegationTraceRecord({
+      tenantId,
+      task,
+      agreement,
+      contextType: DELEGATION_TRACE_CONTEXT_TYPE.AGREEMENT_ACCEPTANCE,
+      contextId: agreement.agreementId ?? null,
+      acceptedByAgentId: agreement.acceptedByAgentId ?? null,
+      acceptanceSignature: agreement.acceptanceSignature ?? null
+    });
+    if (agreementTrace) traces.push(agreementTrace);
+
+    const changeOrders = Array.isArray(agreement?.terms?.changeOrders) ? agreement.terms.changeOrders : [];
+    for (const changeOrder of changeOrders) {
+      if (!changeOrder || typeof changeOrder !== "object" || Array.isArray(changeOrder)) continue;
+      const trace = buildDelegationTraceRecord({
+        tenantId,
+        task,
+        agreement,
+        contextType: DELEGATION_TRACE_CONTEXT_TYPE.CHANGE_ORDER_ACCEPTANCE,
+        contextId: changeOrder.changeOrderId ?? null,
+        acceptedByAgentId: changeOrder.acceptedByAgentId ?? null,
+        acceptanceSignature: changeOrder.acceptanceSignature ?? null
+      });
+      if (trace) traces.push(trace);
+    }
+
+    const cancellation =
+      task?.metadata?.cancellation && typeof task.metadata.cancellation === "object" && !Array.isArray(task.metadata.cancellation)
+        ? task.metadata.cancellation
+        : null;
+    if (cancellation) {
+      const trace = buildDelegationTraceRecord({
+        tenantId,
+        task,
+        agreement,
+        contextType: DELEGATION_TRACE_CONTEXT_TYPE.CANCELLATION_ACCEPTANCE,
+        contextId: cancellation.cancellationId ?? null,
+        acceptedByAgentId: cancellation.acceptedByAgentId ?? null,
+        acceptanceSignature: cancellation.acceptanceSignature ?? null
+      });
+      if (trace) traces.push(trace);
+    }
+
+    return traces;
+  }
+
+  function listDelegationTraces({
+    tenantId,
+    runId = null,
+    chainHash = null,
+    delegationId = null,
+    signerKeyId = null,
+    signerAgentId = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    const normalizedRunId = typeof runId === "string" && runId.trim() !== "" ? runId.trim() : null;
+    const normalizedChainHash =
+      typeof chainHash === "string" && chainHash.trim() !== "" ? chainHash.trim().toLowerCase() : null;
+    const normalizedDelegationId =
+      typeof delegationId === "string" && delegationId.trim() !== "" ? delegationId.trim() : null;
+    const normalizedSignerKeyId =
+      typeof signerKeyId === "string" && signerKeyId.trim() !== "" ? signerKeyId.trim() : null;
+    const normalizedSignerAgentId =
+      typeof signerAgentId === "string" && signerAgentId.trim() !== "" ? signerAgentId.trim() : null;
+
+    const traces = [];
+    const tasks = listMarketplaceTasks({ tenantId, status: "all" });
+    for (const task of tasks) {
+      const perTask = collectDelegationTracesFromTask({ tenantId, task });
+      for (const trace of perTask) {
+        if (normalizedRunId && String(trace.runId ?? "") !== normalizedRunId) continue;
+        if (normalizedChainHash && String(trace.chainHash ?? "").toLowerCase() !== normalizedChainHash) continue;
+        if (normalizedSignerKeyId && String(trace.signerKeyId ?? "") !== normalizedSignerKeyId) continue;
+        if (normalizedSignerAgentId && String(trace.signerAgentId ?? "") !== normalizedSignerAgentId) continue;
+        if (
+          normalizedDelegationId &&
+          !trace.delegationChain.some((row) => row && typeof row === "object" && String(row.delegationId ?? "") === normalizedDelegationId)
+        ) {
+          continue;
+        }
+        traces.push(trace);
+      }
+    }
+
+    traces.sort((left, right) => {
+      const leftMs = Date.parse(String(left.signedAt ?? ""));
+      const rightMs = Date.parse(String(right.signedAt ?? ""));
+      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && rightMs !== leftMs) return rightMs - leftMs;
+      if (String(left.runId ?? "") !== String(right.runId ?? "")) return String(left.runId ?? "").localeCompare(String(right.runId ?? ""));
+      if (String(left.taskId ?? "") !== String(right.taskId ?? "")) return String(left.taskId ?? "").localeCompare(String(right.taskId ?? ""));
+      if (String(left.contextType ?? "") !== String(right.contextType ?? "")) {
+        return String(left.contextType ?? "").localeCompare(String(right.contextType ?? ""));
+      }
+      return String(left.contextId ?? "").localeCompare(String(right.contextId ?? ""));
+    });
+
+    const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(1000, limit) : 200;
+    const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+    return {
+      traces: traces.slice(safeOffset, safeOffset + safeLimit),
+      total: traces.length,
+      limit: safeLimit,
+      offset: safeOffset
+    };
   }
 
   function listMarketplaceTaskBids({
@@ -6423,7 +6606,8 @@ export function createApi({
     signerAgentId,
     signedAt,
     actingOnBehalfOfInput,
-    requiredScope
+    requiredScope,
+    enforceActiveAgents = true
   } = {}) {
     if (actingOnBehalfOfInput === null || actingOnBehalfOfInput === undefined) return null;
     if (
@@ -6505,6 +6689,10 @@ export function createApi({
       }
       const principalIdentity = await getAgentIdentityRecord({ tenantId, agentId: core.principalAgentId });
       if (!principalIdentity) throw new TypeError(`${path}.principalAgentId identity not found`);
+      const principalStatus = String(principalIdentity?.status ?? "active").toLowerCase();
+      if (enforceActiveAgents && principalStatus !== "active") {
+        throw new TypeError(`${path}.principalAgentId must be active`);
+      }
       const expectedAgentKeyId = String(principalIdentity?.keys?.keyId ?? "");
       if (expectedAgentKeyId && signerKeyId !== expectedAgentKeyId) {
         throw new TypeError(`${path}.signerKeyId does not match principal agent key`);
@@ -6533,6 +6721,12 @@ export function createApi({
     const delegateAgentId = expectedPrincipalAgentId;
     if (delegateAgentId !== signerAgentId) {
       throw new TypeError("acceptanceSignature.signerAgentId must match actingOnBehalfOf delegated agent");
+    }
+    const delegateIdentity = await getAgentIdentityRecord({ tenantId, agentId: delegateAgentId });
+    if (!delegateIdentity) throw new TypeError("acceptanceSignature.actingOnBehalfOf.delegateAgentId identity not found");
+    const delegateStatus = String(delegateIdentity?.status ?? "active").toLowerCase();
+    if (enforceActiveAgents && delegateStatus !== "active") {
+      throw new TypeError("acceptanceSignature.actingOnBehalfOf.delegateAgentId must be active");
     }
     const computedChainHash = sha256Hex(canonicalJsonStringify(normalizedChain));
     const chainHashRaw = actingOnBehalfOfInput.chainHash;
@@ -6661,6 +6855,9 @@ export function createApi({
         ? acceptedByIdentity
         : await getAgentIdentityRecord({ tenantId, agentId: signerAgentId });
     if (!signerIdentity) throw new TypeError("acceptanceSignature signer agent not found");
+    if (String(signerIdentity?.status ?? "active").toLowerCase() !== "active") {
+      throw new TypeError("acceptanceSignature signer agent must be active");
+    }
 
     const signerKeyId =
       typeof acceptanceSignatureInput.signerKeyId === "string" && acceptanceSignatureInput.signerKeyId.trim() !== ""
@@ -7532,7 +7729,8 @@ export function createApi({
         signerAgentId,
         signedAt,
         actingOnBehalfOfInput: acceptanceSignature.actingOnBehalfOf,
-        requiredScope: MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_ACCEPT
+        requiredScope: MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_ACCEPT,
+        enforceActiveAgents: false
       });
     } catch (err) {
       return {
@@ -7791,6 +7989,9 @@ export function createApi({
         ? acceptedByIdentity
         : await getAgentIdentityRecord({ tenantId, agentId: signerAgentId });
     if (!signerIdentity) throw new TypeError("acceptanceSignature signer agent not found");
+    if (String(signerIdentity?.status ?? "active").toLowerCase() !== "active") {
+      throw new TypeError("acceptanceSignature signer agent must be active");
+    }
 
     const signerKeyId =
       typeof acceptanceSignatureInput.signerKeyId === "string" && acceptanceSignatureInput.signerKeyId.trim() !== ""
@@ -7885,7 +8086,8 @@ export function createApi({
         signerAgentId,
         signedAt,
         actingOnBehalfOfInput: signatureObj.actingOnBehalfOf,
-        requiredScope: MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CHANGE_ORDER
+        requiredScope: MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CHANGE_ORDER,
+        enforceActiveAgents: false
       });
     } catch (err) {
       return {
@@ -8092,6 +8294,9 @@ export function createApi({
         ? acceptedByIdentity
         : await getAgentIdentityRecord({ tenantId, agentId: signerAgentId });
     if (!signerIdentity) throw new TypeError("acceptanceSignature signer agent not found");
+    if (String(signerIdentity?.status ?? "active").toLowerCase() !== "active") {
+      throw new TypeError("acceptanceSignature signer agent must be active");
+    }
 
     const signerKeyId =
       typeof acceptanceSignatureInput.signerKeyId === "string" && acceptanceSignatureInput.signerKeyId.trim() !== ""
@@ -8182,7 +8387,8 @@ export function createApi({
         signerAgentId,
         signedAt,
         actingOnBehalfOfInput: signatureObj.actingOnBehalfOf,
-        requiredScope: MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CANCEL
+        requiredScope: MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CANCEL,
+        enforceActiveAgents: false
       });
     } catch (err) {
       return {
@@ -12630,6 +12836,229 @@ export function createApi({
             runtimeMs: result?.runtimeMs ?? null,
             timedOut: result?.timedOut === true,
             purged: result?.purged ?? { ingest_records: 0, deliveries: 0, delivery_receipts: 0 }
+          });
+        }
+
+        if (parts[1] === "delegation" && parts[2] === "chains" && parts.length === 3 && req.method === "GET") {
+          if (!requireScope(auth.scopes, OPS_SCOPES.OPS_READ)) return sendError(res, 403, "forbidden");
+          const { limit, offset } = parsePagination({
+            limitRaw: url.searchParams.get("limit"),
+            offsetRaw: url.searchParams.get("offset"),
+            defaultLimit: 200,
+            maxLimit: 1000
+          });
+          const runId = url.searchParams.get("runId");
+          const chainHash = url.searchParams.get("chainHash");
+          const delegationId = url.searchParams.get("delegationId");
+          const signerKeyId = url.searchParams.get("signerKeyId");
+          const signerAgentId = url.searchParams.get("signerAgentId");
+          const listed = listDelegationTraces({
+            tenantId,
+            runId,
+            chainHash,
+            delegationId,
+            signerKeyId,
+            signerAgentId,
+            limit,
+            offset
+          });
+          return sendJson(res, 200, listed);
+        }
+
+        if (parts[1] === "delegation" && parts[2] === "chains" && parts[3] && parts.length === 4 && req.method === "GET") {
+          if (!requireScope(auth.scopes, OPS_SCOPES.OPS_READ)) return sendError(res, 403, "forbidden");
+          const chainHash = String(parts[3]).trim().toLowerCase();
+          if (!chainHash) return sendError(res, 400, "chainHash is required");
+          const listed = listDelegationTraces({
+            tenantId,
+            chainHash,
+            limit: 1000,
+            offset: 0
+          });
+          if (listed.total === 0) return sendError(res, 404, "delegation chain not found");
+          return sendJson(res, 200, {
+            chainHash,
+            traces: listed.traces,
+            total: listed.total
+          });
+        }
+
+        if (parts[1] === "delegation" && parts[2] === "emergency-revoke" && parts.length === 3 && req.method === "POST") {
+          if (!requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE)) return sendError(res, 403, "forbidden");
+          const body = (await readJsonBody(req)) ?? {};
+          const runId = typeof body?.runId === "string" && body.runId.trim() !== "" ? body.runId.trim() : null;
+          const chainHash = typeof body?.chainHash === "string" && body.chainHash.trim() !== "" ? body.chainHash.trim().toLowerCase() : null;
+          const delegationId = typeof body?.delegationId === "string" && body.delegationId.trim() !== "" ? body.delegationId.trim() : null;
+          const signerKeyIdInput = typeof body?.signerKeyId === "string" && body.signerKeyId.trim() !== "" ? body.signerKeyId.trim() : null;
+          const signerAgentIdInput =
+            typeof body?.signerAgentId === "string" && body.signerAgentId.trim() !== "" ? body.signerAgentId.trim() : null;
+          const authKeyIdInput = typeof body?.authKeyId === "string" && body.authKeyId.trim() !== "" ? body.authKeyId.trim() : null;
+          const agentIdInput = typeof body?.agentId === "string" && body.agentId.trim() !== "" ? body.agentId.trim() : null;
+          const reason = typeof body?.reason === "string" && body.reason.trim() !== "" ? body.reason.trim() : null;
+          const includeDelegateAgent = body?.includeDelegateAgent === undefined ? true : body.includeDelegateAgent === true;
+          const includePrincipalAgent = body?.includePrincipalAgent === true;
+          const includeSignerKey = body?.includeSignerKey === undefined ? true : body.includeSignerKey === true;
+
+          if (!runId && !chainHash && !delegationId && !signerKeyIdInput && !signerAgentIdInput && !authKeyIdInput && !agentIdInput) {
+            return sendError(res, 400, "at least one revoke selector is required");
+          }
+
+          const listed = listDelegationTraces({
+            tenantId,
+            runId,
+            chainHash,
+            delegationId,
+            signerKeyId: signerKeyIdInput,
+            signerAgentId: signerAgentIdInput,
+            limit: 1000,
+            offset: 0
+          });
+
+          const signerKeyIds = new Set();
+          const agentIds = new Set();
+          const authKeyIds = new Set();
+
+          if (signerKeyIdInput) signerKeyIds.add(signerKeyIdInput);
+          if (authKeyIdInput) authKeyIds.add(authKeyIdInput);
+          if (agentIdInput) agentIds.add(agentIdInput);
+
+          for (const trace of listed.traces) {
+            if (includeSignerKey && typeof trace?.signerKeyId === "string" && trace.signerKeyId.trim() !== "") {
+              signerKeyIds.add(trace.signerKeyId.trim());
+            }
+            if (includeDelegateAgent && typeof trace?.delegateAgentId === "string" && trace.delegateAgentId.trim() !== "") {
+              agentIds.add(trace.delegateAgentId.trim());
+            }
+            if (includePrincipalAgent && typeof trace?.principalAgentId === "string" && trace.principalAgentId.trim() !== "") {
+              agentIds.add(trace.principalAgentId.trim());
+            }
+          }
+
+          if (signerKeyIds.size === 0 && authKeyIds.size === 0 && agentIds.size === 0) {
+            return sendError(res, 404, "no revocation targets found for selectors");
+          }
+
+          const nowAt = nowIso();
+          const revoked = {
+            agents: [],
+            signerKeys: [],
+            authKeys: []
+          };
+          const missing = {
+            agents: [],
+            signerKeys: [],
+            authKeys: []
+          };
+
+          if (agentIds.size > 0) {
+            if (typeof store.getAgentIdentity !== "function") {
+              return sendError(res, 501, "agent identity revocation not supported for this store");
+            }
+            for (const targetAgentId of [...agentIds]) {
+              const existingIdentity = await store.getAgentIdentity({ tenantId, agentId: targetAgentId });
+              if (!existingIdentity) {
+                missing.agents.push(targetAgentId);
+                continue;
+              }
+              const nextIdentity = {
+                ...existingIdentity,
+                status: "revoked",
+                updatedAt: nowAt
+              };
+              await commitTx([{ kind: "AGENT_IDENTITY_UPSERT", tenantId, agentIdentity: nextIdentity }]);
+              revoked.agents.push({
+                agentId: targetAgentId,
+                status: nextIdentity.status,
+                updatedAt: nextIdentity.updatedAt ?? nowAt
+              });
+            }
+          }
+
+          if (signerKeyIds.size > 0) {
+            if (typeof store.setSignerKeyStatus !== "function") return sendError(res, 501, "signer key revocation not supported for this store");
+            for (const targetSignerKeyId of [...signerKeyIds]) {
+              const updated = await store.setSignerKeyStatus({
+                tenantId,
+                keyId: targetSignerKeyId,
+                status: SIGNER_KEY_STATUS.REVOKED,
+                at: nowAt
+              });
+              if (!updated) {
+                missing.signerKeys.push(targetSignerKeyId);
+                continue;
+              }
+              revoked.signerKeys.push({
+                keyId: targetSignerKeyId,
+                status: updated?.status ?? SIGNER_KEY_STATUS.REVOKED,
+                revokedAt: updated?.revokedAt ?? nowAt
+              });
+            }
+          }
+
+          if (authKeyIds.size > 0) {
+            if (typeof store.setAuthKeyStatus !== "function") return sendError(res, 501, "auth key revocation not supported for this store");
+            for (const targetAuthKeyId of [...authKeyIds]) {
+              const updated = await store.setAuthKeyStatus({
+                tenantId,
+                keyId: targetAuthKeyId,
+                status: normalizeAuthKeyStatus("revoked"),
+                at: nowAt
+              });
+              if (!updated) {
+                missing.authKeys.push(targetAuthKeyId);
+                continue;
+              }
+              revoked.authKeys.push({
+                keyId: targetAuthKeyId,
+                status: updated?.status ?? "revoked",
+                revokedAt: updated?.revokedAt ?? nowAt
+              });
+            }
+          }
+
+          if (typeof store.appendOpsAudit === "function") {
+            await store.appendOpsAudit({
+              tenantId,
+              audit: makeOpsAudit({
+                action: "DELEGATION_EMERGENCY_REVOKE",
+                targetType: "delegation_authority",
+                targetId: chainHash ?? delegationId ?? runId ?? signerKeyIdInput ?? authKeyIdInput ?? agentIdInput ?? "bulk",
+                details: {
+                  selectors: {
+                    runId,
+                    chainHash,
+                    delegationId,
+                    signerKeyId: signerKeyIdInput,
+                    signerAgentId: signerAgentIdInput,
+                    authKeyId: authKeyIdInput,
+                    agentId: agentIdInput
+                  },
+                  includeDelegateAgent,
+                  includePrincipalAgent,
+                  includeSignerKey,
+                  reason,
+                  affectedTraceCount: listed.total,
+                  revoked,
+                  missing
+                }
+              })
+            });
+          }
+
+          return sendJson(res, 200, {
+            ok: true,
+            selectors: {
+              runId,
+              chainHash,
+              delegationId,
+              signerKeyId: signerKeyIdInput,
+              signerAgentId: signerAgentIdInput,
+              authKeyId: authKeyIdInput,
+              agentId: agentIdInput
+            },
+            affectedTraceCount: listed.total,
+            revoked,
+            missing
           });
         }
 
