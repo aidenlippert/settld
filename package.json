@@ -35,7 +35,7 @@
     "sdk:first-run:py": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/examples/sdk-first-verified-run.py",
     "sdk:analytics": "node scripts/examples/sdk-tenant-analytics.mjs",
     "sdk:analytics:py": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/examples/sdk-tenant-analytics.py",
-    "dev:env:init": "bash -lc 'cp -n scripts/dev/.env.dev.example .env.dev && echo \"Created .env.dev (or kept existing)\"'",
+    "dev:env:init": "bash -lc 'cp -n scripts/dev/env.dev.example .env.dev && echo \"Created .env.dev (or kept existing)\"'",
     "dev:start": "bash scripts/dev/start-api.sh",
     "dev:sdk:key": "bash scripts/dev/new-sdk-key.sh",
     "dev:sdk:first-run": "bash scripts/dev/sdk-first-run.sh",
