@@ -148,7 +148,11 @@ import {
   walletAvailableAccountId,
   walletEscrowAccountId
 } from "../core/escrow-ledger.js";
-import { createInMemoryMoneyRailAdapter, createMoneyRailAdapterRegistry } from "../core/money-rail-adapters.js";
+import {
+  MONEY_RAIL_PROVIDER_EVENT_TYPE,
+  createInMemoryMoneyRailAdapter,
+  createMoneyRailAdapterRegistry
+} from "../core/money-rail-adapters.js";
 import { buildDeterministicZipStore, sha256HexBytes } from "../core/deterministic-zip.js";
 import { buildFinancePackBundleV1 } from "../core/finance-pack-bundle.js";
 import { buildMonthProofBundleV1 } from "../core/proof-bundle.js";
@@ -226,7 +230,10 @@ export function createApi({
   fetchFn = null,
   rateLimitRpm = null,
   rateLimitBurst = null,
-  protocol = null
+  protocol = null,
+  moneyRailMode = null,
+  moneyRailProviderConfigs = null,
+  moneyRailDefaultProviderId = null
 } = {}) {
   const apiStartedAtMs = Date.now();
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
@@ -563,12 +570,144 @@ export function createApi({
     store.nowIso = nowIso;
   }
 
+  const CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES = new Set(Object.values(MONEY_RAIL_PROVIDER_EVENT_TYPE));
+
+  function normalizeMoneyRailModeValue(value, { fieldName = "moneyRailMode" } = {}) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (normalized === "" || normalized === "sandbox" || normalized === "stub" || normalized === "test") return "sandbox";
+    if (normalized === "production" || normalized === "prod") return "production";
+    throw new TypeError(`${fieldName} must be sandbox|production`);
+  }
+
+  function normalizeMoneyRailProviderConfigsInput(rawValue, { fallbackMode = "sandbox" } = {}) {
+    let parsed = rawValue;
+    if (parsed === null || parsed === undefined || parsed === "") return [];
+    if (typeof parsed === "string") {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch (err) {
+        throw new TypeError(`PROXY_MONEY_RAIL_PROVIDERS must be valid JSON: ${err?.message}`);
+      }
+    }
+    let entries = [];
+    if (Array.isArray(parsed)) {
+      entries = parsed;
+    } else if (parsed && typeof parsed === "object") {
+      entries = Object.entries(parsed).map(([providerId, config]) => ({
+        providerId,
+        ...(config && typeof config === "object" && !Array.isArray(config) ? config : {})
+      }));
+    } else {
+      throw new TypeError("PROXY_MONEY_RAIL_PROVIDERS must be an array or object");
+    }
+
+    const seenProviderIds = new Set();
+    const normalizedEntries = [];
+    for (let index = 0; index < entries.length; index += 1) {
+      const item = entries[index];
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new TypeError(`money rail provider config at index ${index} must be an object`);
+      }
+      const providerId = typeof item.providerId === "string" && item.providerId.trim() !== "" ? item.providerId.trim() : null;
+      if (!providerId) throw new TypeError(`money rail provider config at index ${index} requires providerId`);
+      if (seenProviderIds.has(providerId)) throw new TypeError(`duplicate money rail providerId: ${providerId}`);
+      seenProviderIds.add(providerId);
+
+      const providerMode = normalizeMoneyRailModeValue(item.mode ?? fallbackMode, {
+        fieldName: `money rail provider ${providerId}.mode`
+      });
+      const allowPayout = item.allowPayout !== false;
+      const allowCollection = item.allowCollection !== false;
+
+      const statusMap = new Map();
+      for (const canonicalType of CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES) statusMap.set(canonicalType, canonicalType);
+      const statusMapInput =
+        item.providerStatusMap && typeof item.providerStatusMap === "object" && !Array.isArray(item.providerStatusMap)
+          ? item.providerStatusMap
+          : {};
+      for (const [providerStatusRaw, eventTypeRaw] of Object.entries(statusMapInput)) {
+        const providerStatus = String(providerStatusRaw ?? "").trim().toLowerCase();
+        if (!providerStatus) throw new TypeError(`providerStatusMap keys for ${providerId} must be non-empty strings`);
+        const eventType = String(eventTypeRaw ?? "").trim().toLowerCase();
+        if (!CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES.has(eventType)) {
+          throw new TypeError(
+            `providerStatusMap.${providerStatus} for ${providerId} must map to ${Array.from(CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES).join("|")}`
+          );
+        }
+        statusMap.set(providerStatus, eventType);
+      }
+
+      normalizedEntries.push({
+        providerId,
+        mode: providerMode,
+        allowPayout,
+        allowCollection,
+        providerStatusMap: statusMap
+      });
+    }
+    return normalizedEntries;
+  }
+
+  function normalizeMoneyRailProviderStatusValue(value) {
+    if (value === null || value === undefined) return null;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized || null;
+  }
+
+  const moneyRailModeRaw =
+    moneyRailMode ?? (typeof process !== "undefined" && process.env.PROXY_MONEY_RAIL_MODE ? process.env.PROXY_MONEY_RAIL_MODE : null);
+  const effectiveMoneyRailMode = normalizeMoneyRailModeValue(moneyRailModeRaw ?? "sandbox");
+  const moneyRailProviderConfigsRaw =
+    moneyRailProviderConfigs ??
+    (typeof process !== "undefined" && typeof process.env.PROXY_MONEY_RAIL_PROVIDERS === "string" ? process.env.PROXY_MONEY_RAIL_PROVIDERS : null);
+  const parsedMoneyRailProviderConfigs = normalizeMoneyRailProviderConfigsInput(moneyRailProviderConfigsRaw, {
+    fallbackMode: effectiveMoneyRailMode
+  });
+  if (effectiveMoneyRailMode === "production" && parsedMoneyRailProviderConfigs.length === 0) {
+    throw new TypeError("production money rail mode requires configured providers");
+  }
+
   const defaultMoneyRailProviderId =
-    typeof process !== "undefined" && typeof process.env.PROXY_MONEY_RAIL_PROVIDER_ID === "string" && process.env.PROXY_MONEY_RAIL_PROVIDER_ID.trim() !== ""
-      ? process.env.PROXY_MONEY_RAIL_PROVIDER_ID.trim()
-      : "stub_default";
+    typeof moneyRailDefaultProviderId === "string" && moneyRailDefaultProviderId.trim() !== ""
+      ? moneyRailDefaultProviderId.trim()
+      : typeof process !== "undefined" && typeof process.env.PROXY_MONEY_RAIL_PROVIDER_ID === "string" && process.env.PROXY_MONEY_RAIL_PROVIDER_ID.trim() !== ""
+        ? process.env.PROXY_MONEY_RAIL_PROVIDER_ID.trim()
+        : parsedMoneyRailProviderConfigs[0]?.providerId ?? "stub_default";
+
+  const fallbackProviderStatusMap = new Map();
+  for (const canonicalType of CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES) fallbackProviderStatusMap.set(canonicalType, canonicalType);
+  const moneyRailProviderConfigById = new Map(
+    parsedMoneyRailProviderConfigs.map((config) => [
+      config.providerId,
+      {
+        providerId: config.providerId,
+        mode: config.mode,
+        allowPayout: config.allowPayout,
+        allowCollection: config.allowCollection,
+        providerStatusMap: new Map(config.providerStatusMap)
+      }
+    ])
+  );
+  if (!moneyRailProviderConfigById.has(defaultMoneyRailProviderId)) {
+    if (effectiveMoneyRailMode === "production") {
+      throw new TypeError("default production money rail provider must be configured");
+    }
+    moneyRailProviderConfigById.set(defaultMoneyRailProviderId, {
+      providerId: defaultMoneyRailProviderId,
+      mode: effectiveMoneyRailMode,
+      allowPayout: true,
+      allowCollection: true,
+      providerStatusMap: new Map(fallbackProviderStatusMap)
+    });
+  }
+  if (effectiveMoneyRailMode === "production" && String(defaultMoneyRailProviderId).toLowerCase().startsWith("stub")) {
+    throw new TypeError("production money rail mode cannot use a stub provider");
+  }
+
   const moneyRailAdapters = createMoneyRailAdapterRegistry({
-    adapters: [createInMemoryMoneyRailAdapter({ providerId: defaultMoneyRailProviderId, now: nowIso })]
+    adapters: Array.from(moneyRailProviderConfigById.values()).map((config) =>
+      createInMemoryMoneyRailAdapter({ providerId: config.providerId, now: nowIso })
+    )
   });
 
   try {
@@ -1483,6 +1622,35 @@ export function createApi({
   function getMoneyRailAdapter(providerId) {
     const normalizedProviderId = typeof providerId === "string" && providerId.trim() !== "" ? providerId.trim() : defaultMoneyRailProviderId;
     return moneyRailAdapters.get(normalizedProviderId) ?? null;
+  }
+
+  function getMoneyRailProviderConfig(providerId) {
+    const normalizedProviderId = typeof providerId === "string" && providerId.trim() !== "" ? providerId.trim() : defaultMoneyRailProviderId;
+    return moneyRailProviderConfigById.get(normalizedProviderId) ?? null;
+  }
+
+  function resolveMoneyRailProviderEventType({ providerId, eventType, providerStatus } = {}) {
+    const config = getMoneyRailProviderConfig(providerId);
+    if (!config) throw new TypeError("unknown money rail provider");
+
+    const normalizedEventType =
+      typeof eventType === "string" && eventType.trim() !== "" ? String(eventType).trim().toLowerCase() : null;
+    if (normalizedEventType && !CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES.has(normalizedEventType)) {
+      throw new TypeError(
+        `eventType must be one of: ${Array.from(CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES).join("|")}`
+      );
+    }
+
+    const normalizedProviderStatus = normalizeMoneyRailProviderStatusValue(providerStatus);
+    const mappedEventType = normalizedProviderStatus ? config.providerStatusMap.get(normalizedProviderStatus) ?? null : null;
+
+    if (normalizedEventType && normalizedProviderStatus && mappedEventType && normalizedEventType !== mappedEventType) {
+      throw new TypeError("eventType does not match providerStatus mapping");
+    }
+    if (normalizedEventType) return normalizedEventType;
+    if (mappedEventType) return mappedEventType;
+    if (normalizedProviderStatus) throw new TypeError(`unmapped providerStatus: ${normalizedProviderStatus}`);
+    throw new TypeError("eventType or providerStatus is required");
   }
 
   function syncEscrowLedgerWalletSnapshot({ ledgerState, tenantId, wallet }) {
@@ -10687,6 +10855,11 @@ export function createApi({
                 : defaultMoneyRailProviderId;
             const adapter = getMoneyRailAdapter(providerIdInput);
             if (!adapter) return sendError(res, 400, "unknown money rail provider");
+            const providerConfig = getMoneyRailProviderConfig(providerIdInput);
+            if (!providerConfig) return sendError(res, 400, "unknown money rail provider");
+            if (providerConfig.allowPayout !== true) {
+              return sendError(res, 409, "money rail provider does not support payout direction");
+            }
             const operationId = `mop_${payoutKey}`;
             const counterpartyRef =
               typeof body?.counterpartyRef === "string" && body.counterpartyRef.trim() !== ""
@@ -10705,7 +10878,8 @@ export function createApi({
                 payoutArtifactId: payoutArtifact.artifactId,
                 payoutArtifactHash: payoutArtifact.artifactHash,
                 period,
-                partyId
+                partyId,
+                providerMode: providerConfig.mode
               },
               at: nowIso()
             });
@@ -10732,6 +10906,99 @@ export function createApi({
             const operation = await adapter.status({ tenantId, operationId });
             if (!operation) return sendError(res, 404, "money rail operation not found");
             return sendJson(res, 200, { operation });
+          }
+
+          if (parts[1] === "money-rails" && parts[2] && parts[3] === "events" && parts[4] === "ingest" && parts.length === 5 && req.method === "POST") {
+            if (!requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE)) return sendError(res, 403, "forbidden");
+            const providerId = String(parts[2]);
+            const adapter = getMoneyRailAdapter(providerId);
+            if (!adapter) return sendError(res, 404, "money rail provider not found");
+            if (typeof adapter.ingestProviderEvent !== "function") {
+              return sendError(res, 409, "money rail provider does not support provider event ingestion");
+            }
+
+            const body = (await readJsonBody(req)) ?? {};
+            let idemStoreKey = null;
+            let idemRequestHash = null;
+            try {
+              ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+            } catch (err) {
+              return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+            }
+            if (idemStoreKey) {
+              const existing = store.idempotency.get(idemStoreKey);
+              if (existing) {
+                if (existing.requestHash !== idemRequestHash) {
+                  return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+                }
+                return sendJson(res, existing.statusCode, existing.body);
+              }
+            }
+
+            const operationId = typeof body?.operationId === "string" && body.operationId.trim() !== "" ? body.operationId.trim() : null;
+            if (!operationId) return sendError(res, 400, "operationId is required");
+
+            let eventType = null;
+            try {
+              eventType = resolveMoneyRailProviderEventType({
+                providerId,
+                eventType: body?.eventType ?? null,
+                providerStatus: body?.providerStatus ?? null
+              });
+            } catch (err) {
+              return sendError(res, 400, "invalid provider event", { message: err?.message });
+            }
+
+            const eventId = typeof body?.eventId === "string" && body.eventId.trim() !== "" ? body.eventId.trim() : null;
+            const providerRef = typeof body?.providerRef === "string" && body.providerRef.trim() !== "" ? body.providerRef.trim() : null;
+            const reasonCode = typeof body?.reasonCode === "string" && body.reasonCode.trim() !== "" ? body.reasonCode.trim() : null;
+            const payload = body?.payload;
+            if (payload !== undefined && payload !== null && (typeof payload !== "object" || Array.isArray(payload))) {
+              return sendError(res, 400, "payload must be an object or null");
+            }
+            const at =
+              typeof body?.at === "string" && body.at.trim() !== ""
+                ? body.at.trim()
+                : nowIso();
+            if (!Number.isFinite(Date.parse(at))) return sendError(res, 400, "at must be an ISO date-time");
+
+            let ingested = null;
+            try {
+              ingested = await adapter.ingestProviderEvent({
+                tenantId,
+                operationId,
+                eventType,
+                providerRef,
+                reasonCode,
+                at,
+                eventId,
+                payload: payload ?? null
+              });
+            } catch (err) {
+              if (err?.code === "MONEY_RAIL_OPERATION_NOT_FOUND") return sendError(res, 404, "money rail operation not found");
+              if (err?.code === "MONEY_RAIL_INVALID_TRANSITION") {
+                return sendError(res, 409, "money rail provider event rejected", { message: err?.message, code: err?.code ?? null });
+              }
+              return sendError(res, 409, "money rail provider event rejected", { message: err?.message, code: err?.code ?? null });
+            }
+
+            const responseBody = {
+              operation: ingested?.operation ?? null,
+              event: ingested?.event ?? null,
+              applied: Boolean(ingested?.applied),
+              eventType,
+              providerStatus: normalizeMoneyRailProviderStatusValue(body?.providerStatus ?? null)
+            };
+            if (idemStoreKey) {
+              await commitTx([
+                {
+                  kind: "IDEMPOTENCY_PUT",
+                  key: idemStoreKey,
+                  value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody }
+                }
+              ]);
+            }
+            return sendJson(res, 200, responseBody);
           }
 
           if (

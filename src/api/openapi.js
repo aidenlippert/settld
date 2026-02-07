@@ -3651,6 +3651,48 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
+      "/ops/money-rails/{providerId}/events/ingest": {
+        post: {
+          summary: "Ingest provider event and deterministically map to operation state",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "providerId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          "x-settld-scopes": ["finance_write"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["operationId"],
+                  properties: {
+                    operationId: { type: "string" },
+                    eventType: { type: "string", enum: ["submitted", "confirmed", "failed", "cancelled", "reversed"] },
+                    providerStatus: { type: "string" },
+                    eventId: { type: "string" },
+                    providerRef: { type: "string" },
+                    reasonCode: { type: "string" },
+                    at: { type: "string", format: "date-time" },
+                    payload: { type: "object", additionalProperties: true, nullable: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
       "/ops/money-rails/{providerId}/operations/{operationId}/cancel": {
         post: {
           summary: "Cancel a money rail operation",

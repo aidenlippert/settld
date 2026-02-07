@@ -21,3 +21,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 
 ### Changed
 - Run dispute close now enforces the appeal window when a signed arbiter verdict is submitted (`POST /runs/{runId}/dispute/close`): late verdicts are rejected with `409 appeal window has closed`, while administrative closes without verdict remain allowed for already-open disputes.
+- Money rail provider handling now supports explicit production-mode configuration (`moneyRailMode`, `moneyRailProviderConfigs`, `moneyRailDefaultProviderId`) with fail-fast guards against implicit stub usage in production.
+
+### Added
+- Money rail provider event ingestion endpoint: `POST /ops/money-rails/{providerId}/events/ingest`, including deterministic provider-status to canonical-state mapping and idempotent event replay semantics.
