@@ -6323,6 +6323,22 @@ export function createApi({
     };
   }
 
+  function settlementDisputeWindowEndsAtMs(settlement) {
+    const windowDays = Number(settlement?.disputeWindowDays ?? 0);
+    if (!Number.isSafeInteger(windowDays) || windowDays <= 0) return Number.NaN;
+    const explicitEndsAtMs =
+      settlement?.disputeWindowEndsAt && Number.isFinite(Date.parse(String(settlement.disputeWindowEndsAt)))
+        ? Date.parse(String(settlement.disputeWindowEndsAt))
+        : Number.NaN;
+    if (Number.isFinite(explicitEndsAtMs)) return explicitEndsAtMs;
+    const resolvedAtMs =
+      settlement?.resolvedAt && Number.isFinite(Date.parse(String(settlement.resolvedAt)))
+        ? Date.parse(String(settlement.resolvedAt))
+        : Number.NaN;
+    if (!Number.isFinite(resolvedAtMs)) return Number.NaN;
+    return resolvedAtMs + windowDays * 24 * 60 * 60_000;
+  }
+
   function normalizeAgreementMilestoneStatusGate(value, { defaultValue = "any", allowAny = true } = {}) {
     const fallback = allowAny ? "any" : "green";
     const normalizedDefault = allowAny && defaultValue === "any" ? "any" : "green";
@@ -16632,15 +16648,9 @@ export function createApi({
 
         const nowAt = nowIso();
         if (action === "open") {
-          const windowDays = Number(settlement.disputeWindowDays ?? 0);
-          const endsAt =
-            settlement.disputeWindowEndsAt && Number.isFinite(Date.parse(String(settlement.disputeWindowEndsAt)))
-              ? Date.parse(String(settlement.disputeWindowEndsAt))
-              : Number.isFinite(Date.parse(String(settlement.resolvedAt ?? "")))
-                ? Date.parse(String(settlement.resolvedAt)) + Math.max(0, windowDays) * 24 * 60 * 60_000
-                : NaN;
+          const endsAt = settlementDisputeWindowEndsAtMs(settlement);
           const nowMs = Date.parse(nowAt);
-          if (!Number.isSafeInteger(windowDays) || windowDays <= 0 || !Number.isFinite(endsAt) || !Number.isFinite(nowMs) || nowMs > endsAt) {
+          if (!Number.isFinite(endsAt) || !Number.isFinite(nowMs) || nowMs > endsAt) {
             return sendError(res, 409, "dispute window has closed");
           }
         }
@@ -16689,6 +16699,21 @@ export function createApi({
           resolutionInput = mergedResolution;
         }
         if (action === "close" && signedVerdict) {
+          const nowMs = Date.parse(nowAt);
+          const endsAtMs = settlementDisputeWindowEndsAtMs(settlement);
+          const verdictIssuedAtMs =
+            signedVerdict?.issuedAt && Number.isFinite(Date.parse(String(signedVerdict.issuedAt)))
+              ? Date.parse(String(signedVerdict.issuedAt))
+              : Number.NaN;
+          if (
+            !Number.isFinite(endsAtMs) ||
+            !Number.isFinite(nowMs) ||
+            nowMs > endsAtMs ||
+            !Number.isFinite(verdictIssuedAtMs) ||
+            verdictIssuedAtMs > endsAtMs
+          ) {
+            return sendError(res, 409, "appeal window has closed");
+          }
           if (!resolutionInput || typeof resolutionInput !== "object" || Array.isArray(resolutionInput)) resolutionInput = {};
           if (resolutionInput.outcome === undefined || resolutionInput.outcome === null || String(resolutionInput.outcome).trim() === "") {
             resolutionInput.outcome = signedVerdict.outcome;

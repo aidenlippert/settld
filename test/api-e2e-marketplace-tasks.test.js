@@ -794,6 +794,162 @@ test("API e2e: dispute close rejects verdicts with invalid arbiter signature", a
   assert.match(String(closeDispute.json?.details?.message ?? ""), /invalid verdict signature/i);
 });
 
+test("API e2e: appeal window enforcement rejects late signed verdicts but allows administrative close", async () => {
+  let nowMs = Date.parse("2026-02-01T00:00:00.000Z");
+  const api = createApi({ now: () => new Date(nowMs).toISOString() });
+  const arbiterKeypair = createEd25519Keypair();
+  const arbiterRegistration = await registerAgent(api, "agt_market_dispute_window_operator", {
+    publicKeyPem: arbiterKeypair.publicKeyPem
+  });
+
+  await registerAgent(api, "agt_market_dispute_window_poster");
+  await registerAgent(api, "agt_market_dispute_window_bidder");
+  await creditWallet(api, {
+    agentId: "agt_market_dispute_window_poster",
+    amountCents: 5000,
+    idempotencyKey: "wallet_credit_market_dispute_window_poster_1"
+  });
+
+  const createTask = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks",
+    headers: { "x-idempotency-key": "market_dispute_window_task_create_1" },
+    body: {
+      taskId: "task_dispute_window_1",
+      title: "Appeal window task",
+      capability: "translate",
+      posterAgentId: "agt_market_dispute_window_poster",
+      budgetCents: 2100,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+
+  const bid = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_dispute_window_1/bids",
+    headers: { "x-idempotency-key": "market_dispute_window_bid_create_1" },
+    body: {
+      bidId: "bid_dispute_window_1",
+      bidderAgentId: "agt_market_dispute_window_bidder",
+      amountCents: 1700,
+      currency: "USD",
+      etaSeconds: 900
+    }
+  });
+  assert.equal(bid.statusCode, 201);
+
+  const accept = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_dispute_window_1/accept",
+    headers: { "x-idempotency-key": "market_dispute_window_accept_1" },
+    body: {
+      bidId: "bid_dispute_window_1",
+      acceptedByAgentId: "agt_market_dispute_window_operator",
+      disputeWindowDays: 1
+    }
+  });
+  assert.equal(accept.statusCode, 200);
+  const runId = accept.json?.run?.runId;
+  assert.ok(typeof runId === "string" && runId.length > 0);
+
+  const complete = await request(api, {
+    method: "POST",
+    path: `/agents/agt_market_dispute_window_bidder/runs/${encodeURIComponent(runId)}/events`,
+    headers: {
+      "x-proxy-expected-prev-chain-hash": accept.json?.run?.lastChainHash,
+      "x-idempotency-key": "market_dispute_window_complete_1"
+    },
+    body: {
+      type: "RUN_COMPLETED",
+      payload: {
+        outputRef: `evidence://${runId}/output.json`,
+        metrics: { settlementReleaseRatePct: 100 }
+      }
+    }
+  });
+  assert.equal(complete.statusCode, 201);
+
+  const openDispute = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/dispute/open`,
+    headers: { "x-idempotency-key": "market_dispute_window_open_1" },
+    body: {
+      disputeId: "dsp_market_window_1",
+      disputeType: "quality",
+      disputePriority: "normal",
+      disputeChannel: "counterparty",
+      escalationLevel: "l1_counterparty",
+      openedByAgentId: "agt_market_dispute_window_operator",
+      reason: "needs appeal review"
+    }
+  });
+  assert.equal(openDispute.statusCode, 200);
+  assert.equal(openDispute.json?.settlement?.disputeStatus, "open");
+
+  nowMs += 2 * 24 * 60 * 60_000;
+  const verdictIssuedAt = new Date(nowMs).toISOString();
+  const verdictCore = normalizeForCanonicalJson(
+    {
+      schemaVersion: "DisputeVerdict.v1",
+      verdictId: "vrd_market_window_1",
+      tenantId: "tenant_default",
+      runId,
+      settlementId: complete.json?.settlement?.settlementId,
+      disputeId: "dsp_market_window_1",
+      arbiterAgentId: "agt_market_dispute_window_operator",
+      outcome: "accepted",
+      releaseRatePct: 100,
+      rationale: "appeal reviewed",
+      issuedAt: verdictIssuedAt
+    },
+    { path: "$" }
+  );
+  const verdictHash = sha256Hex(canonicalJsonStringify(verdictCore));
+  const verdictSignature = signHashHexEd25519(verdictHash, arbiterKeypair.privateKeyPem);
+
+  const lateCloseWithVerdict = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/dispute/close`,
+    headers: { "x-idempotency-key": "market_dispute_window_close_1" },
+    body: {
+      disputeId: "dsp_market_window_1",
+      resolutionOutcome: "accepted",
+      resolutionEscalationLevel: "l2_arbiter",
+      resolutionSummary: "late verdict should be rejected",
+      closedByAgentId: "agt_market_dispute_window_operator",
+      verdict: {
+        verdictId: "vrd_market_window_1",
+        arbiterAgentId: "agt_market_dispute_window_operator",
+        outcome: "accepted",
+        releaseRatePct: 100,
+        rationale: "appeal reviewed",
+        issuedAt: verdictIssuedAt,
+        signerKeyId: arbiterRegistration.keyId,
+        signature: verdictSignature
+      }
+    }
+  });
+  assert.equal(lateCloseWithVerdict.statusCode, 409);
+  assert.match(String(lateCloseWithVerdict.json?.error ?? ""), /appeal window has closed/i);
+
+  const lateAdministrativeClose = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/dispute/close`,
+    headers: { "x-idempotency-key": "market_dispute_window_close_2" },
+    body: {
+      disputeId: "dsp_market_window_1",
+      resolutionOutcome: "accepted",
+      resolutionEscalationLevel: "l2_arbiter",
+      resolutionSummary: "administrative close after window",
+      closedByAgentId: "agt_market_dispute_window_operator"
+    }
+  });
+  assert.equal(lateAdministrativeClose.statusCode, 200);
+  assert.equal(lateAdministrativeClose.json?.settlement?.disputeStatus, "closed");
+  assert.equal(lateAdministrativeClose.json?.settlement?.disputeVerdictId, null);
+});
+
 test("API e2e: marketplace supports all interaction directions", async () => {
   const api = createApi();
   await registerAgent(api, "agt_market_dir_poster");

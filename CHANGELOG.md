@@ -18,3 +18,6 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 - Ops command-center alerting controls: threshold query params + optional alert artifact persistence/delivery (`CommandCenterAlert.v1`) when `persistAlerts=true` (`ops_write` required).
 - Ops finance reconciliation API: `GET /ops/finance/reconcile` with deterministic report hash + optional persisted relay artifact (`ReconcileReport.v1`) when `persist=true` (`finance_write` required), plus end-to-end coverage in `test/api-e2e-ops-finance-reconcile.test.js`.
 - Escrow/netting hardening: tenant-scoped escrow operation idempotency keys, tenant-safe escrow journal entry IDs, and expanded atomic failure + high-frequency invariants coverage in `test/escrow-ledger.test.js` and `test/escrow-netting-invariants.test.js`.
+
+### Changed
+- Run dispute close now enforces the appeal window when a signed arbiter verdict is submitted (`POST /runs/{runId}/dispute/close`): late verdicts are rejected with `409 appeal window has closed`, while administrative closes without verdict remain allowed for already-open disputes.
