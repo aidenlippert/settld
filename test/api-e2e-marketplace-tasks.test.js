@@ -1131,6 +1131,243 @@ test("API e2e: appeal window enforcement rejects late signed verdicts but allows
   assert.equal(lateAdministrativeClose.json?.settlement?.disputeVerdictId, null);
 });
 
+test("API e2e: arbitration case lifecycle supports deterministic assignment, signed verdict, close, and appeal window enforcement", async () => {
+  let nowMs = Date.parse("2026-02-01T00:00:00.000Z");
+  const api = createApi({ now: () => new Date(nowMs).toISOString() });
+  const arbiterAKeypair = createEd25519Keypair();
+  const arbiterBKeypair = createEd25519Keypair();
+
+  await registerAgent(api, "agt_market_arb_lifecycle_poster");
+  await registerAgent(api, "agt_market_arb_lifecycle_bidder");
+  await registerAgent(api, "agt_market_arb_lifecycle_operator");
+  const arbiterARegistration = await registerAgent(api, "agt_market_arbiter_a", { publicKeyPem: arbiterAKeypair.publicKeyPem });
+  const arbiterBRegistration = await registerAgent(api, "agt_market_arbiter_b", { publicKeyPem: arbiterBKeypair.publicKeyPem });
+
+  await creditWallet(api, {
+    agentId: "agt_market_arb_lifecycle_poster",
+    amountCents: 5000,
+    idempotencyKey: "wallet_credit_market_arb_lifecycle_poster_1"
+  });
+
+  const createTask = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks",
+    headers: { "x-idempotency-key": "market_arb_lifecycle_task_create_1" },
+    body: {
+      taskId: "task_arb_lifecycle_1",
+      title: "Arbitration lifecycle task",
+      capability: "translate",
+      posterAgentId: "agt_market_arb_lifecycle_poster",
+      budgetCents: 2200,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+
+  const bid = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_arb_lifecycle_1/bids",
+    headers: { "x-idempotency-key": "market_arb_lifecycle_bid_create_1" },
+    body: {
+      bidId: "bid_arb_lifecycle_1",
+      bidderAgentId: "agt_market_arb_lifecycle_bidder",
+      amountCents: 1800,
+      currency: "USD",
+      etaSeconds: 900
+    }
+  });
+  assert.equal(bid.statusCode, 201);
+
+  const accept = await request(api, {
+    method: "POST",
+    path: "/marketplace/tasks/task_arb_lifecycle_1/accept",
+    headers: { "x-idempotency-key": "market_arb_lifecycle_accept_1" },
+    body: {
+      bidId: "bid_arb_lifecycle_1",
+      acceptedByAgentId: "agt_market_arb_lifecycle_operator",
+      disputeWindowDays: 2
+    }
+  });
+  assert.equal(accept.statusCode, 200);
+  const runId = accept.json?.run?.runId;
+  assert.ok(typeof runId === "string" && runId.length > 0);
+
+  const complete = await request(api, {
+    method: "POST",
+    path: `/agents/agt_market_arb_lifecycle_bidder/runs/${encodeURIComponent(runId)}/events`,
+    headers: {
+      "x-proxy-expected-prev-chain-hash": accept.json?.run?.lastChainHash,
+      "x-idempotency-key": "market_arb_lifecycle_complete_1"
+    },
+    body: {
+      type: "RUN_COMPLETED",
+      payload: {
+        outputRef: `evidence://${runId}/output.json`,
+        metrics: { settlementReleaseRatePct: 100 }
+      }
+    }
+  });
+  assert.equal(complete.statusCode, 201);
+
+  const openDispute = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/dispute/open`,
+    headers: { "x-idempotency-key": "market_arb_lifecycle_dispute_open_1" },
+    body: {
+      disputeId: "dsp_arb_lifecycle_1",
+      disputeType: "quality",
+      disputePriority: "high",
+      disputeChannel: "arbiter",
+      escalationLevel: "l2_arbiter",
+      openedByAgentId: "agt_market_arb_lifecycle_operator",
+      reason: "requires formal arbitration",
+      evidenceRefs: [`evidence://${runId}/output.json`]
+    }
+  });
+  assert.equal(openDispute.statusCode, 200);
+  assert.equal(openDispute.json?.settlement?.disputeStatus, "open");
+
+  const panelCandidates = ["agt_market_arbiter_b", "agt_market_arbiter_a"];
+  const sortedPanelCandidates = [...panelCandidates].sort();
+  const assignmentSeed = normalizeForCanonicalJson(
+    {
+      tenantId: "tenant_default",
+      runId,
+      disputeId: "dsp_arb_lifecycle_1",
+      panelCandidateAgentIds: sortedPanelCandidates
+    },
+    { path: "$" }
+  );
+  const assignmentHash = sha256Hex(canonicalJsonStringify(assignmentSeed));
+  const expectedArbiter = sortedPanelCandidates[Number.parseInt(assignmentHash.slice(0, 8), 16) % sortedPanelCandidates.length];
+
+  const openArbitration = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/open`,
+    headers: { "x-idempotency-key": "market_arb_lifecycle_open_1" },
+    body: {
+      caseId: "arb_case_lifecycle_1",
+      disputeId: "dsp_arb_lifecycle_1",
+      panelCandidateAgentIds: panelCandidates,
+      evidenceRefs: [`evidence://${runId}/output.json`]
+    }
+  });
+  assert.equal(openArbitration.statusCode, 201);
+  assert.equal(openArbitration.json?.arbitrationCase?.status, "under_review");
+  assert.equal(openArbitration.json?.arbitrationCase?.arbiterAgentId, expectedArbiter);
+  assert.equal(openArbitration.json?.arbitrationCase?.metadata?.assignmentHash, assignmentHash);
+
+  const selectedArbiterKeypair = expectedArbiter === "agt_market_arbiter_a" ? arbiterAKeypair : arbiterBKeypair;
+  const selectedArbiterRegistration = expectedArbiter === "agt_market_arbiter_a" ? arbiterARegistration : arbiterBRegistration;
+  const verdictIssuedAt = new Date(nowMs).toISOString();
+  const arbitrationVerdictCore = normalizeForCanonicalJson(
+    {
+      schemaVersion: "ArbitrationVerdict.v1",
+      verdictId: "arb_vrd_lifecycle_1",
+      caseId: "arb_case_lifecycle_1",
+      tenantId: "tenant_default",
+      runId,
+      settlementId: complete.json?.settlement?.settlementId,
+      disputeId: "dsp_arb_lifecycle_1",
+      arbiterAgentId: expectedArbiter,
+      outcome: "accepted",
+      releaseRatePct: 100,
+      rationale: "verified arbitration outcome",
+      evidenceRefs: [`evidence://${runId}/output.json`],
+      issuedAt: verdictIssuedAt,
+      appealRef: null
+    },
+    { path: "$" }
+  );
+  const arbitrationVerdictHash = sha256Hex(canonicalJsonStringify(arbitrationVerdictCore));
+  const arbitrationVerdictSignature = signHashHexEd25519(arbitrationVerdictHash, selectedArbiterKeypair.privateKeyPem);
+
+  const issueVerdict = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/verdict`,
+    headers: { "x-idempotency-key": "market_arb_lifecycle_verdict_1" },
+    body: {
+      caseId: "arb_case_lifecycle_1",
+      arbitrationVerdict: {
+        caseId: "arb_case_lifecycle_1",
+        verdictId: "arb_vrd_lifecycle_1",
+        arbiterAgentId: expectedArbiter,
+        outcome: "accepted",
+        releaseRatePct: 100,
+        rationale: "verified arbitration outcome",
+        evidenceRefs: [`evidence://${runId}/output.json`],
+        issuedAt: verdictIssuedAt,
+        signerKeyId: selectedArbiterRegistration.keyId,
+        signature: arbitrationVerdictSignature
+      }
+    }
+  });
+  assert.equal(issueVerdict.statusCode, 200);
+  assert.equal(issueVerdict.json?.arbitrationCase?.status, "verdict_issued");
+  assert.equal(issueVerdict.json?.arbitrationVerdict?.verdictHash, arbitrationVerdictHash);
+  assert.equal(issueVerdict.json?.arbitrationVerdictArtifact?.artifactId, "arbitration_verdict_arb_vrd_lifecycle_1");
+
+  const closeArbitration = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/close`,
+    headers: { "x-idempotency-key": "market_arb_lifecycle_close_1" },
+    body: {
+      caseId: "arb_case_lifecycle_1",
+      summary: "arbitration finalized"
+    }
+  });
+  assert.equal(closeArbitration.statusCode, 200);
+  assert.equal(closeArbitration.json?.arbitrationCase?.status, "closed");
+  assert.equal(closeArbitration.json?.settlement?.disputeStatus, "closed");
+  assert.equal(closeArbitration.json?.settlement?.disputeVerdictArtifactId, "arbitration_verdict_arb_vrd_lifecycle_1");
+
+  const openAppeal = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/appeal`,
+    headers: { "x-idempotency-key": "market_arb_lifecycle_appeal_open_1" },
+    body: {
+      caseId: "arb_case_lifecycle_appeal_1",
+      parentCaseId: "arb_case_lifecycle_1",
+      reason: "new admissible evidence",
+      panelCandidateAgentIds: ["agt_market_arbiter_a", "agt_market_arbiter_b"],
+      evidenceRefs: [`evidence://${runId}/output.json`]
+    }
+  });
+  assert.equal(openAppeal.statusCode, 201);
+  assert.equal(openAppeal.json?.arbitrationCase?.appealRef?.parentCaseId, "arb_case_lifecycle_1");
+  assert.equal(openAppeal.json?.arbitrationCase?.status, "under_review");
+
+  const listCases = await request(api, {
+    method: "GET",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/cases`
+  });
+  assert.equal(listCases.statusCode, 200);
+  assert.equal(Array.isArray(listCases.json?.cases), true);
+  assert.equal((listCases.json?.cases ?? []).length >= 2, true);
+
+  const getAppealCase = await request(api, {
+    method: "GET",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/cases/arb_case_lifecycle_appeal_1`
+  });
+  assert.equal(getAppealCase.statusCode, 200);
+  assert.equal(getAppealCase.json?.arbitrationCase?.caseId, "arb_case_lifecycle_appeal_1");
+
+  nowMs += 3 * 24 * 60 * 60_000;
+  const lateAppeal = await request(api, {
+    method: "POST",
+    path: `/runs/${encodeURIComponent(runId)}/arbitration/appeal`,
+    headers: { "x-idempotency-key": "market_arb_lifecycle_appeal_open_2" },
+    body: {
+      caseId: "arb_case_lifecycle_appeal_2",
+      parentCaseId: "arb_case_lifecycle_1",
+      reason: "should miss appeal window",
+      evidenceRefs: [`evidence://${runId}/output.json`]
+    }
+  });
+  assert.equal(lateAppeal.statusCode, 409);
+  assert.match(String(lateAppeal.json?.error ?? ""), /appeal window has closed/i);
+});
+
 test("API e2e: marketplace supports all interaction directions", async () => {
   const api = createApi();
   await registerAgent(api, "agt_market_dir_poster");

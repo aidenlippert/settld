@@ -5671,6 +5671,33 @@ export function createApi({
     throw new TypeError("agent run settlements not supported for this store");
   }
 
+  async function getArbitrationCaseRecord({ tenantId, caseId }) {
+    if (typeof store.getArbitrationCase === "function") return store.getArbitrationCase({ tenantId, caseId });
+    if (store.arbitrationCases instanceof Map) return store.arbitrationCases.get(makeScopedKey({ tenantId, id: String(caseId) })) ?? null;
+    throw new TypeError("arbitration cases not supported for this store");
+  }
+
+  async function listArbitrationCaseRecords({ tenantId, runId = null, disputeId = null, status = null, limit = 200, offset = 0 } = {}) {
+    if (typeof store.listArbitrationCases === "function") {
+      return store.listArbitrationCases({ tenantId, runId, disputeId, status, limit, offset });
+    }
+    if (!(store.arbitrationCases instanceof Map)) throw new TypeError("arbitration cases not supported for this store");
+    const statusFilter = typeof status === "string" && status.trim() !== "" ? status.trim().toLowerCase() : null;
+    const rows = [];
+    for (const row of store.arbitrationCases.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID)) continue;
+      if (runId !== null && String(row.runId ?? "") !== String(runId)) continue;
+      if (disputeId !== null && String(row.disputeId ?? "") !== String(disputeId)) continue;
+      if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      rows.push(row);
+    }
+    rows.sort((left, right) => String(left.caseId ?? "").localeCompare(String(right.caseId ?? "")));
+    const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(1000, limit) : 200;
+    const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+    return rows.slice(safeOffset, safeOffset + safeLimit);
+  }
+
   function normalizePercentIntOrNull(value) {
     if (value === null || value === undefined) return null;
     const n = Number(value);
@@ -6951,6 +6978,128 @@ export function createApi({
         throw new TypeError("arbitrationVerdict.evidenceRefs must be a subset of settlement.disputeContext.evidenceRefs");
       }
     }
+  }
+
+  const ARBITRATION_CASE_STATUS = Object.freeze({
+    OPEN: "open",
+    UNDER_REVIEW: "under_review",
+    VERDICT_ISSUED: "verdict_issued",
+    CLOSED: "closed"
+  });
+
+  const ARBITRATION_CASE_STATUS_RANK = new Map([
+    [ARBITRATION_CASE_STATUS.OPEN, 1],
+    [ARBITRATION_CASE_STATUS.UNDER_REVIEW, 2],
+    [ARBITRATION_CASE_STATUS.VERDICT_ISSUED, 3],
+    [ARBITRATION_CASE_STATUS.CLOSED, 4]
+  ]);
+
+  function normalizeArbitrationCaseStatus(value, { fieldName = "status" } = {}) {
+    const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (!ARBITRATION_CASE_STATUS_RANK.has(normalized)) {
+      throw new TypeError(`${fieldName} must be one of: ${Array.from(ARBITRATION_CASE_STATUS_RANK.keys()).join("|")}`);
+    }
+    return normalized;
+  }
+
+  function normalizeArbitrationCaseEvidenceRefs(value, { fieldName = "evidenceRefs" } = {}) {
+    if (!Array.isArray(value)) throw new TypeError(`${fieldName} must be an array`);
+    return normalizeUniqueNonEmptyStringArray(value, { fieldName });
+  }
+
+  function assertArbitrationCaseEvidenceBoundToDisputeContext({ settlement, evidenceRefs } = {}) {
+    const disputeContextEvidenceRefs = Array.isArray(settlement?.disputeContext?.evidenceRefs) ? settlement.disputeContext.evidenceRefs : [];
+    const allowedEvidenceRefs = new Set(disputeContextEvidenceRefs.map((value) => String(value)));
+    for (let index = 0; index < evidenceRefs.length; index += 1) {
+      const evidenceRef = String(evidenceRefs[index]);
+      if (!allowedEvidenceRefs.has(evidenceRef)) {
+        throw new TypeError("arbitration case evidenceRefs must be a subset of settlement.disputeContext.evidenceRefs");
+      }
+    }
+  }
+
+  function assertArbitrationVerdictEvidenceBoundToCase({ arbitrationCase, arbitrationVerdict } = {}) {
+    if (!arbitrationCase || typeof arbitrationCase !== "object" || Array.isArray(arbitrationCase)) {
+      throw new TypeError("arbitrationCase is required");
+    }
+    if (!arbitrationVerdict || typeof arbitrationVerdict !== "object" || Array.isArray(arbitrationVerdict)) {
+      throw new TypeError("arbitrationVerdict is required");
+    }
+    const caseEvidenceRefs = Array.isArray(arbitrationCase.evidenceRefs) ? arbitrationCase.evidenceRefs : [];
+    const allowedEvidenceRefs = new Set(caseEvidenceRefs.map((value) => String(value)));
+    const verdictEvidenceRefs = Array.isArray(arbitrationVerdict.evidenceRefs) ? arbitrationVerdict.evidenceRefs : [];
+    for (let index = 0; index < verdictEvidenceRefs.length; index += 1) {
+      const evidenceRef = String(verdictEvidenceRefs[index]);
+      if (!allowedEvidenceRefs.has(evidenceRef)) {
+        throw new TypeError("arbitrationVerdict.evidenceRefs must be a subset of arbitration case evidenceRefs");
+      }
+    }
+  }
+
+  function mergeUniqueStringArrays(...arrays) {
+    const out = [];
+    const seen = new Set();
+    for (const arr of arrays) {
+      if (!Array.isArray(arr)) continue;
+      for (let index = 0; index < arr.length; index += 1) {
+        const value = arr[index];
+        if (typeof value !== "string" || value.trim() === "") continue;
+        const normalized = value.trim();
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        out.push(normalized);
+      }
+    }
+    return out;
+  }
+
+  async function assignDeterministicArbiterAgentId({ tenantId, runId, disputeId, panelCandidateAgentIds } = {}) {
+    if (!Array.isArray(panelCandidateAgentIds) || panelCandidateAgentIds.length === 0) {
+      throw new TypeError("panelCandidateAgentIds must be a non-empty array");
+    }
+    const normalizedCandidates = [];
+    const seenCandidates = new Set();
+    for (let index = 0; index < panelCandidateAgentIds.length; index += 1) {
+      const candidate = panelCandidateAgentIds[index];
+      if (typeof candidate !== "string" || candidate.trim() === "") {
+        throw new TypeError(`panelCandidateAgentIds[${index}] must be a non-empty string`);
+      }
+      const normalizedCandidate = candidate.trim();
+      if (seenCandidates.has(normalizedCandidate)) continue;
+      const identity = await getAgentIdentityRecord({ tenantId, agentId: normalizedCandidate });
+      if (!identity) throw new TypeError(`arbiter panel candidate not found: ${normalizedCandidate}`);
+      seenCandidates.add(normalizedCandidate);
+      normalizedCandidates.push(normalizedCandidate);
+    }
+    if (!normalizedCandidates.length) throw new TypeError("panelCandidateAgentIds must include at least one existing agent");
+    normalizedCandidates.sort((left, right) => left.localeCompare(right));
+    const assignmentSeed = normalizeForCanonicalJson(
+      {
+        tenantId: normalizeTenant(tenantId),
+        runId: String(runId),
+        disputeId: String(disputeId),
+        panelCandidateAgentIds: normalizedCandidates
+      },
+      { path: "$" }
+    );
+    const assignmentHash = sha256Hex(canonicalJsonStringify(assignmentSeed));
+    const assignmentIndex = Number.parseInt(assignmentHash.slice(0, 8), 16) % normalizedCandidates.length;
+    return {
+      arbiterAgentId: normalizedCandidates[assignmentIndex],
+      assignmentHash,
+      panelCandidateAgentIds: normalizedCandidates
+    };
+  }
+
+  function ensureArbitrationCaseStatusTransition({ currentStatus, nextStatus }) {
+    const current = normalizeArbitrationCaseStatus(currentStatus, { fieldName: "arbitrationCase.status" });
+    const next = normalizeArbitrationCaseStatus(nextStatus, { fieldName: "next arbitration case status" });
+    const currentRank = ARBITRATION_CASE_STATUS_RANK.get(current) ?? 0;
+    const nextRank = ARBITRATION_CASE_STATUS_RANK.get(next) ?? 0;
+    if (nextRank < currentRank) {
+      throw new TypeError("arbitration case status cannot regress");
+    }
+    return next;
   }
 
   function settlementDisputeWindowEndsAtMs(settlement) {
@@ -8423,33 +8572,46 @@ export function createApi({
     runId,
     settlement,
     arbitrationVerdict,
+    arbitrationCase = null,
     at = nowIso()
   } = {}) {
-    if (!arbitrationVerdict || typeof arbitrationVerdict !== "object" || Array.isArray(arbitrationVerdict)) return null;
+    const hasArbitrationCase = arbitrationCase && typeof arbitrationCase === "object" && !Array.isArray(arbitrationCase);
+    const hasArbitrationVerdict = arbitrationVerdict && typeof arbitrationVerdict === "object" && !Array.isArray(arbitrationVerdict);
+    if (!hasArbitrationCase && !hasArbitrationVerdict) return null;
     if (typeof store.putArtifact !== "function" || typeof store.createDelivery !== "function") return null;
     const artifactType = "ArbitrationCase.v1";
-    const caseId = typeof arbitrationVerdict.caseId === "string" && arbitrationVerdict.caseId.trim() !== ""
-      ? arbitrationVerdict.caseId.trim()
-      : null;
+    const caseId = hasArbitrationCase
+      ? (typeof arbitrationCase.caseId === "string" && arbitrationCase.caseId.trim() !== "" ? arbitrationCase.caseId.trim() : null)
+      : typeof arbitrationVerdict.caseId === "string" && arbitrationVerdict.caseId.trim() !== ""
+        ? arbitrationVerdict.caseId.trim()
+        : null;
     if (!caseId) return null;
-    const artifactId = `arbitration_case_${caseId}`;
-    const openedAt = settlement?.disputeOpenedAt ?? at;
-    const closedAt = settlement?.disputeClosedAt ?? at;
-    const createdAt = openedAt;
-    const updatedAt = closedAt;
-    const evidenceRefs = Array.isArray(settlement?.disputeContext?.evidenceRefs)
-      ? settlement.disputeContext.evidenceRefs
-      : Array.isArray(arbitrationVerdict.evidenceRefs)
-        ? arbitrationVerdict.evidenceRefs
-        : [];
-    const appealRef =
-      arbitrationVerdict?.appealRef && typeof arbitrationVerdict.appealRef === "object" && !Array.isArray(arbitrationVerdict.appealRef)
+    const revisionRaw = hasArbitrationCase ? Number(arbitrationCase.revision ?? 1) : 1;
+    const revision = Number.isSafeInteger(revisionRaw) && revisionRaw > 0 ? revisionRaw : 1;
+    const artifactId = revision > 1 ? `arbitration_case_${caseId}_r${revision}` : `arbitration_case_${caseId}`;
+    const openedAt = hasArbitrationCase ? arbitrationCase.openedAt ?? at : settlement?.disputeOpenedAt ?? at;
+    const closedAt = hasArbitrationCase ? arbitrationCase.closedAt ?? null : settlement?.disputeClosedAt ?? at;
+    const createdAt = hasArbitrationCase ? arbitrationCase.createdAt ?? openedAt : openedAt;
+    const updatedAt = hasArbitrationCase ? arbitrationCase.updatedAt ?? at : closedAt ?? at;
+    const evidenceRefs = hasArbitrationCase
+      ? (Array.isArray(arbitrationCase.evidenceRefs) ? arbitrationCase.evidenceRefs : [])
+      : Array.isArray(settlement?.disputeContext?.evidenceRefs)
+        ? settlement.disputeContext.evidenceRefs
+        : Array.isArray(arbitrationVerdict.evidenceRefs)
+          ? arbitrationVerdict.evidenceRefs
+          : [];
+    const appealRef = hasArbitrationCase
+      ? arbitrationCase.appealRef ?? null
+      : arbitrationVerdict?.appealRef && typeof arbitrationVerdict.appealRef === "object" && !Array.isArray(arbitrationVerdict.appealRef)
         ? {
             parentCaseId: arbitrationVerdict.appealRef.appealCaseId ?? null,
             parentVerdictId: arbitrationVerdict.appealRef.parentVerdictId ?? null,
             reason: arbitrationVerdict.appealRef.reason ?? null
           }
         : null;
+    const normalizedStatus = hasArbitrationCase
+      ? normalizeArbitrationCaseStatus(arbitrationCase.status ?? ARBITRATION_CASE_STATUS.OPEN, { fieldName: "arbitrationCase.status" })
+      : ARBITRATION_CASE_STATUS.CLOSED;
     const body = normalizeForCanonicalJson(
       {
         schemaVersion: artifactType,
@@ -8457,21 +8619,23 @@ export function createApi({
         artifactId,
         caseId,
         tenantId: normalizeTenant(tenantId),
-        runId: String(runId),
-        settlementId: String(settlement?.settlementId ?? ""),
-        disputeId: String(settlement?.disputeId ?? arbitrationVerdict?.disputeId ?? ""),
-        claimantAgentId: String(settlement?.payerAgentId ?? settlement?.disputeContext?.openedByAgentId ?? ""),
-        respondentAgentId: String(settlement?.agentId ?? ""),
-        arbiterAgentId: arbitrationVerdict.arbiterAgentId ?? null,
-        status: "closed",
+        runId: String((hasArbitrationCase ? arbitrationCase.runId : runId) ?? ""),
+        settlementId: String((hasArbitrationCase ? arbitrationCase.settlementId : settlement?.settlementId) ?? ""),
+        disputeId: String((hasArbitrationCase ? arbitrationCase.disputeId : settlement?.disputeId ?? arbitrationVerdict?.disputeId) ?? ""),
+        claimantAgentId: String(
+          (hasArbitrationCase ? arbitrationCase.claimantAgentId : settlement?.payerAgentId ?? settlement?.disputeContext?.openedByAgentId) ?? ""
+        ),
+        respondentAgentId: String((hasArbitrationCase ? arbitrationCase.respondentAgentId : settlement?.agentId) ?? ""),
+        arbiterAgentId: hasArbitrationCase ? arbitrationCase.arbiterAgentId ?? null : arbitrationVerdict.arbiterAgentId ?? null,
+        status: normalizedStatus,
         openedAt,
-        closedAt,
-        summary: settlement?.disputeResolution?.summary ?? arbitrationVerdict?.rationale ?? null,
+        closedAt: closedAt ?? null,
+        summary: hasArbitrationCase ? arbitrationCase.summary ?? null : settlement?.disputeResolution?.summary ?? arbitrationVerdict?.rationale ?? null,
         evidenceRefs,
-        verdictId: arbitrationVerdict.verdictId ?? null,
-        verdictHash: arbitrationVerdict.verdictHash ?? null,
+        verdictId: hasArbitrationCase ? arbitrationCase.verdictId ?? null : arbitrationVerdict.verdictId ?? null,
+        verdictHash: hasArbitrationCase ? arbitrationCase.verdictHash ?? null : arbitrationVerdict.verdictHash ?? null,
         appealRef: appealRef?.parentCaseId ? appealRef : null,
-        revision: 1,
+        revision,
         createdAt,
         updatedAt
       },
@@ -8491,7 +8655,7 @@ export function createApi({
     let deliveriesCreated = 0;
     for (const destination of destinations) {
       const dedupeKey = `${tenantId}:${destination.destinationId}:${artifactType}:${artifactId}:${artifactHash}`;
-      const scopeKey = String(runId ?? settlement?.settlementId ?? caseId ?? artifactId);
+      const scopeKey = String((hasArbitrationCase ? arbitrationCase.runId : runId) ?? settlement?.settlementId ?? caseId ?? artifactId);
       const orderSeq = Date.parse(updatedAt) || 0;
       const priority = 75;
       const orderKey = `${scopeKey}\n${String(orderSeq)}\n${String(priority)}\n${artifactId}`;
@@ -16734,6 +16898,40 @@ export function createApi({
         return sendJson(res, 200, { settlement });
       }
 
+      if (parts[0] === "runs" && parts[1] && parts[2] === "arbitration" && parts[3] === "cases" && parts.length === 4 && req.method === "GET") {
+        const runId = parts[1];
+        let settlement = null;
+        try {
+          settlement = await getAgentRunSettlementRecord({ tenantId, runId });
+        } catch (err) {
+          return sendError(res, 501, "agent run settlements not supported for this store", { message: err?.message });
+        }
+        if (!settlement) return sendError(res, 404, "run settlement not found");
+        const statusFilter = url.searchParams.get("status");
+        let cases = [];
+        try {
+          cases = await listArbitrationCaseRecords({ tenantId, runId, status: statusFilter ?? null, limit: 500, offset: 0 });
+        } catch (err) {
+          return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+        }
+        return sendJson(res, 200, { runId, cases });
+      }
+
+      if (parts[0] === "runs" && parts[1] && parts[2] === "arbitration" && parts[3] === "cases" && parts[4] && parts.length === 5 && req.method === "GET") {
+        const runId = parts[1];
+        const caseId = parts[4];
+        let arbitrationCase = null;
+        try {
+          arbitrationCase = await getArbitrationCaseRecord({ tenantId, caseId });
+        } catch (err) {
+          return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+        }
+        if (!arbitrationCase || String(arbitrationCase.runId ?? "") !== String(runId)) {
+          return sendError(res, 404, "arbitration case not found");
+        }
+        return sendJson(res, 200, { runId, arbitrationCase });
+      }
+
       if (parts[0] === "runs" && parts[1] && parts[2] === "agreement" && parts.length === 3 && req.method === "GET") {
         const runId = parts[1];
         const linkedTask = findMarketplaceTaskByRunId({ tenantId, runId });
@@ -17841,6 +18039,656 @@ export function createApi({
           return sendJson(res, 200, responseBody);
         } catch (err) {
           return sendError(res, 409, "manual settlement resolution failed", { message: err?.message, code: err?.code ?? null });
+        }
+      }
+
+      if (parts[0] === "runs" && parts[1] && parts[2] === "arbitration" && parts.length === 4 && req.method === "POST") {
+        if (!requireProtocolHeaderForWrite(req, res)) return;
+        const runId = parts[1];
+        const action = parts[3];
+        if (action !== "open" && action !== "assign" && action !== "evidence" && action !== "verdict" && action !== "close" && action !== "appeal") {
+          return sendError(res, 404, "not found");
+        }
+
+        const body = await readJsonBody(req);
+        let idemStoreKey = null;
+        let idemRequestHash = null;
+        try {
+          ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+        } catch (err) {
+          return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+        }
+        if (idemStoreKey) {
+          const existing = store.idempotency.get(idemStoreKey);
+          if (existing) {
+            if (existing.requestHash !== idemRequestHash) {
+              return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+            }
+            return sendJson(res, existing.statusCode, existing.body);
+          }
+        }
+
+        let settlement = null;
+        try {
+          settlement = await getAgentRunSettlementRecord({ tenantId, runId });
+        } catch (err) {
+          return sendError(res, 501, "agent run settlements not supported for this store", { message: err?.message });
+        }
+        if (!settlement) return sendError(res, 404, "run settlement not found");
+
+        const nowAt = nowIso();
+        const parseOptionalNonEmptyString = (value, name) => {
+          if (value === undefined || value === null) return null;
+          if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${name} must be a non-empty string`);
+          return value.trim();
+        };
+        let disputeId = null;
+        try {
+          disputeId = parseOptionalNonEmptyString(body?.disputeId, "disputeId") ?? String(settlement?.disputeId ?? "");
+        } catch (err) {
+          return sendError(res, 400, "invalid disputeId", { message: err?.message });
+        }
+        if (!disputeId) return sendError(res, 400, "disputeId is required");
+        if (String(settlement?.disputeId ?? "") && String(settlement?.disputeId ?? "") !== String(disputeId)) {
+          return sendError(res, 409, "disputeId does not match settlement dispute");
+        }
+
+        const parseCaseIdFromBody = () => {
+          const caseIdRaw = body?.caseId ?? null;
+          if (caseIdRaw === null || caseIdRaw === undefined || caseIdRaw === "") return null;
+          if (typeof caseIdRaw !== "string" || caseIdRaw.trim() === "") throw new TypeError("caseId must be a non-empty string");
+          return caseIdRaw.trim();
+        };
+
+        const loadCaseOrError = async (caseId, { requireOpen = false } = {}) => {
+          let arbitrationCase;
+          try {
+            arbitrationCase = await getArbitrationCaseRecord({ tenantId, caseId });
+          } catch (err) {
+            return { error: sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message }) };
+          }
+          if (!arbitrationCase || String(arbitrationCase.runId ?? "") !== String(runId)) {
+            return { error: sendError(res, 404, "arbitration case not found") };
+          }
+          if (requireOpen && normalizeArbitrationCaseStatus(arbitrationCase.status) === ARBITRATION_CASE_STATUS.CLOSED) {
+            return { error: sendError(res, 409, "arbitration case is closed") };
+          }
+          return { arbitrationCase };
+        };
+
+        if (action === "open") {
+          if (String(settlement?.disputeStatus ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_DISPUTE_STATUS.OPEN) {
+            return sendError(res, 409, "arbitration requires an open dispute");
+          }
+          let caseId = null;
+          try {
+            caseId = parseCaseIdFromBody() ?? createId("arb_case");
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration case id", { message: err?.message });
+          }
+          let existingCase = null;
+          try {
+            existingCase = await getArbitrationCaseRecord({ tenantId, caseId });
+          } catch (err) {
+            return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+          }
+          if (existingCase) return sendError(res, 409, "arbitration case already exists");
+
+          let evidenceRefs = [];
+          try {
+            evidenceRefs = normalizeArbitrationCaseEvidenceRefs(
+              Array.isArray(body?.evidenceRefs) ? body.evidenceRefs : settlement?.disputeContext?.evidenceRefs ?? [],
+              { fieldName: "evidenceRefs" }
+            );
+            assertArbitrationCaseEvidenceBoundToDisputeContext({ settlement, evidenceRefs });
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration evidence", { message: err?.message });
+          }
+
+          let arbiterAgentId = null;
+          let assignment = null;
+          try {
+            arbiterAgentId = parseOptionalNonEmptyString(body?.arbiterAgentId, "arbiterAgentId");
+          } catch (err) {
+            return sendError(res, 400, "invalid arbiter assignment", { message: err?.message });
+          }
+          if (arbiterAgentId) {
+            const arbiterIdentity = await getAgentIdentityRecord({ tenantId, agentId: arbiterAgentId });
+            if (!arbiterIdentity) return sendError(res, 404, "arbiterAgentId not found");
+          } else if (Array.isArray(body?.panelCandidateAgentIds) && body.panelCandidateAgentIds.length > 0) {
+            try {
+              assignment = await assignDeterministicArbiterAgentId({
+                tenantId,
+                runId,
+                disputeId,
+                panelCandidateAgentIds: body.panelCandidateAgentIds
+              });
+            } catch (err) {
+              return sendError(res, 400, "invalid arbitration panel assignment", { message: err?.message });
+            }
+            arbiterAgentId = assignment.arbiterAgentId;
+          }
+          if (!arbiterAgentId) return sendError(res, 400, "arbiterAgentId or panelCandidateAgentIds is required");
+
+          const arbitrationCase = normalizeForCanonicalJson(
+            {
+              schemaVersion: "ArbitrationCase.v1",
+              caseId,
+              tenantId: normalizeTenant(tenantId),
+              runId: String(runId),
+              settlementId: String(settlement?.settlementId ?? ""),
+              disputeId: String(disputeId),
+              claimantAgentId: String(settlement?.payerAgentId ?? settlement?.disputeContext?.openedByAgentId ?? ""),
+              respondentAgentId: String(settlement?.agentId ?? ""),
+              arbiterAgentId,
+              status: ARBITRATION_CASE_STATUS.UNDER_REVIEW,
+              openedAt: nowAt,
+              closedAt: null,
+              summary: parseOptionalNonEmptyString(body?.summary, "summary"),
+              evidenceRefs,
+              appealRef: null,
+              metadata: assignment
+                ? {
+                    assignmentHash: assignment.assignmentHash,
+                    panelCandidateAgentIds: assignment.panelCandidateAgentIds
+                  }
+                : null,
+              revision: 1,
+              createdAt: nowAt,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+          const responseBody = {
+            arbitrationCase,
+            arbitrationCaseArtifact: null
+          };
+          const ops = [{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } });
+          }
+          await commitTx(ops);
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase, at: nowAt });
+            await emitMarketplaceLifecycleArtifact({
+              tenantId,
+              eventType: "marketplace.arbitration.opened",
+              runId,
+              sourceEventId: caseId,
+              actorAgentId: arbitrationCase.arbiterAgentId ?? null,
+              settlement,
+              details: { arbitrationCase, arbitrationCaseArtifact }
+            });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          return sendJson(res, 201, { ...responseBody, arbitrationCaseArtifact });
+        }
+
+        if (action === "assign") {
+          let caseId = null;
+          try {
+            caseId = parseCaseIdFromBody();
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration case id", { message: err?.message });
+          }
+          if (!caseId) return sendError(res, 400, "caseId is required");
+          const loaded = await loadCaseOrError(caseId, { requireOpen: true });
+          if (loaded.error) return;
+          const arbitrationCase = loaded.arbitrationCase;
+
+          let assignment = null;
+          let arbiterAgentId = null;
+          try {
+            arbiterAgentId = parseOptionalNonEmptyString(body?.arbiterAgentId, "arbiterAgentId");
+          } catch (err) {
+            return sendError(res, 400, "invalid arbiter assignment", { message: err?.message });
+          }
+          if (arbiterAgentId) {
+            const arbiterIdentity = await getAgentIdentityRecord({ tenantId, agentId: arbiterAgentId });
+            if (!arbiterIdentity) return sendError(res, 404, "arbiterAgentId not found");
+          } else {
+            try {
+              assignment = await assignDeterministicArbiterAgentId({
+                tenantId,
+                runId,
+                disputeId,
+                panelCandidateAgentIds: body?.panelCandidateAgentIds
+              });
+            } catch (err) {
+              return sendError(res, 400, "invalid arbitration panel assignment", { message: err?.message });
+            }
+            arbiterAgentId = assignment.arbiterAgentId;
+          }
+
+          let nextStatus;
+          try {
+            nextStatus = ensureArbitrationCaseStatusTransition({
+              currentStatus: arbitrationCase.status,
+              nextStatus: ARBITRATION_CASE_STATUS.UNDER_REVIEW
+            });
+          } catch (err) {
+            return sendError(res, 409, "arbitration transition rejected", { message: err?.message });
+          }
+          const nextCase = normalizeForCanonicalJson(
+            {
+              ...arbitrationCase,
+              arbiterAgentId,
+              status: nextStatus,
+              metadata: {
+                ...(arbitrationCase?.metadata && typeof arbitrationCase.metadata === "object" ? arbitrationCase.metadata : {}),
+                ...(assignment
+                  ? {
+                      assignmentHash: assignment.assignmentHash,
+                      panelCandidateAgentIds: assignment.panelCandidateAgentIds
+                    }
+                  : null)
+              },
+              revision: Number(arbitrationCase.revision ?? 0) + 1,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+          const responseBody = { arbitrationCase: nextCase, arbitrationCaseArtifact: null };
+          const ops = [{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: nextCase }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await commitTx(ops);
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: nextCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          return sendJson(res, 200, { ...responseBody, arbitrationCaseArtifact });
+        }
+
+        if (action === "evidence") {
+          let caseId = null;
+          try {
+            caseId = parseCaseIdFromBody();
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration case id", { message: err?.message });
+          }
+          if (!caseId) return sendError(res, 400, "caseId is required");
+          const loaded = await loadCaseOrError(caseId, { requireOpen: true });
+          if (loaded.error) return;
+          const arbitrationCase = loaded.arbitrationCase;
+          const evidenceRef = typeof body?.evidenceRef === "string" && body.evidenceRef.trim() !== "" ? body.evidenceRef.trim() : null;
+          if (!evidenceRef) return sendError(res, 400, "evidenceRef is required");
+          const mergedEvidenceRefs = mergeUniqueStringArrays(arbitrationCase?.evidenceRefs, [evidenceRef]);
+          try {
+            assertArbitrationCaseEvidenceBoundToDisputeContext({ settlement, evidenceRefs: mergedEvidenceRefs });
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration evidence", { message: err?.message });
+          }
+          let nextStatus = arbitrationCase.status;
+          try {
+            nextStatus = ensureArbitrationCaseStatusTransition({
+              currentStatus: arbitrationCase.status,
+              nextStatus:
+                normalizeArbitrationCaseStatus(arbitrationCase.status) === ARBITRATION_CASE_STATUS.OPEN
+                  ? ARBITRATION_CASE_STATUS.UNDER_REVIEW
+                  : arbitrationCase.status
+            });
+          } catch (err) {
+            return sendError(res, 409, "arbitration transition rejected", { message: err?.message });
+          }
+          const nextCase = normalizeForCanonicalJson(
+            {
+              ...arbitrationCase,
+              status: nextStatus,
+              evidenceRefs: mergedEvidenceRefs,
+              revision: Number(arbitrationCase.revision ?? 0) + 1,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+          const responseBody = {
+            arbitrationCase: nextCase,
+            arbitrationCaseArtifact: null
+          };
+          const ops = [{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: nextCase }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await commitTx(ops);
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: nextCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          return sendJson(res, 200, { ...responseBody, arbitrationCaseArtifact });
+        }
+
+        if (action === "verdict") {
+          let caseId = null;
+          try {
+            caseId = parseCaseIdFromBody();
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration case id", { message: err?.message });
+          }
+          if (!caseId) return sendError(res, 400, "caseId is required");
+          const loaded = await loadCaseOrError(caseId, { requireOpen: true });
+          if (loaded.error) return;
+          const arbitrationCase = loaded.arbitrationCase;
+          const currentStatus = normalizeArbitrationCaseStatus(arbitrationCase.status);
+          if (currentStatus !== ARBITRATION_CASE_STATUS.OPEN && currentStatus !== ARBITRATION_CASE_STATUS.UNDER_REVIEW) {
+            return sendError(res, 409, "arbitration case cannot accept verdict in current status");
+          }
+          let signedArbitrationVerdict = null;
+          try {
+            signedArbitrationVerdict = await parseSignedArbitrationVerdict({
+              tenantId,
+              runId,
+              settlement,
+              disputeId: arbitrationCase.disputeId,
+              arbitrationVerdictInput: body?.arbitrationVerdict
+            });
+            if (String(signedArbitrationVerdict.caseId ?? "") !== String(caseId)) {
+              throw new TypeError("arbitrationVerdict.caseId must match caseId");
+            }
+            assertArbitrationVerdictEvidenceBoundToDisputeContext({ settlement, arbitrationVerdict: signedArbitrationVerdict });
+            assertArbitrationVerdictEvidenceBoundToCase({ arbitrationCase, arbitrationVerdict: signedArbitrationVerdict });
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration verdict", { message: err?.message });
+          }
+          const nowMs = Date.parse(nowAt);
+          const endsAtMs = settlementDisputeWindowEndsAtMs(settlement);
+          const verdictIssuedAtMs =
+            signedArbitrationVerdict?.issuedAt && Number.isFinite(Date.parse(String(signedArbitrationVerdict.issuedAt)))
+              ? Date.parse(String(signedArbitrationVerdict.issuedAt))
+              : Number.NaN;
+          if (!Number.isFinite(endsAtMs) || !Number.isFinite(nowMs) || nowMs > endsAtMs || !Number.isFinite(verdictIssuedAtMs) || verdictIssuedAtMs > endsAtMs) {
+            return sendError(res, 409, "appeal window has closed");
+          }
+
+          const nextCase = normalizeForCanonicalJson(
+            {
+              ...arbitrationCase,
+              arbiterAgentId: signedArbitrationVerdict.arbiterAgentId ?? arbitrationCase.arbiterAgentId ?? null,
+              status: ARBITRATION_CASE_STATUS.VERDICT_ISSUED,
+              summary: signedArbitrationVerdict.rationale ?? arbitrationCase.summary ?? null,
+              evidenceRefs: mergeUniqueStringArrays(arbitrationCase.evidenceRefs, signedArbitrationVerdict.evidenceRefs),
+              verdictId: signedArbitrationVerdict.verdictId,
+              verdictHash: signedArbitrationVerdict.verdictHash,
+              metadata: {
+                ...(arbitrationCase?.metadata && typeof arbitrationCase.metadata === "object" ? arbitrationCase.metadata : {}),
+                verdictOutcome: signedArbitrationVerdict.outcome ?? null,
+                verdictReleaseRatePct: signedArbitrationVerdict.releaseRatePct ?? null,
+                verdictIssuedAt: signedArbitrationVerdict.issuedAt ?? nowAt,
+                verdictSignerKeyId: signedArbitrationVerdict.signerKeyId ?? null
+              },
+              revision: Number(arbitrationCase.revision ?? 0) + 1,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+          const responseBody = {
+            arbitrationCase: nextCase,
+            arbitrationVerdict: signedArbitrationVerdict,
+            arbitrationCaseArtifact: null,
+            arbitrationVerdictArtifact: null
+          };
+          const ops = [{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: nextCase }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await commitTx(ops);
+          let arbitrationCaseArtifact = null;
+          let arbitrationVerdictArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: nextCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          try {
+            arbitrationVerdictArtifact = await emitArbitrationVerdictArtifact({
+              tenantId,
+              runId,
+              settlement,
+              arbitrationVerdict: signedArbitrationVerdict
+            });
+          } catch {
+            arbitrationVerdictArtifact = null;
+          }
+          return sendJson(res, 200, { ...responseBody, arbitrationCaseArtifact, arbitrationVerdictArtifact });
+        }
+
+        if (action === "close") {
+          let caseId = null;
+          try {
+            caseId = parseCaseIdFromBody();
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration case id", { message: err?.message });
+          }
+          if (!caseId) return sendError(res, 400, "caseId is required");
+          const loaded = await loadCaseOrError(caseId, { requireOpen: true });
+          if (loaded.error) return;
+          const arbitrationCase = loaded.arbitrationCase;
+          const currentStatus = normalizeArbitrationCaseStatus(arbitrationCase.status);
+          if (currentStatus !== ARBITRATION_CASE_STATUS.VERDICT_ISSUED) {
+            return sendError(res, 409, "arbitration case can only be closed after verdict_issued");
+          }
+
+          const closedSummary =
+            body?.summary === undefined || body?.summary === null
+              ? arbitrationCase?.summary ?? null
+              : typeof body?.summary === "string" && body.summary.trim() !== ""
+                ? body.summary.trim()
+                : null;
+          if (body?.summary !== undefined && body?.summary !== null && closedSummary === null) {
+            return sendError(res, 400, "summary must be a non-empty string when provided");
+          }
+
+          let nextSettlement = settlement;
+          if (String(settlement?.disputeStatus ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_DISPUTE_STATUS.OPEN) {
+            const verdictOutcome = String(arbitrationCase?.metadata?.verdictOutcome ?? "").toLowerCase();
+            if (verdictOutcome !== "accepted" && verdictOutcome !== "rejected" && verdictOutcome !== "partial") {
+              return sendError(res, 409, "arbitration verdict outcome missing for settlement finalization");
+            }
+            try {
+              nextSettlement = updateAgentRunSettlementDispute({
+                settlement,
+                action: "close",
+                disputeId: arbitrationCase.disputeId,
+                resolutionInput: {
+                  outcome: verdictOutcome,
+                  escalationLevel: AGENT_RUN_SETTLEMENT_DISPUTE_ESCALATION_LEVEL.L2_ARBITER,
+                  closedByAgentId: arbitrationCase.arbiterAgentId ?? null,
+                  summary: closedSummary ?? null,
+                  evidenceRefs: Array.isArray(arbitrationCase.evidenceRefs) ? arbitrationCase.evidenceRefs : []
+                },
+                at: nowAt
+              });
+            } catch (err) {
+              return sendError(res, 409, "settlement finality transition rejected", { message: err?.message });
+            }
+            nextSettlement = {
+              ...nextSettlement,
+              disputeVerdictId: arbitrationCase.verdictId ?? nextSettlement.disputeVerdictId ?? null,
+              disputeVerdictHash: arbitrationCase.verdictHash ?? nextSettlement.disputeVerdictHash ?? null,
+              disputeVerdictArtifactId:
+                arbitrationCase.verdictId ? `arbitration_verdict_${String(arbitrationCase.verdictId)}` : nextSettlement.disputeVerdictArtifactId ?? null,
+              disputeVerdictSignerKeyId: arbitrationCase?.metadata?.verdictSignerKeyId ?? nextSettlement.disputeVerdictSignerKeyId ?? null,
+              disputeVerdictIssuedAt: arbitrationCase?.metadata?.verdictIssuedAt ?? nextSettlement.disputeVerdictIssuedAt ?? null,
+              revision: Number(nextSettlement.revision ?? 0) + 1,
+              updatedAt: nowAt
+            };
+          }
+
+          const nextCase = normalizeForCanonicalJson(
+            {
+              ...arbitrationCase,
+              status: ARBITRATION_CASE_STATUS.CLOSED,
+              closedAt: nowAt,
+              summary: closedSummary ?? null,
+              revision: Number(arbitrationCase.revision ?? 0) + 1,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+          const responseBody = {
+            arbitrationCase: nextCase,
+            settlement: nextSettlement,
+            arbitrationCaseArtifact: null
+          };
+          const ops = [{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: nextCase }];
+          if (nextSettlement !== settlement) {
+            ops.push({ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement: nextSettlement });
+          }
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await commitTx(ops);
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: nextCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          return sendJson(res, 200, { ...responseBody, arbitrationCaseArtifact });
+        }
+
+        if (action === "appeal") {
+          const parentCaseId =
+            typeof body?.parentCaseId === "string" && body.parentCaseId.trim() !== "" ? body.parentCaseId.trim() : null;
+          if (!parentCaseId) return sendError(res, 400, "parentCaseId is required");
+          const loadedParent = await loadCaseOrError(parentCaseId, { requireOpen: false });
+          if (loadedParent.error) return;
+          const parentCase = loadedParent.arbitrationCase;
+          const parentStatus = normalizeArbitrationCaseStatus(parentCase.status);
+          if (parentStatus !== ARBITRATION_CASE_STATUS.VERDICT_ISSUED && parentStatus !== ARBITRATION_CASE_STATUS.CLOSED) {
+            return sendError(res, 409, "appeal requires parent case in verdict_issued or closed state");
+          }
+          if (!parentCase.verdictId || !parentCase.verdictHash) {
+            return sendError(res, 409, "appeal requires parent case verdict metadata");
+          }
+          const nowMs = Date.parse(nowAt);
+          const endsAtMs = settlementDisputeWindowEndsAtMs(settlement);
+          if (!Number.isFinite(endsAtMs) || !Number.isFinite(nowMs) || nowMs > endsAtMs) {
+            return sendError(res, 409, "appeal window has closed");
+          }
+
+          let caseId = null;
+          try {
+            caseId = parseCaseIdFromBody() ?? createId("arb_case");
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration case id", { message: err?.message });
+          }
+          let existingCase = null;
+          try {
+            existingCase = await getArbitrationCaseRecord({ tenantId, caseId });
+          } catch (err) {
+            return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+          }
+          if (existingCase) return sendError(res, 409, "arbitration case already exists");
+
+          let evidenceRefs = [];
+          try {
+            evidenceRefs = normalizeArbitrationCaseEvidenceRefs(
+              Array.isArray(body?.evidenceRefs) ? body.evidenceRefs : parentCase.evidenceRefs ?? [],
+              { fieldName: "evidenceRefs" }
+            );
+            assertArbitrationCaseEvidenceBoundToDisputeContext({ settlement, evidenceRefs });
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitration evidence", { message: err?.message });
+          }
+
+          let arbiterAgentId = null;
+          let assignment = null;
+          try {
+            arbiterAgentId = parseOptionalNonEmptyString(body?.arbiterAgentId, "arbiterAgentId");
+          } catch (err) {
+            return sendError(res, 400, "invalid arbiter assignment", { message: err?.message });
+          }
+          if (arbiterAgentId) {
+            const arbiterIdentity = await getAgentIdentityRecord({ tenantId, agentId: arbiterAgentId });
+            if (!arbiterIdentity) return sendError(res, 404, "arbiterAgentId not found");
+          } else if (Array.isArray(body?.panelCandidateAgentIds) && body.panelCandidateAgentIds.length > 0) {
+            try {
+              assignment = await assignDeterministicArbiterAgentId({
+                tenantId,
+                runId,
+                disputeId,
+                panelCandidateAgentIds: body.panelCandidateAgentIds
+              });
+            } catch (err) {
+              return sendError(res, 400, "invalid arbitration panel assignment", { message: err?.message });
+            }
+            arbiterAgentId = assignment.arbiterAgentId;
+          } else {
+            arbiterAgentId = parentCase.arbiterAgentId ?? null;
+          }
+          if (!arbiterAgentId) return sendError(res, 400, "arbiterAgentId or panelCandidateAgentIds is required");
+
+          const appealReason =
+            body?.reason === undefined || body?.reason === null
+              ? null
+              : typeof body?.reason === "string" && body.reason.trim() !== ""
+                ? body.reason.trim()
+                : null;
+          if (body?.reason !== undefined && body?.reason !== null && appealReason === null) {
+            return sendError(res, 400, "reason must be a non-empty string when provided");
+          }
+          const appealRef = {
+            parentCaseId,
+            parentVerdictId:
+              typeof body?.parentVerdictId === "string" && body.parentVerdictId.trim() !== ""
+                ? body.parentVerdictId.trim()
+                : parentCase.verdictId,
+            reason: appealReason
+          };
+
+          const appealCase = normalizeForCanonicalJson(
+            {
+              schemaVersion: "ArbitrationCase.v1",
+              caseId,
+              tenantId: normalizeTenant(tenantId),
+              runId: String(runId),
+              settlementId: String(settlement?.settlementId ?? ""),
+              disputeId: String(disputeId),
+              claimantAgentId: String(parentCase.claimantAgentId ?? settlement?.payerAgentId ?? ""),
+              respondentAgentId: String(parentCase.respondentAgentId ?? settlement?.agentId ?? ""),
+              arbiterAgentId,
+              status: ARBITRATION_CASE_STATUS.UNDER_REVIEW,
+              openedAt: nowAt,
+              closedAt: null,
+              summary:
+                typeof body?.summary === "string" && body.summary.trim() !== ""
+                  ? body.summary.trim()
+                  : null,
+              evidenceRefs,
+              appealRef,
+              metadata: assignment
+                ? {
+                    assignmentHash: assignment.assignmentHash,
+                    panelCandidateAgentIds: assignment.panelCandidateAgentIds
+                  }
+                : null,
+              revision: 1,
+              createdAt: nowAt,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+
+          const responseBody = { arbitrationCase: appealCase, arbitrationCaseArtifact: null };
+          const ops = [{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: appealCase }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } });
+          }
+          await commitTx(ops);
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: appealCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          return sendJson(res, 201, { ...responseBody, arbitrationCaseArtifact });
         }
       }
 

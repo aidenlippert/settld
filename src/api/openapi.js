@@ -1721,6 +1721,59 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
     }
   };
 
+  const ArbitrationCaseV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "caseId",
+      "tenantId",
+      "runId",
+      "settlementId",
+      "disputeId",
+      "claimantAgentId",
+      "respondentAgentId",
+      "status",
+      "openedAt",
+      "evidenceRefs",
+      "revision",
+      "createdAt",
+      "updatedAt"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["ArbitrationCase.v1"] },
+      caseId: { type: "string" },
+      tenantId: { type: "string" },
+      runId: { type: "string" },
+      settlementId: { type: "string" },
+      disputeId: { type: "string" },
+      claimantAgentId: { type: "string" },
+      respondentAgentId: { type: "string" },
+      arbiterAgentId: { type: "string", nullable: true },
+      status: { type: "string", enum: ["open", "under_review", "verdict_issued", "closed"] },
+      openedAt: { type: "string", format: "date-time" },
+      closedAt: { type: "string", format: "date-time", nullable: true },
+      summary: { type: "string", nullable: true },
+      evidenceRefs: { type: "array", items: { type: "string" } },
+      verdictId: { type: "string", nullable: true },
+      verdictHash: { type: "string", nullable: true },
+      appealRef: {
+        type: "object",
+        additionalProperties: false,
+        nullable: true,
+        properties: {
+          parentCaseId: { type: "string" },
+          parentVerdictId: { type: "string" },
+          reason: { type: "string", nullable: true }
+        }
+      },
+      metadata: { type: "object", additionalProperties: true, nullable: true },
+      revision: { type: "integer", minimum: 0 },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    }
+  };
+
   const RunSettlementPolicyReplayResponse = {
     type: "object",
     additionalProperties: false,
@@ -2141,6 +2194,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
         RunAgreementCancelResponse,
         DisputeVerdictSignedRequest,
         ArbitrationVerdictSignedRequest,
+        ArbitrationCaseV1,
         RunSettlementPolicyReplayResponse,
         MonthCloseRequest,
         AckRequest,
@@ -2504,6 +2558,382 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
                       run: AgentRunV1,
                       settlement: AgentRunSettlementV1,
                       agreement: MarketplaceTaskAgreementV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/cases": {
+        get: {
+          summary: "List arbitration cases for a run",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } },
+            { name: "status", in: "query", required: false, schema: { type: "string", enum: ["open", "under_review", "verdict_issued", "closed"] } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      runId: { type: "string" },
+                      cases: { type: "array", items: ArbitrationCaseV1 }
+                    }
+                  }
+                }
+              }
+            },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/cases/{caseId}": {
+        get: {
+          summary: "Get arbitration case by id",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } },
+            { name: "caseId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      runId: { type: "string" },
+                      arbitrationCase: ArbitrationCaseV1
+                    }
+                  }
+                }
+              }
+            },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/open": {
+        post: {
+          summary: "Open an arbitration case for an active dispute",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    caseId: { type: "string" },
+                    disputeId: { type: "string" },
+                    claimantAgentId: { type: "string" },
+                    respondentAgentId: { type: "string" },
+                    arbiterAgentId: { type: "string" },
+                    panelCandidateAgentIds: { type: "array", items: { type: "string" } },
+                    summary: { type: "string" },
+                    evidenceRefs: { type: "array", items: { type: "string" } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            201: {
+              description: "Created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      arbitrationCase: ArbitrationCaseV1,
+                      arbitrationCaseArtifact: { type: "object", additionalProperties: true, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/assign": {
+        post: {
+          summary: "Assign or reassign arbiter for a case",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["caseId"],
+                  properties: {
+                    caseId: { type: "string" },
+                    arbiterAgentId: { type: "string" },
+                    panelCandidateAgentIds: { type: "array", items: { type: "string" } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      arbitrationCase: ArbitrationCaseV1,
+                      arbitrationCaseArtifact: { type: "object", additionalProperties: true, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/evidence": {
+        post: {
+          summary: "Attach evidence to arbitration case",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["caseId", "evidenceRef"],
+                  properties: {
+                    caseId: { type: "string" },
+                    disputeId: { type: "string" },
+                    evidenceRef: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      arbitrationCase: ArbitrationCaseV1,
+                      arbitrationCaseArtifact: { type: "object", additionalProperties: true, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/verdict": {
+        post: {
+          summary: "Submit signed arbitration verdict for a case",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["caseId", "arbitrationVerdict"],
+                  properties: {
+                    caseId: { type: "string" },
+                    disputeId: { type: "string" },
+                    arbitrationVerdict: ArbitrationVerdictSignedRequest
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      arbitrationCase: ArbitrationCaseV1,
+                      arbitrationVerdict: { type: "object", additionalProperties: true },
+                      arbitrationCaseArtifact: { type: "object", additionalProperties: true, nullable: true },
+                      arbitrationVerdictArtifact: { type: "object", additionalProperties: true, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/close": {
+        post: {
+          summary: "Finalize arbitration case and settlement finality transition",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["caseId"],
+                  properties: {
+                    caseId: { type: "string" },
+                    disputeId: { type: "string" },
+                    summary: { type: "string" },
+                    resolutionOutcome: { type: "string", enum: ["accepted", "rejected", "partial", "withdrawn", "unresolved"] }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      arbitrationCase: ArbitrationCaseV1,
+                      settlement: AgentRunSettlementV1,
+                      arbitrationCaseArtifact: { type: "object", additionalProperties: true, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/runs/{runId}/arbitration/appeal": {
+        post: {
+          summary: "Open appeal arbitration case linked to parent verdict",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "runId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["parentCaseId"],
+                  properties: {
+                    caseId: { type: "string" },
+                    disputeId: { type: "string" },
+                    parentCaseId: { type: "string" },
+                    parentVerdictId: { type: "string" },
+                    reason: { type: "string" },
+                    summary: { type: "string" },
+                    arbiterAgentId: { type: "string" },
+                    panelCandidateAgentIds: { type: "array", items: { type: "string" } },
+                    evidenceRefs: { type: "array", items: { type: "string" } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            201: {
+              description: "Created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      arbitrationCase: ArbitrationCaseV1,
+                      arbitrationCaseArtifact: { type: "object", additionalProperties: true, nullable: true }
                     }
                   }
                 }

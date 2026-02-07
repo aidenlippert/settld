@@ -210,6 +210,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     agentRuns: new Map(), // `${tenantId}\n${runId}` -> AgentRun.v1 snapshot
     agentRunEvents: new Map(), // `${tenantId}\n${runId}` -> AgentEvent.v1[]
     agentRunSettlements: new Map(), // `${tenantId}\n${runId}` -> AgentRunSettlement.v1
+    arbitrationCases: new Map(), // `${tenantId}\n${caseId}` -> ArbitrationCase.v1 snapshot
     marketplaceTasks: new Map(), // `${tenantId}\n${taskId}` -> MarketplaceTask.v1
     marketplaceTaskBids: new Map(), // `${tenantId}\n${taskId}` -> MarketplaceBid.v1[]
     tenantSettlementPolicies: new Map(), // `${tenantId}\n${policyId}\n${policyVersion}` -> TenantSettlementPolicy.v1
@@ -738,6 +739,43 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     tenantId = normalizeTenantId(tenantId);
     if (typeof runId !== "string" || runId.trim() === "") throw new TypeError("runId is required");
     return store.agentRunSettlements.get(makeScopedKey({ tenantId, id: String(runId) })) ?? null;
+  };
+
+  store.getArbitrationCase = async function getArbitrationCase({ tenantId = DEFAULT_TENANT_ID, caseId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof caseId !== "string" || caseId.trim() === "") throw new TypeError("caseId is required");
+    return store.arbitrationCases.get(makeScopedKey({ tenantId, id: String(caseId) })) ?? null;
+  };
+
+  store.listArbitrationCases = async function listArbitrationCases({
+    tenantId = DEFAULT_TENANT_ID,
+    runId = null,
+    disputeId = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (runId !== null && (typeof runId !== "string" || runId.trim() === "")) throw new TypeError("runId must be null or a non-empty string");
+    if (disputeId !== null && (typeof disputeId !== "string" || disputeId.trim() === "")) throw new TypeError("disputeId must be null or a non-empty string");
+    if (status !== null && (typeof status !== "string" || status.trim() === "")) throw new TypeError("status must be null or a non-empty string");
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const statusFilter = status ? String(status).trim().toLowerCase() : null;
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const out = [];
+    for (const row of store.arbitrationCases.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (runId !== null && String(row.runId ?? "") !== String(runId)) continue;
+      if (disputeId !== null && String(row.disputeId ?? "") !== String(disputeId)) continue;
+      if (statusFilter !== null && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => String(left.caseId ?? "").localeCompare(String(right.caseId ?? "")));
+    return out.slice(safeOffset, safeOffset + safeLimit);
   };
 
   store.refreshFromDb = async function refreshFromDb() {

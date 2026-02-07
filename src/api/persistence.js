@@ -397,6 +397,20 @@ export function applyTxRecord(store, record) {
       continue;
     }
 
+    if (kind === "ARBITRATION_CASE_UPSERT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const arbitrationCase = op.arbitrationCase ?? null;
+      if (!arbitrationCase || typeof arbitrationCase !== "object" || Array.isArray(arbitrationCase)) {
+        throw new TypeError("ARBITRATION_CASE_UPSERT requires arbitrationCase");
+      }
+      const caseId = arbitrationCase.caseId ?? op.caseId ?? null;
+      if (!caseId) throw new TypeError("ARBITRATION_CASE_UPSERT requires arbitrationCase.caseId");
+      if (!(store.arbitrationCases instanceof Map)) store.arbitrationCases = new Map();
+      const key = makeScopedKey({ tenantId, id: String(caseId) });
+      store.arbitrationCases.set(key, { ...arbitrationCase, tenantId, caseId: String(caseId) });
+      continue;
+    }
+
     if (kind === "MARKETPLACE_TASK_UPSERT") {
       const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
       const task = op.task ?? null;

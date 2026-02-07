@@ -9609,6 +9609,129 @@
           }
         }
       },
+      "ArbitrationCaseV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "caseId",
+          "tenantId",
+          "runId",
+          "settlementId",
+          "disputeId",
+          "claimantAgentId",
+          "respondentAgentId",
+          "status",
+          "openedAt",
+          "evidenceRefs",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "ArbitrationCase.v1"
+            ]
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "settlementId": {
+            "type": "string"
+          },
+          "disputeId": {
+            "type": "string"
+          },
+          "claimantAgentId": {
+            "type": "string"
+          },
+          "respondentAgentId": {
+            "type": "string"
+          },
+          "arbiterAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "under_review",
+              "verdict_issued",
+              "closed"
+            ]
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verdictId": {
+            "type": "string",
+            "nullable": true
+          },
+          "verdictHash": {
+            "type": "string",
+            "nullable": true
+          },
+          "appealRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "nullable": true,
+            "properties": {
+              "parentCaseId": {
+                "type": "string"
+              },
+              "parentVerdictId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "RunSettlementPolicyReplayResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -20238,6 +20361,2620 @@
                           }
                         }
                       }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/cases": {
+      "get": {
+        "summary": "List arbitration cases for a run",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "under_review",
+                "verdict_issued",
+                "closed"
+              ]
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "runId": {
+                      "type": "string"
+                    },
+                    "cases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "caseId",
+                          "tenantId",
+                          "runId",
+                          "settlementId",
+                          "disputeId",
+                          "claimantAgentId",
+                          "respondentAgentId",
+                          "status",
+                          "openedAt",
+                          "evidenceRefs",
+                          "revision",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "type": "string",
+                            "enum": [
+                              "ArbitrationCase.v1"
+                            ]
+                          },
+                          "caseId": {
+                            "type": "string"
+                          },
+                          "tenantId": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": "string"
+                          },
+                          "settlementId": {
+                            "type": "string"
+                          },
+                          "disputeId": {
+                            "type": "string"
+                          },
+                          "claimantAgentId": {
+                            "type": "string"
+                          },
+                          "respondentAgentId": {
+                            "type": "string"
+                          },
+                          "arbiterAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "open",
+                              "under_review",
+                              "verdict_issued",
+                              "closed"
+                            ]
+                          },
+                          "openedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "closedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "summary": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "evidenceRefs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "verdictId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "verdictHash": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "appealRef": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "properties": {
+                              "parentCaseId": {
+                                "type": "string"
+                              },
+                              "parentVerdictId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "nullable": true
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/cases/{caseId}": {
+      "get": {
+        "summary": "Get arbitration case by id",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "runId": {
+                      "type": "string"
+                    },
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/open": {
+      "post": {
+        "summary": "Open an arbitration case for an active dispute",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "caseId": {
+                    "type": "string"
+                  },
+                  "disputeId": {
+                    "type": "string"
+                  },
+                  "claimantAgentId": {
+                    "type": "string"
+                  },
+                  "respondentAgentId": {
+                    "type": "string"
+                  },
+                  "arbiterAgentId": {
+                    "type": "string"
+                  },
+                  "panelCandidateAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "evidenceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "arbitrationCaseArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/assign": {
+      "post": {
+        "summary": "Assign or reassign arbiter for a case",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "caseId"
+                ],
+                "properties": {
+                  "caseId": {
+                    "type": "string"
+                  },
+                  "arbiterAgentId": {
+                    "type": "string"
+                  },
+                  "panelCandidateAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "arbitrationCaseArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/evidence": {
+      "post": {
+        "summary": "Attach evidence to arbitration case",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "caseId",
+                  "evidenceRef"
+                ],
+                "properties": {
+                  "caseId": {
+                    "type": "string"
+                  },
+                  "disputeId": {
+                    "type": "string"
+                  },
+                  "evidenceRef": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "arbitrationCaseArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/verdict": {
+      "post": {
+        "summary": "Submit signed arbitration verdict for a case",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "caseId",
+                  "arbitrationVerdict"
+                ],
+                "properties": {
+                  "caseId": {
+                    "type": "string"
+                  },
+                  "disputeId": {
+                    "type": "string"
+                  },
+                  "arbitrationVerdict": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "caseId",
+                      "verdictId",
+                      "arbiterAgentId",
+                      "outcome",
+                      "releaseRatePct",
+                      "rationale",
+                      "evidenceRefs",
+                      "signerKeyId",
+                      "signature"
+                    ],
+                    "properties": {
+                      "caseId": {
+                        "type": "string"
+                      },
+                      "verdictId": {
+                        "type": "string"
+                      },
+                      "arbiterAgentId": {
+                        "type": "string"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "accepted",
+                          "rejected",
+                          "partial"
+                        ]
+                      },
+                      "releaseRatePct": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "rationale": {
+                        "type": "string"
+                      },
+                      "evidenceRefs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "issuedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "appealRef": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "nullable": true,
+                        "properties": {
+                          "appealCaseId": {
+                            "type": "string"
+                          },
+                          "parentVerdictId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      },
+                      "signerKeyId": {
+                        "type": "string"
+                      },
+                      "signature": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "arbitrationVerdict": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "arbitrationCaseArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
+                    },
+                    "arbitrationVerdictArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/close": {
+      "post": {
+        "summary": "Finalize arbitration case and settlement finality transition",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "caseId"
+                ],
+                "properties": {
+                  "caseId": {
+                    "type": "string"
+                  },
+                  "disputeId": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "resolutionOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "rejected",
+                      "partial",
+                      "withdrawn",
+                      "unresolved"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "settlement": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "settlementId",
+                        "runId",
+                        "tenantId",
+                        "agentId",
+                        "payerAgentId",
+                        "amountCents",
+                        "currency",
+                        "status",
+                        "lockedAt",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "AgentRunSettlement.v1"
+                          ]
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "payerAgentId": {
+                          "type": "string"
+                        },
+                        "amountCents": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "locked",
+                            "released",
+                            "refunded"
+                          ]
+                        },
+                        "lockedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "resolvedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "resolutionEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "runStatus": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "releasedAmountCents": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "refundedAmountCents": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "releaseRatePct": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100,
+                          "nullable": true
+                        },
+                        "disputeWindowDays": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "disputeWindowEndsAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "disputeStatus": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "open",
+                            "closed"
+                          ],
+                          "nullable": true
+                        },
+                        "disputeId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "disputeOpenedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "disputeClosedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "disputeVerdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "disputeVerdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "disputeVerdictArtifactId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "disputeVerdictSignerKeyId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "disputeVerdictIssuedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "disputeContext": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "quality",
+                                "delivery",
+                                "fraud",
+                                "policy",
+                                "payment",
+                                "other"
+                              ]
+                            },
+                            "priority": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "normal",
+                                "high",
+                                "critical"
+                              ]
+                            },
+                            "channel": {
+                              "type": "string",
+                              "enum": [
+                                "counterparty",
+                                "policy_engine",
+                                "arbiter",
+                                "external"
+                              ]
+                            },
+                            "escalationLevel": {
+                              "type": "string",
+                              "enum": [
+                                "l1_counterparty",
+                                "l2_arbiter",
+                                "l3_external"
+                              ]
+                            },
+                            "openedByAgentId": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "disputeResolution": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "accepted",
+                                "rejected",
+                                "partial",
+                                "withdrawn",
+                                "unresolved"
+                              ]
+                            },
+                            "escalationLevel": {
+                              "type": "string",
+                              "enum": [
+                                "l1_counterparty",
+                                "l2_arbiter",
+                                "l3_external"
+                              ]
+                            },
+                            "closedByAgentId": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "summary": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "closedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "decisionStatus": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "auto_resolved",
+                            "manual_review_required",
+                            "manual_resolved"
+                          ],
+                          "nullable": true
+                        },
+                        "decisionMode": {
+                          "type": "string",
+                          "enum": [
+                            "automatic",
+                            "manual-review"
+                          ],
+                          "nullable": true
+                        },
+                        "decisionPolicyHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "decisionReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "decisionTrace": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "decisionUpdatedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "arbitrationCaseArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{runId}/arbitration/appeal": {
+      "post": {
+        "summary": "Open appeal arbitration case linked to parent verdict",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "parentCaseId"
+                ],
+                "properties": {
+                  "caseId": {
+                    "type": "string"
+                  },
+                  "disputeId": {
+                    "type": "string"
+                  },
+                  "parentCaseId": {
+                    "type": "string"
+                  },
+                  "parentVerdictId": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "arbiterAgentId": {
+                    "type": "string"
+                  },
+                  "panelCandidateAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "evidenceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arbitrationCase": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "caseId",
+                        "tenantId",
+                        "runId",
+                        "settlementId",
+                        "disputeId",
+                        "claimantAgentId",
+                        "respondentAgentId",
+                        "status",
+                        "openedAt",
+                        "evidenceRefs",
+                        "revision",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "ArbitrationCase.v1"
+                          ]
+                        },
+                        "caseId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "settlementId": {
+                          "type": "string"
+                        },
+                        "disputeId": {
+                          "type": "string"
+                        },
+                        "claimantAgentId": {
+                          "type": "string"
+                        },
+                        "respondentAgentId": {
+                          "type": "string"
+                        },
+                        "arbiterAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "under_review",
+                            "verdict_issued",
+                            "closed"
+                          ]
+                        },
+                        "openedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "closedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "summary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "verdictId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "verdictHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "appealRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "parentCaseId": {
+                              "type": "string"
+                            },
+                            "parentVerdictId": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "arbitrationCaseArtifact": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "nullable": true
                     }
                   }
                 }
