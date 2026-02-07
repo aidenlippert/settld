@@ -374,7 +374,16 @@ export function validateAgentRunSettlementRequest(payload) {
   const amountCents = Number(payload.amountCents);
   assertAmountCents(amountCents, "settlement.amountCents");
   const currency = normalizeCurrency(payload.currency ?? DEFAULT_AGENT_WALLET_CURRENCY);
-  return { payerAgentId: String(payload.payerAgentId), amountCents, currency };
+  const disputeWindowDaysRaw = payload.disputeWindowDays;
+  let disputeWindowDays = 0;
+  if (disputeWindowDaysRaw !== undefined && disputeWindowDaysRaw !== null) {
+    const parsed = Number(disputeWindowDaysRaw);
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+      throw new TypeError("settlement.disputeWindowDays must be a non-negative safe integer");
+    }
+    disputeWindowDays = parsed;
+  }
+  return { payerAgentId: String(payload.payerAgentId), amountCents, currency, disputeWindowDays };
 }
 
 function normalizeSettlementRecord(settlement) {
@@ -528,12 +537,24 @@ function normalizeSettlementRecord(settlement) {
   };
 }
 
-export function createAgentRunSettlement({ tenantId, runId, agentId, payerAgentId, amountCents, currency, at = new Date().toISOString() }) {
+export function createAgentRunSettlement({
+  tenantId,
+  runId,
+  agentId,
+  payerAgentId,
+  amountCents,
+  currency,
+  disputeWindowDays = 0,
+  at = new Date().toISOString()
+}) {
   assertNonEmptyString(tenantId, "tenantId");
   assertNonEmptyString(runId, "runId");
   assertNonEmptyString(agentId, "agentId");
   assertNonEmptyString(payerAgentId, "payerAgentId");
   assertAmountCents(amountCents, "amountCents");
+  if (!Number.isSafeInteger(Number(disputeWindowDays)) || Number(disputeWindowDays) < 0) {
+    throw new TypeError("disputeWindowDays must be a non-negative safe integer");
+  }
   assertIsoDate(at, "at");
   return normalizeSettlementRecord({
     schemaVersion: AGENT_RUN_SETTLEMENT_SCHEMA_VERSION,
@@ -552,7 +573,7 @@ export function createAgentRunSettlement({ tenantId, runId, agentId, payerAgentI
     releasedAmountCents: 0,
     refundedAmountCents: 0,
     releaseRatePct: null,
-    disputeWindowDays: 0,
+    disputeWindowDays: Number(disputeWindowDays),
     disputeWindowEndsAt: null,
     disputeStatus: AGENT_RUN_SETTLEMENT_DISPUTE_STATUS.NONE,
     disputeId: null,

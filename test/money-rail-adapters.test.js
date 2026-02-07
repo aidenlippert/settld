@@ -5,8 +5,10 @@ import {
   MONEY_RAIL_PROVIDER_EVENT_TYPE,
   MONEY_RAIL_OPERATION_STATE,
   createInMemoryMoneyRailAdapter,
+  createStoreBackedMoneyRailAdapter,
   createMoneyRailAdapterRegistry
 } from "../src/core/money-rail-adapters.js";
+import { createStore } from "../src/api/store.js";
 
 test("money rail adapter: create/status/cancel lifecycle is deterministic", async () => {
   const adapter = createInMemoryMoneyRailAdapter({ now: () => "2026-02-07T00:00:00.000Z" });
@@ -213,4 +215,46 @@ test("money rail adapter: listOperations returns tenant-scoped deterministic ord
     tenantB.map((row) => row.operationId),
     ["op_0002"]
   );
+});
+
+test("money rail adapter: store-backed state survives adapter recreation", async () => {
+  const store = createStore();
+  const fixedNow = () => "2026-02-07T00:00:00.000Z";
+  const adapterA = createStoreBackedMoneyRailAdapter({ providerId: "stub_store", store, now: fixedNow });
+
+  const created = await adapterA.create({
+    tenantId: "tenant_store",
+    operationId: "op_store_1",
+    direction: "payout",
+    idempotencyKey: "idem_store_1",
+    amountCents: 1750,
+    currency: "USD",
+    counterpartyRef: "acct_store_1"
+  });
+  assert.equal(created.idempotentReplay, false);
+
+  const submitted = await adapterA.ingestProviderEvent({
+    tenantId: "tenant_store",
+    operationId: "op_store_1",
+    eventType: MONEY_RAIL_PROVIDER_EVENT_TYPE.SUBMITTED,
+    eventId: "evt_store_submit_1",
+    at: "2026-02-07T00:01:00.000Z"
+  });
+  assert.equal(submitted.applied, true);
+  assert.equal(submitted.operation.state, MONEY_RAIL_OPERATION_STATE.SUBMITTED);
+
+  const adapterB = createStoreBackedMoneyRailAdapter({ providerId: "stub_store", store, now: fixedNow });
+  const status = await adapterB.status({ tenantId: "tenant_store", operationId: "op_store_1" });
+  assert.ok(status);
+  assert.equal(status.state, MONEY_RAIL_OPERATION_STATE.SUBMITTED);
+
+  const replay = await adapterB.ingestProviderEvent({
+    tenantId: "tenant_store",
+    operationId: "op_store_1",
+    eventType: MONEY_RAIL_PROVIDER_EVENT_TYPE.SUBMITTED,
+    eventId: "evt_store_submit_1",
+    at: "2026-02-07T00:01:00.000Z"
+  });
+  assert.equal(replay.applied, false);
+  assert.equal(replay.operation.state, MONEY_RAIL_OPERATION_STATE.SUBMITTED);
 });

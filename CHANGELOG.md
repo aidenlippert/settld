@@ -22,8 +22,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 ### Changed
 - Run dispute close now enforces the appeal window when a signed arbiter verdict is submitted (`POST /runs/{runId}/dispute/close`): late verdicts are rejected with `409 appeal window has closed`, while administrative closes without verdict remain allowed for already-open disputes.
 - Money rail provider handling now supports explicit production-mode configuration (`moneyRailMode`, `moneyRailProviderConfigs`, `moneyRailDefaultProviderId`) with fail-fast guards against implicit stub usage in production.
+- Money rail operations/provider events are now persisted through store-backed adapters (memory + Postgres), so operation state survives API/adapter restarts.
+- Run-level settlement creation now preserves `settlement.disputeWindowDays`, enabling deterministic post-settlement dispute-open behavior for direct run flows.
 
 ### Added
 - Money rail provider event ingestion endpoint: `POST /ops/money-rails/{providerId}/events/ingest`, including deterministic provider-status to canonical-state mapping and idempotent event replay semantics.
 - Money rail reconciliation endpoint: `GET /ops/finance/money-rails/reconcile` to deterministically compare period payout instructions against provider operations and surface critical mismatches (`missing`, `amount/currency drift`, `terminal failures`, `unexpected operations`).
 - Escrow net-close endpoints: `GET /ops/finance/net-close` for deterministic snapshot/reconciliation and `POST /ops/finance/net-close/execute` for gated execution when invariants pass, both with optional persisted `EscrowNetClose.v1` artifacts.
+- Billable usage event pipeline primitives: durable store support, `GET /ops/finance/billable-events` query endpoint, and deterministic emissions for verified runs, settled volume, and arbitration usage paths.

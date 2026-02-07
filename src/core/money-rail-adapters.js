@@ -120,9 +120,35 @@ function buildOperationRequestHash(input) {
   return canonicalJsonStringify(normalized);
 }
 
+function deriveRequestHashFromOperation(operation) {
+  if (!operation || typeof operation !== "object" || Array.isArray(operation)) return null;
+  try {
+    return buildOperationRequestHash({
+      tenantId: operation.tenantId,
+      operationId: operation.operationId,
+      direction: operation.direction,
+      idempotencyKey: operation.idempotencyKey,
+      amountCents: operation.amountCents,
+      currency: operation.currency,
+      counterpartyRef: operation.counterpartyRef,
+      metadata: operation.metadata ?? null
+    });
+  } catch {
+    return null;
+  }
+}
+
 function clone(value) {
   if (value === null || value === undefined) return value;
   return JSON.parse(JSON.stringify(value));
+}
+
+function stripInternalOperationFields(operation) {
+  const next = clone(operation);
+  if (next && typeof next === "object" && !Array.isArray(next)) {
+    delete next.requestHash;
+  }
+  return next;
 }
 
 function createConflictError(code, message) {
@@ -426,6 +452,244 @@ export function createInMemoryMoneyRailAdapter({ providerId = "stub_memory", now
     };
     providerEventsByKey.set(eventStoreKey, { event, operation: next });
     return { operation: clone(next), applied: true, event: clone(event) };
+  }
+
+  return {
+    providerId,
+    create,
+    status,
+    listOperations,
+    cancel,
+    transition,
+    ingestProviderEvent
+  };
+}
+
+export function createStoreBackedMoneyRailAdapter({ providerId = "stub_memory", store = null, now = () => new Date().toISOString() } = {}) {
+  assertNonEmptyString(providerId, "providerId");
+  if (typeof now !== "function") throw new TypeError("now must be a function");
+
+  const supportsStorePersistence =
+    store &&
+    typeof store === "object" &&
+    typeof store.getMoneyRailOperation === "function" &&
+    typeof store.findMoneyRailOperationByIdempotency === "function" &&
+    typeof store.listMoneyRailOperations === "function" &&
+    typeof store.putMoneyRailOperation === "function" &&
+    typeof store.getMoneyRailProviderEvent === "function" &&
+    typeof store.putMoneyRailProviderEvent === "function";
+
+  if (!supportsStorePersistence) {
+    return createInMemoryMoneyRailAdapter({ providerId, now });
+  }
+
+  async function loadOperation({ tenantId, operationId }) {
+    const loaded = await store.getMoneyRailOperation({ tenantId, providerId, operationId });
+    return loaded && typeof loaded === "object" && !Array.isArray(loaded) ? clone(loaded) : null;
+  }
+
+  async function create(input) {
+    const normalized = normalizeCreateInput(input, { now });
+    const requestHash = buildOperationRequestHash(normalized);
+    const existingByIdempotency = await store.findMoneyRailOperationByIdempotency({
+      tenantId: normalized.tenantId,
+      providerId,
+      direction: normalized.direction,
+      idempotencyKey: normalized.idempotencyKey
+    });
+    if (existingByIdempotency) {
+      const existingHash = existingByIdempotency.requestHash ?? deriveRequestHashFromOperation(existingByIdempotency);
+      if (existingHash && existingHash !== requestHash) {
+        throw createConflictError("MONEY_RAIL_IDEMPOTENCY_CONFLICT", "idempotency key was already used with a different request");
+      }
+      return { operation: stripInternalOperationFields(existingByIdempotency), idempotentReplay: true };
+    }
+
+    const existingByOperationId = await loadOperation({ tenantId: normalized.tenantId, operationId: normalized.operationId });
+    if (existingByOperationId) {
+      const existingHash = existingByOperationId.requestHash ?? deriveRequestHashFromOperation(existingByOperationId);
+      if (existingHash && existingHash !== requestHash) {
+        throw createConflictError("MONEY_RAIL_OPERATION_CONFLICT", "operationId already exists with a different request");
+      }
+      return { operation: stripInternalOperationFields(existingByOperationId), idempotentReplay: true };
+    }
+
+    const operation = { ...buildOperationRecord({ providerId, input: normalized }), requestHash };
+    const persisted = await store.putMoneyRailOperation({
+      tenantId: normalized.tenantId,
+      providerId,
+      operation,
+      requestHash
+    });
+    const savedOperation = persisted?.operation && typeof persisted.operation === "object" ? persisted.operation : operation;
+    const created = persisted?.created !== false;
+    return { operation: stripInternalOperationFields(savedOperation), idempotentReplay: !created };
+  }
+
+  async function status({ tenantId, operationId } = {}) {
+    assertNonEmptyString(tenantId, "tenantId");
+    assertNonEmptyString(operationId, "operationId");
+    const operation = await loadOperation({ tenantId: tenantId.trim(), operationId: operationId.trim() });
+    return operation ? stripInternalOperationFields(operation) : null;
+  }
+
+  async function listOperations({ tenantId } = {}) {
+    assertNonEmptyString(tenantId, "tenantId");
+    const rows = await store.listMoneyRailOperations({ tenantId: tenantId.trim(), providerId });
+    const out = Array.isArray(rows) ? rows : [];
+    out.sort((a, b) => String(a?.operationId ?? "").localeCompare(String(b?.operationId ?? "")));
+    return out.map((row) => stripInternalOperationFields(row));
+  }
+
+  async function cancel({ tenantId, operationId, reasonCode = "cancelled_by_caller", at = now() } = {}) {
+    assertNonEmptyString(tenantId, "tenantId");
+    assertNonEmptyString(operationId, "operationId");
+    const current = await loadOperation({ tenantId: tenantId.trim(), operationId: operationId.trim() });
+    if (!current) throw createConflictError("MONEY_RAIL_OPERATION_NOT_FOUND", "operation not found");
+
+    if (
+      current.state === MONEY_RAIL_OPERATION_STATE.CANCELLED ||
+      current.state === MONEY_RAIL_OPERATION_STATE.CONFIRMED ||
+      current.state === MONEY_RAIL_OPERATION_STATE.FAILED ||
+      current.state === MONEY_RAIL_OPERATION_STATE.REVERSED
+    ) {
+      return { operation: stripInternalOperationFields(current), applied: false };
+    }
+
+    const next = applyStateTransition({
+      operation: current,
+      nextState: MONEY_RAIL_OPERATION_STATE.CANCELLED,
+      at,
+      reasonCode
+    });
+    const persisted = await store.putMoneyRailOperation({
+      tenantId: tenantId.trim(),
+      providerId,
+      operation: next,
+      requestHash: current.requestHash ?? null
+    });
+    const operation = persisted?.operation && typeof persisted.operation === "object" ? persisted.operation : next;
+    return { operation: stripInternalOperationFields(operation), applied: true };
+  }
+
+  async function transition({ tenantId, operationId, state, providerRef = null, reasonCode = null, at = now() } = {}) {
+    assertNonEmptyString(tenantId, "tenantId");
+    assertNonEmptyString(operationId, "operationId");
+    const current = await loadOperation({ tenantId: tenantId.trim(), operationId: operationId.trim() });
+    if (!current) throw createConflictError("MONEY_RAIL_OPERATION_NOT_FOUND", "operation not found");
+
+    const next = applyStateTransition({
+      operation: current,
+      nextState: normalizeState(state),
+      at,
+      providerRef,
+      reasonCode
+    });
+    const persisted = await store.putMoneyRailOperation({
+      tenantId: tenantId.trim(),
+      providerId,
+      operation: next,
+      requestHash: current.requestHash ?? null
+    });
+    const operation = persisted?.operation && typeof persisted.operation === "object" ? persisted.operation : next;
+    return stripInternalOperationFields(operation);
+  }
+
+  async function ingestProviderEvent({
+    tenantId,
+    operationId,
+    eventType,
+    providerRef = null,
+    reasonCode = null,
+    at = now(),
+    eventId = null,
+    payload = null
+  } = {}) {
+    assertNonEmptyString(tenantId, "tenantId");
+    assertNonEmptyString(operationId, "operationId");
+    const normalizedTenantId = tenantId.trim();
+    const normalizedOperationId = operationId.trim();
+    const current = await loadOperation({ tenantId: normalizedTenantId, operationId: normalizedOperationId });
+    if (!current) throw createConflictError("MONEY_RAIL_OPERATION_NOT_FOUND", "operation not found");
+
+    const normalizedEventType = normalizeProviderEventType(eventType);
+    const normalizedAt = normalizeIsoDate(at, "at");
+    const normalizedEventId = eventId === null || eventId === undefined ? null : String(eventId).trim();
+    const eventDedupeKey = `${normalizedEventType}\n${normalizedEventId ?? normalizedAt}`;
+    const existingEvent = await store.getMoneyRailProviderEvent({
+      tenantId: normalizedTenantId,
+      providerId,
+      operationId: normalizedOperationId,
+      eventType: normalizedEventType,
+      eventDedupeKey
+    });
+    if (existingEvent) {
+      const currentOperation = await loadOperation({ tenantId: normalizedTenantId, operationId: normalizedOperationId });
+      return {
+        operation: stripInternalOperationFields(currentOperation ?? current),
+        applied: false,
+        event: clone(existingEvent)
+      };
+    }
+
+    const nextState = normalizedEventType;
+    let next = null;
+    let applied = true;
+    try {
+      next = applyStateTransition({
+        operation: current,
+        nextState,
+        at: normalizedAt,
+        providerRef,
+        reasonCode
+      });
+    } catch (err) {
+      if (err?.code !== "MONEY_RAIL_INVALID_TRANSITION") throw err;
+      const fromState = normalizeState(current.state);
+      if (fromState === nextState) {
+        next = current;
+        applied = false;
+      } else {
+        throw err;
+      }
+    }
+
+    if (applied) {
+      const persisted = await store.putMoneyRailOperation({
+        tenantId: normalizedTenantId,
+        providerId,
+        operation: next,
+        requestHash: current.requestHash ?? null
+      });
+      next = persisted?.operation && typeof persisted.operation === "object" ? persisted.operation : next;
+    }
+
+    const event = {
+      schemaVersion: "MoneyRailProviderEvent.v1",
+      providerId,
+      tenantId: normalizedTenantId,
+      operationId: normalizedOperationId,
+      eventType: normalizedEventType,
+      eventId: normalizedEventId,
+      eventDedupeKey,
+      at: normalizedAt,
+      payload: clone(payload)
+    };
+    const persistedEvent = await store.putMoneyRailProviderEvent({
+      tenantId: normalizedTenantId,
+      providerId,
+      operationId: normalizedOperationId,
+      event
+    });
+    if (persistedEvent?.created === false) {
+      const currentOperation = await loadOperation({ tenantId: normalizedTenantId, operationId: normalizedOperationId });
+      return {
+        operation: stripInternalOperationFields(currentOperation ?? next),
+        applied: false,
+        event: clone(persistedEvent?.event ?? event)
+      };
+    }
+    return { operation: stripInternalOperationFields(next), applied, event: clone(persistedEvent?.event ?? event) };
   }
 
   return {

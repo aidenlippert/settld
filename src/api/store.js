@@ -211,6 +211,9 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     agentRunEvents: new Map(), // `${tenantId}\n${runId}` -> AgentEvent.v1[]
     agentRunSettlements: new Map(), // `${tenantId}\n${runId}` -> AgentRunSettlement.v1
     arbitrationCases: new Map(), // `${tenantId}\n${caseId}` -> ArbitrationCase.v1 snapshot
+    moneyRailOperations: new Map(), // `${tenantId}\n${providerId}\n${operationId}` -> MoneyRailOperation.v1
+    moneyRailProviderEvents: new Map(), // `${tenantId}\n${providerId}\n${operationId}\n${eventType}\n${eventDedupeKey}` -> MoneyRailProviderEvent.v1
+    billableUsageEvents: new Map(), // `${tenantId}\n${eventKey}` -> BillableUsageEvent.v1
     marketplaceTasks: new Map(), // `${tenantId}\n${taskId}` -> MarketplaceTask.v1
     marketplaceTaskBids: new Map(), // `${tenantId}\n${taskId}` -> MarketplaceBid.v1[]
     tenantSettlementPolicies: new Map(), // `${tenantId}\n${policyId}\n${policyVersion}` -> TenantSettlementPolicy.v1
@@ -776,6 +779,252 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     }
     out.sort((left, right) => String(left.caseId ?? "").localeCompare(String(right.caseId ?? "")));
     return out.slice(safeOffset, safeOffset + safeLimit);
+  };
+
+  function assertNonEmptyString(value, name) {
+    if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${name} is required`);
+    return value.trim();
+  }
+
+  function normalizeOptionalIso(value) {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    if (!Number.isFinite(Date.parse(text))) throw new TypeError("invalid ISO date-time");
+    return new Date(text).toISOString();
+  }
+
+  function moneyRailOperationStoreKey({ tenantId, providerId, operationId }) {
+    return `${normalizeTenantId(tenantId)}\n${assertNonEmptyString(providerId, "providerId")}\n${assertNonEmptyString(operationId, "operationId")}`;
+  }
+
+  function moneyRailProviderEventStoreKey({ tenantId, providerId, operationId, eventType, eventDedupeKey }) {
+    return `${normalizeTenantId(tenantId)}\n${assertNonEmptyString(providerId, "providerId")}\n${assertNonEmptyString(operationId, "operationId")}\n${assertNonEmptyString(eventType, "eventType")}\n${assertNonEmptyString(eventDedupeKey, "eventDedupeKey")}`;
+  }
+
+  function billableUsageEventStoreKey({ tenantId, eventKey }) {
+    return `${normalizeTenantId(tenantId)}\n${assertNonEmptyString(eventKey, "eventKey")}`;
+  }
+
+  store.getMoneyRailOperation = async function getMoneyRailOperation({ tenantId = DEFAULT_TENANT_ID, providerId, operationId } = {}) {
+    const key = moneyRailOperationStoreKey({ tenantId, providerId, operationId });
+    return store.moneyRailOperations.get(key) ?? null;
+  };
+
+  store.findMoneyRailOperationByIdempotency = async function findMoneyRailOperationByIdempotency({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId,
+    direction,
+    idempotencyKey
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    providerId = assertNonEmptyString(providerId, "providerId");
+    direction = assertNonEmptyString(direction, "direction").toLowerCase();
+    idempotencyKey = assertNonEmptyString(idempotencyKey, "idempotencyKey");
+    for (const operation of store.moneyRailOperations.values()) {
+      if (!operation || typeof operation !== "object") continue;
+      if (normalizeTenantId(operation.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(operation.providerId ?? "") !== providerId) continue;
+      if (String(operation.direction ?? "").toLowerCase() !== direction) continue;
+      if (String(operation.idempotencyKey ?? "") !== idempotencyKey) continue;
+      return operation;
+    }
+    return null;
+  };
+
+  store.listMoneyRailOperations = async function listMoneyRailOperations({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId = null,
+    direction = null,
+    state = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (providerId !== null) providerId = assertNonEmptyString(providerId, "providerId");
+    if (direction !== null) direction = assertNonEmptyString(direction, "direction").toLowerCase();
+    if (state !== null) state = assertNonEmptyString(state, "state").toLowerCase();
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const out = [];
+    for (const operation of store.moneyRailOperations.values()) {
+      if (!operation || typeof operation !== "object") continue;
+      if (normalizeTenantId(operation.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (providerId !== null && String(operation.providerId ?? "") !== providerId) continue;
+      if (direction !== null && String(operation.direction ?? "").toLowerCase() !== direction) continue;
+      if (state !== null && String(operation.state ?? "").toLowerCase() !== state) continue;
+      out.push(operation);
+    }
+    out.sort((left, right) => String(left.operationId ?? "").localeCompare(String(right.operationId ?? "")));
+    return out.slice(offset, offset + Math.min(1000, limit));
+  };
+
+  store.putMoneyRailOperation = async function putMoneyRailOperation({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId,
+    operation,
+    requestHash = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    providerId = assertNonEmptyString(providerId, "providerId");
+    if (!operation || typeof operation !== "object" || Array.isArray(operation)) throw new TypeError("operation is required");
+    const operationId = assertNonEmptyString(operation.operationId ?? null, "operation.operationId");
+    const direction = assertNonEmptyString(operation.direction ?? null, "operation.direction").toLowerCase();
+    const idempotencyKey = assertNonEmptyString(operation.idempotencyKey ?? null, "operation.idempotencyKey");
+    const opKey = moneyRailOperationStoreKey({ tenantId, providerId, operationId });
+
+    for (const existing of store.moneyRailOperations.values()) {
+      if (!existing || typeof existing !== "object") continue;
+      if (normalizeTenantId(existing.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(existing.providerId ?? "") !== providerId) continue;
+      if (String(existing.direction ?? "").toLowerCase() !== direction) continue;
+      if (String(existing.idempotencyKey ?? "") !== idempotencyKey) continue;
+      if (String(existing.operationId ?? "") !== operationId) {
+        const err = new Error("idempotency key was already used with a different operation");
+        err.code = "MONEY_RAIL_IDEMPOTENCY_CONFLICT";
+        throw err;
+      }
+    }
+
+    const existingById = store.moneyRailOperations.get(opKey) ?? null;
+    if (existingById && requestHash && existingById.requestHash && String(existingById.requestHash) !== String(requestHash)) {
+      const err = new Error("operationId already exists with a different request");
+      err.code = "MONEY_RAIL_OPERATION_CONFLICT";
+      throw err;
+    }
+    const next = {
+      ...operation,
+      tenantId,
+      providerId,
+      operationId,
+      direction,
+      idempotencyKey,
+      requestHash:
+        requestHash && String(requestHash).trim() !== ""
+          ? String(requestHash)
+          : existingById?.requestHash && String(existingById.requestHash).trim() !== ""
+            ? String(existingById.requestHash)
+            : null
+    };
+    store.moneyRailOperations.set(opKey, next);
+    return { operation: next, created: !existingById };
+  };
+
+  store.getMoneyRailProviderEvent = async function getMoneyRailProviderEvent({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId,
+    operationId,
+    eventType,
+    eventDedupeKey
+  } = {}) {
+    const key = moneyRailProviderEventStoreKey({ tenantId, providerId, operationId, eventType, eventDedupeKey });
+    return store.moneyRailProviderEvents.get(key) ?? null;
+  };
+
+  store.putMoneyRailProviderEvent = async function putMoneyRailProviderEvent({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId,
+    operationId,
+    event
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    providerId = assertNonEmptyString(providerId, "providerId");
+    operationId = assertNonEmptyString(operationId, "operationId");
+    if (!event || typeof event !== "object" || Array.isArray(event)) throw new TypeError("event is required");
+    const eventType = assertNonEmptyString(event.eventType ?? null, "event.eventType").toLowerCase();
+    const eventDedupeKey = assertNonEmptyString(event.eventDedupeKey ?? null, "event.eventDedupeKey");
+    const key = moneyRailProviderEventStoreKey({ tenantId, providerId, operationId, eventType, eventDedupeKey });
+    const existing = store.moneyRailProviderEvents.get(key) ?? null;
+    if (existing) return { event: existing, created: false };
+
+    const normalizedEvent = {
+      ...event,
+      tenantId,
+      providerId,
+      operationId,
+      eventType,
+      eventDedupeKey
+    };
+    store.moneyRailProviderEvents.set(key, normalizedEvent);
+    return { event: normalizedEvent, created: true };
+  };
+
+  store.appendBillableUsageEvent = async function appendBillableUsageEvent({ tenantId = DEFAULT_TENANT_ID, event } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!event || typeof event !== "object" || Array.isArray(event)) throw new TypeError("event is required");
+    const eventKey = assertNonEmptyString(event.eventKey ?? null, "event.eventKey");
+    const eventType = assertNonEmptyString(event.eventType ?? null, "event.eventType").toLowerCase();
+    const occurredAt = normalizeOptionalIso(event.occurredAt ?? event.createdAt ?? new Date().toISOString());
+    const period =
+      typeof event.period === "string" && /^\d{4}-\d{2}$/.test(event.period.trim())
+        ? event.period.trim()
+        : String((occurredAt ?? new Date().toISOString()).slice(0, 7));
+    const key = billableUsageEventStoreKey({ tenantId, eventKey });
+    const existing = store.billableUsageEvents.get(key) ?? null;
+    if (existing) {
+      if (event.eventHash && existing.eventHash && String(event.eventHash) !== String(existing.eventHash)) {
+        const err = new Error("billable usage event key already exists with different immutable fields");
+        err.code = "BILLABLE_USAGE_EVENT_CONFLICT";
+        throw err;
+      }
+      return { event: existing, appended: false };
+    }
+
+    const quantityRaw = Number(event.quantity ?? 1);
+    const quantity = Number.isSafeInteger(quantityRaw) && quantityRaw >= 0 ? quantityRaw : 1;
+    const amountRaw = event.amountCents === null || event.amountCents === undefined ? null : Number(event.amountCents);
+    const amountCents = amountRaw === null ? null : Number.isSafeInteger(amountRaw) ? amountRaw : null;
+    const normalized = {
+      ...event,
+      schemaVersion: event.schemaVersion ?? "BillableUsageEvent.v1",
+      tenantId,
+      eventKey,
+      eventType,
+      period,
+      occurredAt: occurredAt ?? new Date().toISOString(),
+      quantity,
+      amountCents,
+      currency:
+        event.currency === null || event.currency === undefined || String(event.currency).trim() === ""
+          ? null
+          : String(event.currency).trim().toUpperCase(),
+      createdAt: normalizeOptionalIso(event.createdAt) ?? new Date().toISOString()
+    };
+    store.billableUsageEvents.set(key, normalized);
+    return { event: normalized, appended: true };
+  };
+
+  store.listBillableUsageEvents = async function listBillableUsageEvents({
+    tenantId = DEFAULT_TENANT_ID,
+    period = null,
+    eventType = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (period !== null && (typeof period !== "string" || !/^\d{4}-\d{2}$/.test(period.trim()))) {
+      throw new TypeError("period must match YYYY-MM");
+    }
+    if (eventType !== null) eventType = assertNonEmptyString(eventType, "eventType").toLowerCase();
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const normalizedPeriod = period ? period.trim() : null;
+    const out = [];
+    for (const row of store.billableUsageEvents.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (normalizedPeriod !== null && String(row.period ?? "") !== normalizedPeriod) continue;
+      if (eventType !== null && String(row.eventType ?? "").toLowerCase() !== eventType) continue;
+      out.push(row);
+    }
+    out.sort(
+      (left, right) =>
+        String(left.occurredAt ?? "").localeCompare(String(right.occurredAt ?? "")) ||
+        String(left.eventKey ?? "").localeCompare(String(right.eventKey ?? ""))
+    );
+    return out.slice(offset, offset + Math.min(1000, limit));
   };
 
   store.refreshFromDb = async function refreshFromDb() {
