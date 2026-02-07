@@ -13,6 +13,7 @@ export const ARTIFACT_TYPE = Object.freeze({
   SETTLEMENT_STATEMENT_V1: "SettlementStatement.v1",
   MONTHLY_STATEMENT_V1: "MonthlyStatement.v1",
   HELD_EXPOSURE_ROLLFORWARD_V1: "HeldExposureRollforward.v1",
+  ESCROW_NET_CLOSE_V1: "EscrowNetClose.v1",
   PARTY_STATEMENT_V1: "PartyStatement.v1",
   PAYOUT_INSTRUCTION_V1: "PayoutInstruction.v1",
   GL_BATCH_V1: "GLBatch.v1",
@@ -724,6 +725,27 @@ export function buildHeldExposureRollforwardV1({ tenantId, period, basis, rollfo
     eventProof: proof,
     rollforward,
     holds
+  };
+}
+
+export function buildEscrowNetCloseV1({ tenantId, period, basis, snapshot, events, artifactId, generatedAt }) {
+  assertNonEmptyString(tenantId, "tenantId");
+  assertNonEmptyString(period, "period");
+  assertNonEmptyString(basis, "basis");
+  assertPlainObject(snapshot, "snapshot");
+  if (!Array.isArray(events) || events.length === 0) throw new TypeError("events is required");
+
+  const proof = jobProofFromEvents(events);
+  return {
+    schemaVersion: ARTIFACT_TYPE.ESCROW_NET_CLOSE_V1,
+    artifactType: ARTIFACT_TYPE.ESCROW_NET_CLOSE_V1,
+    artifactId,
+    generatedAt,
+    tenantId,
+    period,
+    basis,
+    eventProof: proof,
+    snapshot
   };
 }
 

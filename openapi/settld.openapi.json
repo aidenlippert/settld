@@ -37426,6 +37426,145 @@
         }
       }
     },
+    "/ops/finance/net-close": {
+      "get": {
+        "summary": "Compute deterministic escrow net-close snapshot for a period",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-02"
+            }
+          },
+          {
+            "name": "persist",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "x-settld-scopes": [
+          "finance_read",
+          "finance_write"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/exports/ack": {
       "post": {
         "summary": "ACK a delivery (destination-signed)",

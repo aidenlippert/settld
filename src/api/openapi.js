@@ -3817,6 +3817,26 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
+      "/ops/finance/net-close": {
+        get: {
+          summary: "Compute deterministic escrow net-close snapshot for a period",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "period", in: "query", required: true, schema: { type: "string", example: "2026-02" } },
+            { name: "persist", in: "query", required: false, schema: { type: "boolean", default: false } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          "x-settld-scopes": ["finance_read", "finance_write"],
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
       "/exports/ack": {
         post: {
           summary: "ACK a delivery (destination-signed)",

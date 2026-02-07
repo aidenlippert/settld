@@ -161,6 +161,7 @@ import {
   ARTIFACT_TYPE,
   buildMonthlyStatementV1,
   buildHeldExposureRollforwardV1,
+  buildEscrowNetCloseV1,
   buildPartyStatementV1,
   buildPayoutInstructionV1,
   buildJournalCsvV1,
@@ -11479,6 +11480,274 @@ export function createApi({
                 glBatchArtifactHash: glBatch?.artifactHash ?? null,
                 partyStatementArtifactIds: partyStatements.map((a) => a?.artifactId).filter((id) => typeof id === "string" && id.trim() !== ""),
                 partyStatementArtifactHashes: partyStatements.map((a) => a?.artifactHash).filter((hash) => typeof hash === "string" && hash.trim() !== "")
+              },
+              artifact: artifactSummary
+            });
+          }
+
+          if (parts[1] === "finance" && parts[2] === "net-close" && parts.length === 3 && req.method === "GET") {
+            if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
+              return sendError(res, 403, "forbidden");
+            }
+            if (typeof store.listArtifacts !== "function") return sendError(res, 501, "artifacts not supported for this store");
+
+            const period = url.searchParams.get("period") ?? url.searchParams.get("month");
+            if (!period) return sendError(res, 400, "period is required");
+
+            let persist = false;
+            try {
+              persist = parseBooleanQueryValue(url.searchParams.get("persist"), { defaultValue: false, name: "persist" });
+            } catch (err) {
+              return sendError(res, 400, err?.message ?? "persist must be boolean");
+            }
+            if (persist && !requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE)) return sendError(res, 403, "forbidden");
+
+            let bounds;
+            try {
+              bounds = parseYearMonth(period);
+            } catch (err) {
+              return sendError(res, 400, "invalid period", { message: err?.message ?? "invalid period" });
+            }
+            const startMs = Date.parse(bounds.startAt);
+            const endMs = Date.parse(bounds.endAt);
+
+            const monthId = makeMonthCloseStreamId({ month: period, basis: MONTH_CLOSE_BASIS.SETTLED_AT });
+            let monthEvents = getMonthEvents(tenantId, monthId);
+            if (!monthEvents.length && typeof store.listAggregateEvents === "function") {
+              try {
+                monthEvents = await store.listAggregateEvents({ tenantId, aggregateType: "month", aggregateId: monthId });
+              } catch {
+                monthEvents = [];
+              }
+            }
+            if (!monthEvents.length) return sendError(res, 409, "month close not found");
+            const monthClose = reduceMonthClose(monthEvents);
+            if (!monthClose || monthClose.status !== "CLOSED") return sendError(res, 409, "month is not closed");
+
+            const artifacts = await store.listArtifacts({ tenantId });
+            const heldCandidates = artifacts
+              .filter((artifact) => artifact?.artifactType === ARTIFACT_TYPE.HELD_EXPOSURE_ROLLFORWARD_V1 && String(artifact?.period ?? "") === String(period))
+              .sort((a, b) => String(a?.generatedAt ?? a?.artifactId ?? "").localeCompare(String(b?.generatedAt ?? b?.artifactId ?? "")));
+            const heldRollforwardArtifact = heldCandidates.length ? heldCandidates[heldCandidates.length - 1] : null;
+
+            function sumHeldBucketNetCents(bucket) {
+              const byCurrency = bucket && typeof bucket === "object" ? bucket.byCurrency : null;
+              if (!byCurrency || typeof byCurrency !== "object") return 0;
+              let total = 0;
+              for (const row of Object.values(byCurrency)) {
+                if (!row || typeof row !== "object") continue;
+                if (!Number.isSafeInteger(row.amountNetCents)) continue;
+                total += row.amountNetCents;
+              }
+              return total;
+            }
+
+            const rollforwardBuckets = heldRollforwardArtifact?.rollforward?.buckets ?? null;
+            const heldRollforwardNet = rollforwardBuckets
+              ? {
+                  openingHeldCents: sumHeldBucketNetCents(rollforwardBuckets.opening),
+                  newLocksCents: sumHeldBucketNetCents(rollforwardBuckets.newHolds),
+                  releasesCents: sumHeldBucketNetCents(rollforwardBuckets.released),
+                  forfeitsCents: sumHeldBucketNetCents(rollforwardBuckets.forfeited),
+                  endingHeldCents: sumHeldBucketNetCents(rollforwardBuckets.ending)
+                }
+              : null;
+
+            const ledgerEntries = await listAllLedgerEntriesForTenant({ tenantId });
+            ledgerEntries.sort((a, b) => {
+              const aMs = Date.parse(String(a?.at ?? ""));
+              const bMs = Date.parse(String(b?.at ?? ""));
+              if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs;
+              return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+            });
+
+            const ledgerEscrow = {
+              openingHeldCents: 0,
+              newLocksCents: 0,
+              releasesCents: 0,
+              forfeitsCents: 0,
+              unknownPositiveAdjustmentsCents: 0,
+              unknownNegativeAdjustmentsCents: 0,
+              endingHeldCents: 0,
+              escrowPostingCount: 0
+            };
+            let totalWindowEscrowDeltaCents = 0;
+
+            for (const entry of ledgerEntries) {
+              if (!entry || typeof entry !== "object") continue;
+              const atMs = Date.parse(String(entry?.at ?? ""));
+              if (!Number.isFinite(atMs)) continue;
+              const memo = String(entry?.memo ?? "").toLowerCase();
+              const postings = Array.isArray(entry?.postings) ? entry.postings : [];
+              for (const posting of postings) {
+                if (!posting || typeof posting !== "object") continue;
+                const accountId = typeof posting?.accountId === "string" ? posting.accountId : "";
+                if (!accountId.endsWith(":escrow_locked")) continue;
+                if (!Number.isSafeInteger(posting.amountCents)) continue;
+                const amountCents = posting.amountCents;
+                if (atMs < startMs) {
+                  ledgerEscrow.openingHeldCents += amountCents;
+                  continue;
+                }
+                if (atMs >= endMs) continue;
+
+                ledgerEscrow.escrowPostingCount += 1;
+                totalWindowEscrowDeltaCents += amountCents;
+
+                if (amountCents > 0) {
+                  if (memo.includes("escrow:hold:")) ledgerEscrow.newLocksCents += amountCents;
+                  else ledgerEscrow.unknownPositiveAdjustmentsCents += amountCents;
+                  continue;
+                }
+
+                if (amountCents < 0) {
+                  const debitCents = -amountCents;
+                  if (memo.includes("escrow:release:")) ledgerEscrow.releasesCents += debitCents;
+                  else if (memo.includes("escrow:forfeit:")) ledgerEscrow.forfeitsCents += debitCents;
+                  else ledgerEscrow.unknownNegativeAdjustmentsCents += debitCents;
+                }
+              }
+            }
+
+            const actualEndingHeldCents = ledgerEscrow.openingHeldCents + totalWindowEscrowDeltaCents;
+            const computedEndingHeldCents =
+              ledgerEscrow.openingHeldCents +
+              ledgerEscrow.newLocksCents -
+              ledgerEscrow.releasesCents -
+              ledgerEscrow.forfeitsCents +
+              ledgerEscrow.unknownPositiveAdjustmentsCents -
+              ledgerEscrow.unknownNegativeAdjustmentsCents;
+            ledgerEscrow.endingHeldCents = actualEndingHeldCents;
+
+            const ledgerConserved = computedEndingHeldCents === actualEndingHeldCents;
+            const heldRollforwardConserved = heldRollforwardNet
+              ? heldRollforwardNet.openingHeldCents + heldRollforwardNet.newLocksCents - heldRollforwardNet.releasesCents - heldRollforwardNet.forfeitsCents ===
+                heldRollforwardNet.endingHeldCents
+              : false;
+            const heldRollforwardMatchesLedger = heldRollforwardNet
+              ? heldRollforwardNet.openingHeldCents === ledgerEscrow.openingHeldCents &&
+                heldRollforwardNet.newLocksCents === ledgerEscrow.newLocksCents &&
+                heldRollforwardNet.releasesCents === ledgerEscrow.releasesCents &&
+                heldRollforwardNet.forfeitsCents === ledgerEscrow.forfeitsCents &&
+                heldRollforwardNet.endingHeldCents === ledgerEscrow.endingHeldCents
+              : false;
+
+            const mismatchCodes = [];
+            if (!heldRollforwardArtifact) mismatchCodes.push("HELD_ROLLFORWARD_MISSING");
+            if (!ledgerConserved) mismatchCodes.push("LEDGER_ESCROW_ROLLFORWARD_INVALID");
+            if (heldRollforwardArtifact && !heldRollforwardConserved) mismatchCodes.push("HELD_ROLLFORWARD_INVALID");
+            if (heldRollforwardArtifact && !heldRollforwardMatchesLedger) mismatchCodes.push("HELD_ROLLFORWARD_LEDGER_MISMATCH");
+
+            const status = mismatchCodes.length ? "fail" : "pass";
+            const snapshot = {
+              schemaVersion: "EscrowNetCloseSnapshot.v1",
+              period,
+              basis: monthClose?.basis ?? MONTH_CLOSE_BASIS.SETTLED_AT,
+              window: {
+                startAt: bounds.startAt,
+                endAt: bounds.endAt
+              },
+              ledgerEscrow,
+              heldRollforward: heldRollforwardNet,
+              invariants: {
+                ledgerConserved,
+                heldRollforwardConserved,
+                heldRollforwardMatchesLedger,
+                computedEndingHeldCents,
+                actualEndingHeldCents
+              },
+              mismatchCodes
+            };
+
+            let artifactSummary = null;
+            if (persist) {
+              if (typeof store.putArtifact !== "function") return sendError(res, 501, "artifact persistence not supported for this store");
+              const generatedAt = nowIso();
+              const snapshotHash = sha256HexBytes(new TextEncoder().encode(`${canonicalJsonStringify(snapshot)}\n`));
+              const artifactId = `escrow_net_close_${String(period).replaceAll(/[^0-9a-zA-Z_-]/g, "_")}_${snapshotHash.slice(0, 24)}`;
+              const artifactBody = buildEscrowNetCloseV1({
+                tenantId,
+                period,
+                basis: monthClose?.basis ?? MONTH_CLOSE_BASIS.SETTLED_AT,
+                snapshot,
+                events: monthEvents,
+                artifactId,
+                generatedAt
+              });
+              const artifactCore = {
+                ...artifactBody,
+                sourceEventId: monthClose?.lastEventId ?? null,
+                atChainHash: monthClose?.lastChainHash ?? artifactBody?.eventProof?.lastChainHash ?? null
+              };
+              const artifactHash = computeArtifactHash(artifactCore);
+              const artifact = { ...artifactCore, artifactHash };
+              let storedArtifact = artifact;
+              try {
+                await store.putArtifact({ tenantId, artifact });
+              } catch (err) {
+                if (err?.code !== "ARTIFACT_HASH_MISMATCH") throw err;
+                if (typeof store.getArtifact !== "function") throw err;
+                const existing = await store.getArtifact({ tenantId, artifactId });
+                if (!existing || typeof existing?.artifactHash !== "string" || existing.artifactHash.trim() === "") throw err;
+                storedArtifact = existing;
+              }
+
+              let deliveriesCreated = 0;
+              if (typeof store.createDelivery === "function") {
+                const destinations = listDestinationsForTenant(tenantId).filter((destination) => {
+                  const allowed = Array.isArray(destination?.artifactTypes) && destination.artifactTypes.length ? destination.artifactTypes : null;
+                  return !allowed || allowed.includes(ARTIFACT_TYPE.ESCROW_NET_CLOSE_V1);
+                });
+                for (const destination of destinations) {
+                  const dedupeKey =
+                    `${tenantId}:${destination.destinationId}:${ARTIFACT_TYPE.ESCROW_NET_CLOSE_V1}:${artifactId}:${String(storedArtifact.artifactHash)}`;
+                  const scopeKey = `escrow_net_close:period:${period}`;
+                  const orderSeq = Date.parse(generatedAt);
+                  const priority = 97;
+                  const orderKey = `${scopeKey}\n${String(orderSeq)}\n${String(priority)}\n${artifactId}`;
+                  try {
+                    await store.createDelivery({
+                      tenantId,
+                      delivery: {
+                        destinationId: destination.destinationId,
+                        artifactType: ARTIFACT_TYPE.ESCROW_NET_CLOSE_V1,
+                        artifactId,
+                        artifactHash: String(storedArtifact.artifactHash),
+                        dedupeKey,
+                        scopeKey,
+                        orderSeq,
+                        priority,
+                        orderKey
+                      }
+                    });
+                    deliveriesCreated += 1;
+                  } catch (err) {
+                    if (err?.code === "DELIVERY_DEDUPE_CONFLICT") continue;
+                    throw err;
+                  }
+                }
+              }
+
+              artifactSummary = {
+                artifactId,
+                artifactHash: String(storedArtifact.artifactHash),
+                deliveriesCreated
+              };
+            }
+
+            return sendJson(res, 200, {
+              ok: true,
+              tenantId,
+              period,
+              basis: monthClose?.basis ?? MONTH_CLOSE_BASIS.SETTLED_AT,
+              status,
+              mismatchCodes,
+              snapshot,
+              evidence: {
+                monthCloseEventId: monthClose?.lastEventId ?? null,
+                monthCloseChainHash: monthClose?.lastChainHash ?? null,
+                heldRollforwardArtifactId: heldRollforwardArtifact?.artifactId ?? null,
+                heldRollforwardArtifactHash: heldRollforwardArtifact?.artifactHash ?? null
               },
               artifact: artifactSummary
             });
