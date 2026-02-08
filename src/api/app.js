@@ -11594,6 +11594,32 @@ export function createApi({
           });
         }
 
+        async function appendBillingProviderRejectedAudit({
+          provider = "stripe",
+          eventId = null,
+          eventType = null,
+          reason = null,
+          message = null,
+          details = null
+        } = {}) {
+          if (typeof store.appendOpsAudit !== "function") return;
+          await store.appendOpsAudit({
+            tenantId,
+            audit: makeOpsAudit({
+              action: "BILLING_PROVIDER_EVENT_REJECTED",
+              targetType: "billing_provider_event",
+              targetId: eventId ?? null,
+              details: {
+                provider: provider ?? "stripe",
+                eventType: eventType ?? null,
+                reason: reason ?? null,
+                message: message ?? null,
+                ...(details && typeof details === "object" && !Array.isArray(details) ? details : {})
+              }
+            })
+          });
+        }
+
         function readIdempotency({ method, requestPath, expectedPrevChainHash, body }) {
           const idempotencyKey = req.headers["x-idempotency-key"] ? String(req.headers["x-idempotency-key"]) : null;
           if (!idempotencyKey) return { idempotencyKey: null, idemStoreKey: null, idemRequestHash: null };
@@ -13932,10 +13958,22 @@ export function createApi({
               try {
                 body = JSON.parse(rawText);
               } catch (err) {
+                await appendBillingProviderRejectedAudit({
+                  provider: "stripe",
+                  reason: "invalid_json",
+                  message: "invalid JSON body"
+                });
                 return sendError(res, 400, "invalid stripe event", { message: "invalid JSON body" }, { code: "SCHEMA_INVALID" });
               }
             }
             if (!body || typeof body !== "object" || Array.isArray(body)) {
+              await appendBillingProviderRejectedAudit({
+                provider: "stripe",
+                eventId: body?.id ?? null,
+                eventType: body?.type ?? null,
+                reason: "schema_invalid",
+                message: "stripe event payload must be an object"
+              });
               return sendError(res, 400, "invalid stripe event", { message: "stripe event payload must be an object" }, { code: "SCHEMA_INVALID" });
             }
 
@@ -13949,21 +13987,13 @@ export function createApi({
                   nowAt: nowIso()
                 });
               } catch (err) {
-                if (typeof store.appendOpsAudit === "function") {
-                  await store.appendOpsAudit({
-                    tenantId,
-                    audit: makeOpsAudit({
-                      action: "BILLING_PROVIDER_EVENT_REJECTED",
-                      targetType: "billing_provider_event",
-                      targetId: body?.id ?? null,
-                      details: {
-                        provider: "stripe",
-                        reason: "signature_verification_failed",
-                        message: err?.message ?? null
-                      }
-                    })
-                  });
-                }
+                await appendBillingProviderRejectedAudit({
+                  provider: "stripe",
+                  eventId: body?.id ?? null,
+                  eventType: body?.type ?? null,
+                  reason: "signature_verification_failed",
+                  message: err?.message ?? null
+                });
                 return sendError(res, 400, "invalid stripe signature", { message: err?.message ?? null }, { code: "SCHEMA_INVALID" });
               }
             }
@@ -13973,6 +14003,13 @@ export function createApi({
               await appendBillingProviderIngestAudit(applied);
               return sendJson(res, 200, applied);
             } catch (err) {
+              await appendBillingProviderRejectedAudit({
+                provider: "stripe",
+                eventId: body?.id ?? null,
+                eventType: body?.type ?? null,
+                reason: "apply_failed",
+                message: err?.message ?? null
+              });
               return sendError(res, 400, "invalid stripe event", { message: err?.message }, { code: "SCHEMA_INVALID" });
             }
           }
@@ -14007,6 +14044,14 @@ export function createApi({
                   ignored: applied?.ignored === true
                 });
               } catch (err) {
+                // eslint-disable-next-line no-await-in-loop
+                await appendBillingProviderRejectedAudit({
+                  provider: "stripe",
+                  eventId: event?.id ?? null,
+                  eventType: event?.type ?? null,
+                  reason: "reconcile_apply_failed",
+                  message: err?.message ?? "unknown error"
+                });
                 results.push({
                   ok: false,
                   eventId: event?.id ?? null,
@@ -14064,6 +14109,17 @@ export function createApi({
               ingested: rows.filter((row) => String(row?.action ?? "") === "BILLING_PROVIDER_EVENT_INGEST").length,
               rejected: rows.filter((row) => String(row?.action ?? "") === "BILLING_PROVIDER_EVENT_REJECTED").length
             };
+            const rejectedReasonCounts = rows
+              .filter((row) => String(row?.action ?? "") === "BILLING_PROVIDER_EVENT_REJECTED")
+              .reduce((acc, row) => {
+                const reason =
+                  row?.details && typeof row.details === "object" && !Array.isArray(row.details) && typeof row.details.reason === "string"
+                    ? row.details.reason.trim()
+                    : "";
+                const key = reason || "unknown";
+                acc[key] = (acc[key] ?? 0) + 1;
+                return acc;
+              }, {});
             const billingCfg = await getTenantBillingConfig(tenantId);
             const subscription = normalizeBillingSubscriptionRecord(billingCfg?.subscription ?? null, { allowNull: true, strictPlan: false });
             const dedupCount = normalizeBillingProviderEventDedupList(billingCfg?.providerEventDedupKeys ?? []).length;
@@ -14071,6 +14127,7 @@ export function createApi({
               tenantId,
               provider: "stripe",
               counts,
+              rejectedReasonCounts,
               dedupeKeyCount: dedupCount,
               subscription,
               recent: rows

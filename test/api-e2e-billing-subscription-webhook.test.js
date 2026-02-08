@@ -245,6 +245,17 @@ test("API e2e: stripe billing webhook enforces signature when secret is configur
   assert.equal(missingSig.statusCode, 400);
   assert.equal(missingSig.json?.error, "invalid stripe signature");
 
+  const reportAfterReject = await request(api, {
+    method: "GET",
+    path: "/ops/finance/billing/providers/stripe/reconcile/report?limit=20",
+    headers: {
+      "x-proxy-tenant-id": tenantId,
+      "x-proxy-ops-token": "tok_finw"
+    }
+  });
+  assert.equal(reportAfterReject.statusCode, 200);
+  assert.ok(Number(reportAfterReject.json?.rejectedReasonCounts?.signature_verification_failed ?? 0) >= 1);
+
   const rawBody = JSON.stringify(payload);
   const signature = makeStripeSignatureHeader({
     rawBody,
@@ -313,16 +324,22 @@ test("API e2e: stripe billing reconcile replay returns summary and report", asyn
           type: "invoice.created",
           created: 1770422400,
           data: { object: { id: "in_001", customer: "cus_reconcile_001", metadata: {} } }
+        },
+        {
+          id: "evt_reconcile_004",
+          type: "customer.subscription.updated",
+          created: 1770422400,
+          data: {}
         }
       ]
     }
   });
   assert.equal(replay.statusCode, 200);
-  assert.equal(replay.json?.summary?.total, 3);
+  assert.equal(replay.json?.summary?.total, 4);
   assert.equal(replay.json?.summary?.duplicate, 1);
   assert.equal(replay.json?.summary?.applied, 1);
   assert.equal(replay.json?.summary?.ignored, 1);
-  assert.equal(replay.json?.summary?.failed, 0);
+  assert.equal(replay.json?.summary?.failed, 1);
 
   const report = await request(api, {
     method: "GET",
@@ -335,5 +352,6 @@ test("API e2e: stripe billing reconcile replay returns summary and report", asyn
   assert.equal(report.statusCode, 200);
   assert.equal(report.json?.provider, "stripe");
   assert.ok(Number(report.json?.counts?.ingested ?? 0) >= 2);
+  assert.ok(Number(report.json?.rejectedReasonCounts?.reconcile_apply_failed ?? 0) >= 1);
   assert.equal(report.json?.subscription?.subscriptionId, "sub_reconcile_001");
 });
