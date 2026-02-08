@@ -100,8 +100,32 @@ if [[ "$(echo "$HEALTH_JSON" | jq -r '.ok // false')" != "true" ]]; then
   exit 1
 fi
 
+STRIPE_CUSTOMER_ID=""
+if [[ -n "${PROXY_BILLING_STRIPE_SECRET_KEY:-}" ]]; then
+  STRIPE_CUSTOMER_ID="$(
+    curl -sS https://api.stripe.com/v1/customers \
+      -u "$PROXY_BILLING_STRIPE_SECRET_KEY:" \
+      -d "name=Settld Smoke Customer $(date +%s)" | jq -r '.id'
+  )"
+  if [[ -z "$STRIPE_CUSTOMER_ID" || "$STRIPE_CUSTOMER_ID" == "null" ]]; then
+    echo "Failed to create Stripe customer for smoke run." >&2
+    exit 1
+  fi
+fi
+
 echo "[2/5] Stripe checkout session..."
-CHECKOUT_JSON="$(api_post_json "/ops/finance/billing/providers/stripe/checkout" '{"plan":"builder"}')"
+CHECKOUT_PAYLOAD="$(jq -n \
+  --arg plan "builder" \
+  --arg customerId "$STRIPE_CUSTOMER_ID" \
+  --arg successUrl "${SETTLD_BASE_URL%/}/billing/success" \
+  --arg cancelUrl "${SETTLD_BASE_URL%/}/billing/cancel" \
+  '{
+    plan: $plan,
+    successUrl: $successUrl,
+    cancelUrl: $cancelUrl
+  } + (if ($customerId | length) > 0 then { customerId: $customerId } else {} end)'
+)"
+CHECKOUT_JSON="$(api_post_json "/ops/finance/billing/providers/stripe/checkout" "$CHECKOUT_PAYLOAD")"
 echo "$CHECKOUT_JSON" | jq '{tenantId, mode: .checkoutSession.mode, plan: .checkoutSession.plan, sessionId: .checkoutSession.sessionId, sessionUrl: .checkoutSession.sessionUrl}'
 CHECKOUT_MODE="$(echo "$CHECKOUT_JSON" | jq -r '.checkoutSession.mode // ""')"
 if [[ "$CHECKOUT_MODE" != "live" && "$CHECKOUT_MODE" != "stub" ]]; then
@@ -110,14 +134,7 @@ if [[ "$CHECKOUT_MODE" != "live" && "$CHECKOUT_MODE" != "stub" ]]; then
 fi
 
 echo "[3/5] Stripe customer portal session..."
-CUSTOMER_ID=""
-if [[ -n "${PROXY_BILLING_STRIPE_SECRET_KEY:-}" ]]; then
-  CUSTOMER_ID="$(
-    curl -sS https://api.stripe.com/v1/customers \
-      -u "$PROXY_BILLING_STRIPE_SECRET_KEY:" \
-      -d "name=Settld Smoke Customer $(date +%s)" | jq -r '.id'
-  )"
-fi
+CUSTOMER_ID="$STRIPE_CUSTOMER_ID"
 if [[ -z "$CUSTOMER_ID" || "$CUSTOMER_ID" == "null" ]]; then
   CUSTOMER_ID="cus_smoke_$(date +%s)"
 fi
