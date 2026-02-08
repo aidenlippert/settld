@@ -263,7 +263,15 @@ export function createApi({
   billingStripeRetryMaxMs = null,
   billingStripeCircuitFailureThreshold = null,
   billingStripeCircuitOpenMs = null,
-  billingStripeFetchFn = null
+  billingStripeFetchFn = null,
+  billingStripeSyncEnabled = null,
+  billingStripeSyncIntervalSeconds = null,
+  billingStripeSyncBatchSize = null,
+  billingStripeSyncAuditScanLimit = null,
+  billingStripeSyncMaxReplayAttempts = null,
+  billingStripeSyncMinRetrySeconds = null,
+  billingStripeSyncMaxRetrySeconds = null,
+  billingStripeSyncReplayReasons = null
 } = {}) {
   const apiStartedAtMs = Date.now();
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
@@ -663,6 +671,85 @@ export function createApi({
     throw new TypeError("PROXY_BILLING_STRIPE_CIRCUIT_OPEN_MS must be a positive safe integer");
   }
   const effectiveBillingStripeFetchFn = typeof billingStripeFetchFn === "function" ? billingStripeFetchFn : null;
+  const effectiveBillingStripeSyncEnabled =
+    billingStripeSyncEnabled !== null && billingStripeSyncEnabled !== undefined
+      ? billingStripeSyncEnabled === true
+      : typeof process !== "undefined" && process.env.PROXY_BILLING_STRIPE_SYNC_ENABLED !== undefined
+        ? String(process.env.PROXY_BILLING_STRIPE_SYNC_ENABLED) === "1"
+        : true;
+  const effectiveBillingStripeSyncIntervalSeconds =
+    billingStripeSyncIntervalSeconds !== null && billingStripeSyncIntervalSeconds !== undefined
+      ? Number(billingStripeSyncIntervalSeconds)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_SYNC_INTERVAL_SECONDS", 60);
+  if (!Number.isSafeInteger(effectiveBillingStripeSyncIntervalSeconds) || effectiveBillingStripeSyncIntervalSeconds < 0) {
+    throw new TypeError("PROXY_BILLING_STRIPE_SYNC_INTERVAL_SECONDS must be a non-negative safe integer");
+  }
+  const effectiveBillingStripeSyncBatchSize =
+    billingStripeSyncBatchSize !== null && billingStripeSyncBatchSize !== undefined
+      ? Number(billingStripeSyncBatchSize)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_SYNC_BATCH_SIZE", 50);
+  if (!Number.isSafeInteger(effectiveBillingStripeSyncBatchSize) || effectiveBillingStripeSyncBatchSize <= 0) {
+    throw new TypeError("PROXY_BILLING_STRIPE_SYNC_BATCH_SIZE must be a positive safe integer");
+  }
+  const effectiveBillingStripeSyncAuditScanLimit =
+    billingStripeSyncAuditScanLimit !== null && billingStripeSyncAuditScanLimit !== undefined
+      ? Number(billingStripeSyncAuditScanLimit)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_SYNC_AUDIT_SCAN_LIMIT", 1000);
+  if (!Number.isSafeInteger(effectiveBillingStripeSyncAuditScanLimit) || effectiveBillingStripeSyncAuditScanLimit <= 0) {
+    throw new TypeError("PROXY_BILLING_STRIPE_SYNC_AUDIT_SCAN_LIMIT must be a positive safe integer");
+  }
+  const effectiveBillingStripeSyncMaxReplayAttempts =
+    billingStripeSyncMaxReplayAttempts !== null && billingStripeSyncMaxReplayAttempts !== undefined
+      ? Number(billingStripeSyncMaxReplayAttempts)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_SYNC_MAX_REPLAY_ATTEMPTS", 5);
+  if (!Number.isSafeInteger(effectiveBillingStripeSyncMaxReplayAttempts) || effectiveBillingStripeSyncMaxReplayAttempts <= 0) {
+    throw new TypeError("PROXY_BILLING_STRIPE_SYNC_MAX_REPLAY_ATTEMPTS must be a positive safe integer");
+  }
+  const effectiveBillingStripeSyncMinRetrySeconds =
+    billingStripeSyncMinRetrySeconds !== null && billingStripeSyncMinRetrySeconds !== undefined
+      ? Number(billingStripeSyncMinRetrySeconds)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_SYNC_MIN_RETRY_SECONDS", 60);
+  if (!Number.isSafeInteger(effectiveBillingStripeSyncMinRetrySeconds) || effectiveBillingStripeSyncMinRetrySeconds < 0) {
+    throw new TypeError("PROXY_BILLING_STRIPE_SYNC_MIN_RETRY_SECONDS must be a non-negative safe integer");
+  }
+  const effectiveBillingStripeSyncMaxRetrySeconds =
+    billingStripeSyncMaxRetrySeconds !== null && billingStripeSyncMaxRetrySeconds !== undefined
+      ? Number(billingStripeSyncMaxRetrySeconds)
+      : parseNonNegativeIntEnv("PROXY_BILLING_STRIPE_SYNC_MAX_RETRY_SECONDS", 3600);
+  if (!Number.isSafeInteger(effectiveBillingStripeSyncMaxRetrySeconds) || effectiveBillingStripeSyncMaxRetrySeconds <= 0) {
+    throw new TypeError("PROXY_BILLING_STRIPE_SYNC_MAX_RETRY_SECONDS must be a positive safe integer");
+  }
+  const effectiveBillingStripeSyncReplayReasons = (() => {
+    const raw =
+      billingStripeSyncReplayReasons !== null && billingStripeSyncReplayReasons !== undefined
+        ? billingStripeSyncReplayReasons
+        : typeof process !== "undefined" && typeof process.env.PROXY_BILLING_STRIPE_SYNC_REPLAY_REASONS === "string"
+          ? process.env.PROXY_BILLING_STRIPE_SYNC_REPLAY_REASONS
+          : "apply_failed,reconcile_apply_failed,dead_letter_replay_apply_failed";
+    const list = Array.isArray(raw)
+      ? raw
+      : String(raw)
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+    const set = new Set();
+    for (const reason of list) {
+      set.add(String(reason));
+    }
+    if (set.size === 0) {
+      set.add("apply_failed");
+      set.add("reconcile_apply_failed");
+      set.add("dead_letter_replay_apply_failed");
+    }
+    return set;
+  })();
+  const billingStripeSyncState = {
+    inFlight: false,
+    lastRunAt: null,
+    lastSuccessAt: null,
+    lastResult: null,
+    nextEligibleAtMs: 0
+  };
 
   function parseOpsTokens(raw) {
     if (raw === null || raw === undefined) return new Map();
@@ -6448,6 +6535,109 @@ export function createApi({
     return Math.max(0, Math.min(max, Math.round(withoutJitter * jitter)));
   }
 
+  function normalizeAuditDetailsObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function cloneJsonLike(value) {
+    if (value === null || value === undefined) return null;
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return null;
+    }
+  }
+
+  function makeSystemOpsAuditRecord({
+    tenantId,
+    action,
+    targetType = null,
+    targetId = null,
+    details = null,
+    at = nowIso()
+  } = {}) {
+    return makeOpsAuditRecord({
+      tenantId,
+      actorKeyId: null,
+      actorPrincipalId: "system:billing_stripe_sync",
+      requestId: createId("req_system"),
+      action: String(action ?? "OPS_SYSTEM"),
+      targetType,
+      targetId,
+      at,
+      details
+    });
+  }
+
+  async function appendSystemBillingProviderIngestAudit(
+    applied,
+    { tenantId, source = "webhook", replayed = false, replayAuditId = null, captureDuplicate = false } = {}
+  ) {
+    if (typeof store.appendOpsAudit !== "function") return;
+    if (!applied || typeof applied !== "object") return;
+    if (applied.duplicate === true && captureDuplicate !== true) return;
+    await store.appendOpsAudit({
+      tenantId,
+      audit: makeSystemOpsAuditRecord({
+        tenantId,
+        action: "BILLING_PROVIDER_EVENT_INGEST",
+        targetType: "billing_provider_event",
+        targetId: applied.eventId ?? null,
+        details: {
+          provider: applied.provider ?? "stripe",
+          eventId: applied.eventId ?? null,
+          eventType: applied.eventType ?? null,
+          source: typeof source === "string" && source.trim() !== "" ? source.trim() : "webhook",
+          replayed: replayed === true,
+          replayAuditId: replayAuditId ?? null,
+          duplicate: applied.duplicate === true,
+          ignored: applied.ignored === true,
+          planChanged: applied?.applied?.planChanged === true,
+          previousPlan: applied?.applied?.previousPlan ?? null,
+          nextPlan: applied?.applied?.nextPlan ?? null,
+          subscriptionId: applied?.subscription?.subscriptionId ?? null,
+          customerId: applied?.subscription?.customerId ?? null,
+          status: applied?.subscription?.status ?? null
+        }
+      })
+    });
+  }
+
+  async function appendSystemBillingProviderRejectedAudit({
+    tenantId,
+    provider = "stripe",
+    eventId = null,
+    eventType = null,
+    reason = null,
+    message = null,
+    source = "webhook",
+    event = null,
+    details = null
+  } = {}) {
+    if (typeof store.appendOpsAudit !== "function") return;
+    const replayEvent = event && typeof event === "object" && !Array.isArray(event) ? cloneJsonLike(event) : null;
+    await store.appendOpsAudit({
+      tenantId,
+      audit: makeSystemOpsAuditRecord({
+        tenantId,
+        action: "BILLING_PROVIDER_EVENT_REJECTED",
+        targetType: "billing_provider_event",
+        targetId: eventId ?? null,
+        details: {
+          provider: provider ?? "stripe",
+          eventId: eventId ?? null,
+          eventType: eventType ?? null,
+          reason: reason ?? null,
+          message: message ?? null,
+          source: typeof source === "string" && source.trim() !== "" ? source.trim() : "webhook",
+          replayable: Boolean(replayEvent),
+          event: replayEvent,
+          ...(details && typeof details === "object" && !Array.isArray(details) ? details : {})
+        }
+      })
+    });
+  }
+
   function normalizeStripeErrorFromResponseBody(json) {
     const stripeError = json && typeof json === "object" && !Array.isArray(json) && json.error && typeof json.error === "object" ? json.error : null;
     if (!stripeError) return null;
@@ -6871,6 +7061,265 @@ export function createApi({
       subscription: parsed.subscription,
       resolvedPlan: resolveTenantBillingPlan({ tenantId })
     };
+  }
+
+  function computeBillingStripeReplayDelaySeconds({ failedAttempts }) {
+    const attempts = Number.isSafeInteger(failedAttempts) ? failedAttempts : 0;
+    if (attempts <= 0) return 0;
+    const base = Math.max(0, effectiveBillingStripeSyncMinRetrySeconds);
+    if (base === 0) return 0;
+    const max = Math.max(base, effectiveBillingStripeSyncMaxRetrySeconds);
+    const computed = base * Math.pow(2, Math.max(0, attempts - 1));
+    return Math.min(max, computed);
+  }
+
+  async function tickBillingStripeSync({
+    tenantId = DEFAULT_TENANT_ID,
+    maxRows = effectiveBillingStripeSyncBatchSize,
+    force = false
+  } = {}) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const startedAt = nowIso();
+    const startedAtMs = Date.parse(startedAt);
+    const normalizedMaxRows = Number.isSafeInteger(maxRows) && maxRows > 0 ? Math.min(1000, maxRows) : effectiveBillingStripeSyncBatchSize;
+
+    if (!effectiveBillingStripeSyncEnabled) {
+      return {
+        ok: true,
+        tenantId: normalizedTenantId,
+        skipped: true,
+        reason: "disabled"
+      };
+    }
+    if (typeof store.listOpsAudit !== "function") {
+      return {
+        ok: false,
+        tenantId: normalizedTenantId,
+        code: "OPS_AUDIT_UNSUPPORTED",
+        message: "ops audit not supported for this store"
+      };
+    }
+    if (billingStripeSyncState.inFlight) {
+      return {
+        ok: false,
+        tenantId: normalizedTenantId,
+        code: "MAINTENANCE_ALREADY_RUNNING",
+        message: "billing stripe sync is already running"
+      };
+    }
+    if (
+      force !== true &&
+      effectiveBillingStripeSyncIntervalSeconds > 0 &&
+      Number.isFinite(billingStripeSyncState.nextEligibleAtMs) &&
+      billingStripeSyncState.nextEligibleAtMs > startedAtMs
+    ) {
+      return {
+        ok: true,
+        tenantId: normalizedTenantId,
+        skipped: true,
+        reason: "interval_not_elapsed",
+        nextEligibleAt: new Date(billingStripeSyncState.nextEligibleAtMs).toISOString()
+      };
+    }
+
+    billingStripeSyncState.inFlight = true;
+    billingStripeSyncState.lastRunAt = startedAt;
+    billingStripeSyncState.nextEligibleAtMs =
+      effectiveBillingStripeSyncIntervalSeconds > 0
+        ? startedAtMs + effectiveBillingStripeSyncIntervalSeconds * 1000
+        : startedAtMs;
+    try {
+      const audits = await store.listOpsAudit({
+        tenantId: normalizedTenantId,
+        limit: effectiveBillingStripeSyncAuditScanLimit,
+        offset: 0
+      });
+      const rows = Array.isArray(audits) ? audits : [];
+      const scoped = rows.filter((row) => {
+        const action = String(row?.action ?? "");
+        return action === "BILLING_PROVIDER_EVENT_REJECTED" || action === "BILLING_PROVIDER_EVENT_INGEST";
+      });
+      const replaySucceededByAuditId = new Set();
+      const replayFailedByAuditId = new Map();
+      const replayFailedLastAtByAuditId = new Map();
+      for (const row of scoped) {
+        const action = String(row?.action ?? "");
+        const details = normalizeAuditDetailsObject(row?.details);
+        const replayAuditId = Number(details.replayAuditId);
+        if (!Number.isSafeInteger(replayAuditId) || replayAuditId <= 0) continue;
+        if (action === "BILLING_PROVIDER_EVENT_INGEST" && details.replayed === true) {
+          replaySucceededByAuditId.add(replayAuditId);
+          continue;
+        }
+        if (action === "BILLING_PROVIDER_EVENT_REJECTED" && String(details.reason ?? "") === "dead_letter_replay_apply_failed") {
+          replayFailedByAuditId.set(replayAuditId, (replayFailedByAuditId.get(replayAuditId) ?? 0) + 1);
+          const atMs = row?.at ? Date.parse(String(row.at)) : Number.NaN;
+          if (Number.isFinite(atMs)) {
+            const prev = replayFailedLastAtByAuditId.get(replayAuditId);
+            if (!Number.isFinite(prev) || atMs > prev) replayFailedLastAtByAuditId.set(replayAuditId, atMs);
+          }
+        }
+      }
+
+      const rejectedRows = scoped
+        .filter((row) => String(row?.action ?? "") === "BILLING_PROVIDER_EVENT_REJECTED")
+        .map((row) => ({ row, details: normalizeAuditDetailsObject(row?.details) }))
+        .filter(({ details }) => (details.provider ?? "stripe") === "stripe")
+        .filter(({ details }) => details.replayable === true && details.event && typeof details.event === "object" && !Array.isArray(details.event))
+        .filter(({ details }) => effectiveBillingStripeSyncReplayReasons.has(String(details.reason ?? "")))
+        .filter(({ details }) => String(details.source ?? "webhook") !== "dead_letter_replay")
+        .filter(({ row }) => !replaySucceededByAuditId.has(Number(row?.id)))
+        .sort((a, b) => Number(a.row?.id ?? 0) - Number(b.row?.id ?? 0));
+
+      const selected = [];
+      let skippedBackoff = 0;
+      let skippedMaxAttempts = 0;
+      for (const candidate of rejectedRows) {
+        const auditId = Number(candidate.row?.id ?? 0);
+        if (!Number.isSafeInteger(auditId) || auditId <= 0) continue;
+        const failedAttempts = replayFailedByAuditId.get(auditId) ?? 0;
+        if (failedAttempts >= effectiveBillingStripeSyncMaxReplayAttempts) {
+          skippedMaxAttempts += 1;
+          continue;
+        }
+        const lastFailedAtMs = replayFailedLastAtByAuditId.get(auditId);
+        const retryDelaySeconds = computeBillingStripeReplayDelaySeconds({ failedAttempts });
+        const nextRetryAtMs =
+          Number.isFinite(lastFailedAtMs) && retryDelaySeconds > 0
+            ? lastFailedAtMs + retryDelaySeconds * 1000
+            : Number.NaN;
+        if (Number.isFinite(nextRetryAtMs) && nextRetryAtMs > startedAtMs) {
+          skippedBackoff += 1;
+          continue;
+        }
+        selected.push(candidate);
+        if (selected.length >= normalizedMaxRows) break;
+      }
+
+      const results = [];
+      for (const candidate of selected) {
+        const replayEvent = candidate.details.event;
+        const replayAuditId = Number(candidate.row?.id ?? 0);
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const applied = await applyStripeBillingProviderEvent({ tenantId: normalizedTenantId, body: replayEvent });
+          // eslint-disable-next-line no-await-in-loop
+          await appendSystemBillingProviderIngestAudit(applied, {
+            tenantId: normalizedTenantId,
+            source: "dead_letter_replay",
+            replayed: true,
+            replayAuditId,
+            captureDuplicate: true
+          });
+          results.push({
+            ok: true,
+            replayAuditId,
+            eventId: applied?.eventId ?? replayEvent?.id ?? null,
+            eventType: applied?.eventType ?? replayEvent?.type ?? null,
+            duplicate: applied?.duplicate === true,
+            ignored: applied?.ignored === true
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-await-in-loop
+          await appendSystemBillingProviderRejectedAudit({
+            tenantId: normalizedTenantId,
+            provider: "stripe",
+            eventId: replayEvent?.id ?? candidate.row?.targetId ?? null,
+            eventType: replayEvent?.type ?? candidate.details.eventType ?? null,
+            reason: "dead_letter_replay_apply_failed",
+            message: err?.message ?? "unknown error",
+            source: "dead_letter_replay",
+            event: replayEvent,
+            details: {
+              replayAuditId,
+              originalReason: candidate.details.reason ?? null
+            }
+          });
+          results.push({
+            ok: false,
+            replayAuditId,
+            eventId: replayEvent?.id ?? candidate.row?.targetId ?? null,
+            eventType: replayEvent?.type ?? candidate.details.eventType ?? null,
+            error: err?.message ?? "unknown error"
+          });
+        }
+      }
+
+      const summary = {
+        scanned: rejectedRows.length,
+        selected: selected.length,
+        applied: results.filter((row) => row.ok === true && row.duplicate !== true && row.ignored !== true).length,
+        duplicate: results.filter((row) => row.ok === true && row.duplicate === true).length,
+        ignored: results.filter((row) => row.ok === true && row.ignored === true).length,
+        failed: results.filter((row) => row.ok !== true).length,
+        skippedBackoff,
+        skippedMaxAttempts
+      };
+      const completedAt = nowIso();
+      billingStripeSyncState.lastSuccessAt = completedAt;
+      billingStripeSyncState.lastResult = {
+        ok: true,
+        tenantId: normalizedTenantId,
+        startedAt,
+        completedAt,
+        summary
+      };
+      try {
+        store.__billingStripeSyncLastRunAt = startedAt;
+        store.__billingStripeSyncLastSuccessAt = completedAt;
+        store.__billingStripeSyncLastResult = billingStripeSyncState.lastResult;
+      } catch {}
+      if (typeof store.appendOpsAudit === "function") {
+        await store.appendOpsAudit({
+          tenantId: normalizedTenantId,
+          audit: makeSystemOpsAuditRecord({
+            tenantId: normalizedTenantId,
+            action: "MAINTENANCE_BILLING_STRIPE_SYNC_RUN",
+            targetType: "maintenance",
+            targetId: "billing_stripe_sync",
+            at: completedAt,
+            details: {
+              outcome: "ok",
+              summary
+            }
+          })
+        });
+      }
+      return billingStripeSyncState.lastResult;
+    } catch (err) {
+      const completedAt = nowIso();
+      const failure = {
+        ok: false,
+        tenantId: normalizedTenantId,
+        startedAt,
+        completedAt,
+        error: err?.message ?? "unknown error"
+      };
+      billingStripeSyncState.lastResult = failure;
+      try {
+        store.__billingStripeSyncLastRunAt = startedAt;
+        store.__billingStripeSyncLastResult = failure;
+      } catch {}
+      if (typeof store.appendOpsAudit === "function") {
+        await store.appendOpsAudit({
+          tenantId: normalizedTenantId,
+          audit: makeSystemOpsAuditRecord({
+            tenantId: normalizedTenantId,
+            action: "MAINTENANCE_BILLING_STRIPE_SYNC_RUN",
+            targetType: "maintenance",
+            targetId: "billing_stripe_sync",
+            at: completedAt,
+            details: {
+              outcome: "error",
+              error: err?.message ?? "unknown error"
+            }
+          })
+        });
+      }
+      return failure;
+    } finally {
+      billingStripeSyncState.inFlight = false;
+    }
   }
 
   async function listBillableUsageEventsAll({
@@ -15263,7 +15712,20 @@ export function createApi({
                     requestId: lastRetention.requestId ?? null,
                     auditId: lastRetention.id ?? null
                   }
-                : null
+                : null,
+              billingStripeSync: (() => {
+                const lastRunAt = store?.__billingStripeSyncLastRunAt ?? null;
+                const lastSuccessAt = store?.__billingStripeSyncLastSuccessAt ?? null;
+                const lastResult = store?.__billingStripeSyncLastResult ?? null;
+                return {
+                  enabled: effectiveBillingStripeSyncEnabled,
+                  intervalSeconds: effectiveBillingStripeSyncIntervalSeconds,
+                  batchSize: effectiveBillingStripeSyncBatchSize,
+                  lastRunAt,
+                  lastSuccessAt,
+                  lastResult
+                };
+              })()
             },
             reasons: {
               topAppendRejected: topAppendRejectReasons,
@@ -25742,6 +26204,7 @@ export function createApi({
     tickJobAccounting,
     tickEvidenceRetention,
     tickRetentionCleanup,
+    tickBillingStripeSync,
     tickProof,
     tickArtifacts,
     tickDeliveries
