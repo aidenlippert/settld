@@ -104,6 +104,62 @@ test("API e2e: billing subscription endpoint upserts provider state and plan", a
   assert.equal(getSubscription.json?.subscription?.status, "active");
 });
 
+test("API e2e: resolved billing plan follows active subscription plan even if stored plan is stale", async () => {
+  const api = createApi({
+    now: () => "2026-02-07T00:00:00.000Z",
+    opsTokens: "tok_finr:finance_read;tok_finw:finance_write"
+  });
+
+  const tenantId = "tenant_billing_subscription_resolved_from_active_sub";
+
+  const upsert = await request(api, {
+    method: "PUT",
+    path: "/ops/finance/billing/subscription",
+    headers: {
+      "x-proxy-tenant-id": tenantId,
+      "x-proxy-ops-token": "tok_finw"
+    },
+    body: {
+      // Simulate stale/manual top-level billing plan while provider subscription is active on a paid tier.
+      plan: "free",
+      subscription: {
+        provider: "stripe",
+        customerId: "cus_stale_plan_001",
+        subscriptionId: "sub_stale_plan_001",
+        status: "active",
+        plan: "builder",
+        currentPeriodStart: "2026-02-01T00:00:00.000Z",
+        currentPeriodEnd: "2026-03-01T00:00:00.000Z"
+      }
+    }
+  });
+  assert.equal(upsert.statusCode, 200);
+  assert.equal(upsert.json?.resolvedPlan?.planId, "builder");
+
+  const getPlan = await request(api, {
+    method: "GET",
+    path: "/ops/finance/billing/plan",
+    headers: {
+      "x-proxy-tenant-id": tenantId,
+      "x-proxy-ops-token": "tok_finr"
+    }
+  });
+  assert.equal(getPlan.statusCode, 200);
+  assert.equal(getPlan.json?.billing?.plan, "free");
+  assert.equal(getPlan.json?.resolvedPlan?.planId, "builder");
+
+  const getSummary = await request(api, {
+    method: "GET",
+    path: "/ops/finance/billing/summary",
+    headers: {
+      "x-proxy-tenant-id": tenantId,
+      "x-proxy-ops-token": "tok_finr"
+    }
+  });
+  assert.equal(getSummary.statusCode, 200);
+  assert.equal(getSummary.json?.plan?.planId, "builder");
+});
+
 test("API e2e: stripe billing webhook is idempotent and syncs growth plan", async () => {
   const api = createApi({
     now: () => "2026-02-07T00:00:00.000Z",

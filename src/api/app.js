@@ -2163,13 +2163,13 @@ export function createApi({
     if (!billing || typeof billing !== "object" || Array.isArray(billing)) {
       throw new TypeError("billing config is required");
     }
+    const cfg = getTenantConfig(tenantId);
+    if (cfg && typeof cfg === "object") cfg.billing = billing;
     if (typeof store.putTenantBillingConfig === "function") {
       await store.putTenantBillingConfig({ tenantId: normalizeTenant(tenantId), billing });
       return;
     }
-    const cfg = getTenantConfig(tenantId);
     if (!cfg || typeof cfg !== "object") throw new TypeError("tenant config unavailable");
-    cfg.billing = billing;
   }
 
   function countOpenJobsForTenant(tenantId) {
@@ -6067,10 +6067,27 @@ export function createApi({
   function resolveTenantBillingPlan({ tenantId }) {
     const cfg = getTenantConfig(tenantId) ?? {};
     const billingCfg = cfg?.billing && typeof cfg.billing === "object" && !Array.isArray(cfg.billing) ? cfg.billing : {};
-    const planId = normalizeBillingPlanId(billingCfg.plan ?? BILLING_PLAN_ID.FREE, {
+    const configuredPlanId = normalizeBillingPlanId(billingCfg.plan ?? BILLING_PLAN_ID.FREE, {
       allowNull: false,
       defaultPlan: BILLING_PLAN_ID.FREE
     });
+    const subscription = normalizeBillingSubscriptionRecord(billingCfg.subscription ?? null, {
+      allowNull: true,
+      strictPlan: false
+    });
+    const subscriptionPlanId = subscription?.plan ?? null;
+    const subscriptionStatus =
+      typeof subscription?.status === "string" && subscription.status.trim() !== ""
+        ? subscription.status.trim().toLowerCase()
+        : null;
+    const subscriptionPlanEligible =
+      Boolean(subscriptionPlanId) &&
+      subscriptionStatus !== "canceled" &&
+      subscriptionStatus !== "cancelled" &&
+      subscriptionStatus !== "incomplete_expired" &&
+      subscriptionStatus !== "ended" &&
+      subscriptionStatus !== "terminated";
+    const planId = subscriptionPlanEligible ? subscriptionPlanId : configuredPlanId;
     const overrides = normalizeBillingPlanOverrides(billingCfg.planOverrides ?? null, { allowNull: true });
     const hardLimitEnforced = billingCfg.hardLimitEnforced !== false;
     return resolveBillingPlan({
@@ -6629,6 +6646,7 @@ export function createApi({
     period
   } = {}) {
     const normalizedPeriod = normalizeBillingPeriodInput(period, { defaultToNow: true });
+    await getTenantBillingConfig(tenantId);
     const billingPlan = resolveTenantBillingPlan({ tenantId });
     const events = await listBillableUsageEventsAll({
       tenantId,
@@ -6700,6 +6718,7 @@ export function createApi({
       Number.isSafeInteger(normalizedQuantityRaw) && normalizedQuantityRaw > 0
         ? normalizedQuantityRaw
         : 1;
+    await getTenantBillingConfig(tenantId);
     const billingPlan = resolveTenantBillingPlan({ tenantId });
     const hardLimit = Number.isSafeInteger(billingPlan.hardLimitVerifiedRunsPerMonth)
       ? billingPlan.hardLimitVerifiedRunsPerMonth
