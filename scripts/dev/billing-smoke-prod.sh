@@ -18,7 +18,9 @@ done
 : "${SETTLD_BASE_URL:?SETTLD_BASE_URL is required (example: https://<your-api-domain>)}"
 : "${PROXY_OPS_TOKEN:?PROXY_OPS_TOKEN is required}"
 
-if [[ -z "${SETTLD_TENANT_ID:-}" ]]; then
+# Default to an isolated smoke tenant to avoid stale billing/subscription state
+# in long-lived tenants (for example tenant_default).
+if [[ -z "${SETTLD_TENANT_ID:-}" || "${SETTLD_TENANT_ID}" == "tenant_default" ]]; then
   SETTLD_TENANT_ID="tenant_smoke_$(date +%s)"
 fi
 export SETTLD_TENANT_ID
@@ -51,8 +53,8 @@ api_get() {
   body="$(printf "%s" "$response" | sed '$d')"
   status="$(printf "%s" "$response" | tail -n1)"
   if [[ ! "$status" =~ ^2 ]]; then
-    echo "GET $path failed (HTTP $status)"
-    echo "$body" | jq . 2>/dev/null || echo "$body"
+    echo "GET $path failed (HTTP $status)" >&2
+    echo "$body" | jq . 2>/dev/null >&2 || echo "$body" >&2
     exit 1
   fi
   printf "%s" "$body"
@@ -71,8 +73,8 @@ api_post_json() {
   body="$(printf "%s" "$response" | sed '$d')"
   status="$(printf "%s" "$response" | tail -n1)"
   if [[ ! "$status" =~ ^2 ]]; then
-    echo "POST $path failed (HTTP $status)"
-    echo "$body" | jq . 2>/dev/null || echo "$body"
+    echo "POST $path failed (HTTP $status)" >&2
+    echo "$body" | jq . 2>/dev/null >&2 || echo "$body" >&2
     exit 1
   fi
   printf "%s" "$body"
