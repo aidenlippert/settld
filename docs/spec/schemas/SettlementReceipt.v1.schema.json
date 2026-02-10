@@ -1,0 +1,48 @@
+{
+  "$id": "https://settld.local/schemas/SettlementReceipt.v1.schema.json",
+  "title": "SettlementReceipt.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "artifactType", "artifactId", "tenantId", "decision", "transfer", "settledAt", "receiptHash", "signature"],
+  "properties": {
+    "schemaVersion": { "const": "SettlementReceipt.v1" },
+    "artifactType": { "const": "SettlementReceipt.v1" },
+    "artifactId": { "type": "string", "minLength": 1 },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "recordHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "recordHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "transfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payerAgentId", "payeeAgentId", "amountCents", "currency"],
+      "properties": {
+        "payerAgentId": { "type": "string", "minLength": 1 },
+        "payeeAgentId": { "type": "string", "minLength": 1 },
+        "amountCents": { "type": "integer", "minimum": 0 },
+        "currency": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ledger": { "type": ["object", "null"], "additionalProperties": true },
+    "settledAt": { "type": "string", "minLength": 1 },
+    "receiptHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1 },
+        "signedAt": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+

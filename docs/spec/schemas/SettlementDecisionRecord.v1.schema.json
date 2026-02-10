@@ -1,0 +1,49 @@
+{
+  "$id": "https://settld.local/schemas/SettlementDecisionRecord.v1.schema.json",
+  "title": "SettlementDecisionRecord.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "artifactType", "artifactId", "tenantId", "agreement", "evidence", "decision", "modality", "decidedAt", "recordHash", "signature"],
+  "properties": {
+    "schemaVersion": { "const": "SettlementDecisionRecord.v1" },
+    "artifactType": { "const": "SettlementDecisionRecord.v1" },
+    "artifactId": { "type": "string", "minLength": 1 },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "agreementHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "evidenceHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "evidenceHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "decision": { "type": "string", "enum": ["approved", "held", "rejected"] },
+    "modality": { "type": "string", "enum": ["deterministic", "attestation", "manual"] },
+    "verifier": { "type": ["object", "null"], "additionalProperties": true },
+    "policy": { "type": ["object", "null"], "additionalProperties": true },
+    "decidedAt": { "type": "string", "minLength": 1 },
+    "recordHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1 },
+        "signedAt": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+

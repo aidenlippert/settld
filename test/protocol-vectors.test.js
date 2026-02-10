@@ -17,6 +17,12 @@ import { computeAgentReputation, computeAgentReputationV2 } from "../src/core/ag
 import { buildInteractionDirectionMatrixV1 } from "../src/core/interaction-directions.js";
 import { buildToolManifestV1 } from "../src/core/tool-manifest.js";
 import { buildAuthorityGrantV1 } from "../src/core/authority-grants.js";
+import {
+  buildToolCallAgreementV1,
+  buildToolCallEvidenceV1,
+  buildSettlementDecisionRecordV1,
+  buildSettlementReceiptV1
+} from "../src/core/settlement-kernel.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -474,6 +480,68 @@ async function buildVectorsV1() {
   });
   const authorityGrantCanonical = canonicalJsonStringify(authorityGrant);
 
+  const toolCallAgreement = buildToolCallAgreementV1({
+    tenantId,
+    artifactId: "tca_det_0001",
+    toolId: toolManifest.toolId,
+    toolManifestHash: toolManifest.manifestHash,
+    authorityGrantId: authorityGrant.grantId,
+    authorityGrantHash: authorityGrant.grantHash,
+    payerAgentId: agentIdentity.agentId,
+    payeeAgentId: "agt_vectors_payee",
+    amountCents: 123,
+    currency: "USD",
+    createdAt: generatedAt,
+    signer
+  });
+  const toolCallAgreementCanonical = canonicalJsonStringify(toolCallAgreement);
+
+  const toolCallEvidence = buildToolCallEvidenceV1({
+    tenantId,
+    artifactId: "tce_det_0001",
+    toolId: toolManifest.toolId,
+    toolManifestHash: toolManifest.manifestHash,
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    input: { text: "hello", to: "es" },
+    output: { text: "hola", lang: "es" },
+    startedAt: "2026-02-01T00:00:10.000Z",
+    completedAt: "2026-02-01T00:00:11.000Z",
+    signer
+  });
+  const toolCallEvidenceCanonical = canonicalJsonStringify(toolCallEvidence);
+
+  const settlementDecisionRecord = buildSettlementDecisionRecordV1({
+    tenantId,
+    artifactId: "sdr_det_0001",
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    evidenceId: toolCallEvidence.artifactId,
+    evidenceHash: toolCallEvidence.evidenceHash,
+    decision: "approved",
+    modality: "deterministic",
+    verifier: { verifierId: "settld-vectors", version: "0.0.0-vectors" },
+    policy: null,
+    decidedAt: generatedAt,
+    signer
+  });
+  const settlementDecisionRecordCanonical = canonicalJsonStringify(settlementDecisionRecord);
+
+  const settlementReceipt = buildSettlementReceiptV1({
+    tenantId,
+    artifactId: "sr_det_0001",
+    decisionId: settlementDecisionRecord.artifactId,
+    decisionHash: settlementDecisionRecord.recordHash,
+    payerAgentId: toolCallAgreement.payerAgentId,
+    payeeAgentId: toolCallAgreement.payeeAgentId,
+    amountCents: toolCallAgreement.amountCents,
+    currency: toolCallAgreement.currency,
+    settledAt: generatedAt,
+    ledger: { kind: "agent_wallet", op: "escrow_release" },
+    signer
+  });
+  const settlementReceiptCanonical = canonicalJsonStringify(settlementReceipt);
+
   return {
     schemaVersion: "ProtocolVectors.v1",
     generatedAt,
@@ -575,6 +643,38 @@ async function buildVectorsV1() {
       signerKeyId: authorityGrant.signature.signerKeyId,
       canonicalJson: authorityGrantCanonical,
       sha256: sha256Hex(authorityGrantCanonical)
+    },
+    toolCallAgreement: {
+      schemaVersion: toolCallAgreement.schemaVersion,
+      artifactId: toolCallAgreement.artifactId,
+      agreementHash: toolCallAgreement.agreementHash,
+      signerKeyId: toolCallAgreement.signature.signerKeyId,
+      canonicalJson: toolCallAgreementCanonical,
+      sha256: sha256Hex(toolCallAgreementCanonical)
+    },
+    toolCallEvidence: {
+      schemaVersion: toolCallEvidence.schemaVersion,
+      artifactId: toolCallEvidence.artifactId,
+      evidenceHash: toolCallEvidence.evidenceHash,
+      signerKeyId: toolCallEvidence.signature.signerKeyId,
+      canonicalJson: toolCallEvidenceCanonical,
+      sha256: sha256Hex(toolCallEvidenceCanonical)
+    },
+    settlementDecisionRecord: {
+      schemaVersion: settlementDecisionRecord.schemaVersion,
+      artifactId: settlementDecisionRecord.artifactId,
+      recordHash: settlementDecisionRecord.recordHash,
+      signerKeyId: settlementDecisionRecord.signature.signerKeyId,
+      canonicalJson: settlementDecisionRecordCanonical,
+      sha256: sha256Hex(settlementDecisionRecordCanonical)
+    },
+    settlementReceipt: {
+      schemaVersion: settlementReceipt.schemaVersion,
+      artifactId: settlementReceipt.artifactId,
+      receiptHash: settlementReceipt.receiptHash,
+      signerKeyId: settlementReceipt.signature.signerKeyId,
+      canonicalJson: settlementReceiptCanonical,
+      sha256: sha256Hex(settlementReceiptCanonical)
     }
   };
 }

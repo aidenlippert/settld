@@ -1,0 +1,51 @@
+{
+  "$id": "https://settld.local/schemas/ToolCallAgreement.v1.schema.json",
+  "title": "ToolCallAgreement.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "artifactId",
+    "tenantId",
+    "toolId",
+    "toolManifestHash",
+    "authorityGrantId",
+    "authorityGrantHash",
+    "payerAgentId",
+    "payeeAgentId",
+    "amountCents",
+    "currency",
+    "createdAt",
+    "agreementHash",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ToolCallAgreement.v1" },
+    "artifactType": { "const": "ToolCallAgreement.v1" },
+    "artifactId": { "type": "string", "minLength": 1 },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "toolId": { "type": "string", "minLength": 1 },
+    "toolManifestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "authorityGrantId": { "type": "string", "minLength": 1 },
+    "authorityGrantHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "payerAgentId": { "type": "string", "minLength": 1 },
+    "payeeAgentId": { "type": "string", "minLength": 1 },
+    "amountCents": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "minLength": 1 },
+    "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1 },
+        "signedAt": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+

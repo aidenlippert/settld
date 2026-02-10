@@ -1,0 +1,48 @@
+{
+  "$id": "https://settld.local/schemas/ToolCallEvidence.v1.schema.json",
+  "title": "ToolCallEvidence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "artifactType", "artifactId", "tenantId", "toolId", "toolManifestHash", "agreement", "call", "evidenceHash", "signature"],
+  "properties": {
+    "schemaVersion": { "const": "ToolCallEvidence.v1" },
+    "artifactType": { "const": "ToolCallEvidence.v1" },
+    "artifactId": { "type": "string", "minLength": 1 },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "toolId": { "type": "string", "minLength": 1 },
+    "toolManifestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "agreementHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output", "startedAt", "completedAt"],
+      "properties": {
+        "input": {},
+        "output": {},
+        "startedAt": { "type": "string", "minLength": 1 },
+        "completedAt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "evidenceHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1 },
+        "signedAt": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+

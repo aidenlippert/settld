@@ -195,6 +195,14 @@ import {
   normalizeSettlementPolicy,
   normalizeVerificationMethod
 } from "../core/settlement-policy.js";
+import { verifyToolManifestV1 } from "../core/tool-manifest.js";
+import { assertAuthorityGrantAllows, verifyAuthorityGrantV1 } from "../core/authority-grants.js";
+import {
+  buildSettlementDecisionRecordV1,
+  buildSettlementReceiptV1,
+  verifyToolCallAgreementV1,
+  verifyToolCallEvidenceV1
+} from "../core/settlement-kernel.js";
 import { createArtifactWorker, deriveArtifactEnqueuesFromJobEvents } from "./workers/artifacts.js";
 import { createDeliveryWorker } from "./workers/deliveries.js";
 import { createProofWorker, deriveProofEvalEnqueuesFromJobEvents } from "./workers/proof.js";
@@ -19040,6 +19048,209 @@ export function createApi({
         return sendError(res, 404, "not found");
       }
 
+      if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "tools") {
+        if (req.method === "POST" && marketplaceParts.length === 4 && marketplaceParts[3] === "settle") {
+          const toolId = marketplaceParts[2] ? String(marketplaceParts[2]) : "";
+          if (!toolId) return sendError(res, 400, "toolId is required");
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          let idempotencyKey = null;
+          try {
+            ({ idempotencyKey, idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (!idempotencyKey) return sendError(res, 400, "x-idempotency-key is required");
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const manifest = body?.toolManifest ?? null;
+          const grant = body?.authorityGrant ?? null;
+          const agreementIn = body?.toolCallAgreement ?? null;
+          const evidenceIn = body?.toolCallEvidence ?? null;
+          if (!manifest) return sendError(res, 400, "toolManifest is required");
+          if (!grant) return sendError(res, 400, "authorityGrant is required");
+          if (!agreementIn) return sendError(res, 400, "toolCallAgreement is required");
+          if (!evidenceIn) return sendError(res, 400, "toolCallEvidence is required");
+
+          const nowAt = nowIso();
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: manifest?.signature?.signerKeyId });
+            verifyToolManifestV1({ manifest, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid toolManifest", { message: err?.message });
+          }
+          if (String(manifest.toolId ?? "") !== toolId) return sendError(res, 400, "toolManifest.toolId must match toolId");
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: grant?.signature?.signerKeyId });
+            verifyAuthorityGrantV1({ grant, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid authorityGrant", { message: err?.message, code: err?.code ?? null });
+          }
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: agreementIn?.signature?.signerKeyId });
+            verifyToolCallAgreementV1({ agreement: agreementIn, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid toolCallAgreement", { message: err?.message });
+          }
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: evidenceIn?.signature?.signerKeyId });
+            verifyToolCallEvidenceV1({ evidence: evidenceIn, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid toolCallEvidence", { message: err?.message });
+          }
+
+          if (String(agreementIn.toolId ?? "") !== toolId) return sendError(res, 400, "toolCallAgreement.toolId must match toolId");
+          if (String(agreementIn.toolManifestHash ?? "") !== String(manifest.manifestHash ?? "")) {
+            return sendError(res, 400, "toolCallAgreement.toolManifestHash must match toolManifest.manifestHash");
+          }
+          if (String(agreementIn.authorityGrantId ?? "") !== String(grant.grantId ?? "")) {
+            return sendError(res, 400, "toolCallAgreement.authorityGrantId must match authorityGrant.grantId");
+          }
+          if (String(agreementIn.authorityGrantHash ?? "") !== String(grant.grantHash ?? "")) {
+            return sendError(res, 400, "toolCallAgreement.authorityGrantHash must match authorityGrant.grantHash");
+          }
+
+          if (String(evidenceIn.toolId ?? "") !== toolId) return sendError(res, 400, "toolCallEvidence.toolId must match toolId");
+          if (String(evidenceIn.toolManifestHash ?? "") !== String(manifest.manifestHash ?? "")) {
+            return sendError(res, 400, "toolCallEvidence.toolManifestHash must match toolManifest.manifestHash");
+          }
+          if (String(evidenceIn.agreement?.artifactId ?? "") !== String(agreementIn.artifactId ?? "")) {
+            return sendError(res, 400, "toolCallEvidence.agreement.artifactId must match toolCallAgreement.artifactId");
+          }
+          if (String(evidenceIn.agreement?.agreementHash ?? "") !== String(agreementIn.agreementHash ?? "")) {
+            return sendError(res, 400, "toolCallEvidence.agreement.agreementHash must match toolCallAgreement.agreementHash");
+          }
+
+          const payerAgentId = String(agreementIn.payerAgentId ?? "");
+          const payeeAgentId = String(agreementIn.payeeAgentId ?? "");
+          if (!payerAgentId) return sendError(res, 400, "toolCallAgreement.payerAgentId is required");
+          if (!payeeAgentId) return sendError(res, 400, "toolCallAgreement.payeeAgentId is required");
+
+          if (String(grant.grantedTo?.actorType ?? "").toLowerCase() !== "agent") {
+            return sendError(res, 400, "authorityGrant.grantedTo.actorType must be agent");
+          }
+          if (String(grant.grantedTo?.actorId ?? "") !== payerAgentId) {
+            return sendError(res, 400, "authorityGrant.grantedTo.actorId must match toolCallAgreement.payerAgentId");
+          }
+
+          try {
+            assertAuthorityGrantAllows({
+              grant,
+              at: nowAt,
+              toolId,
+              manifestHash: manifest.manifestHash,
+              amountCents: agreementIn.amountCents,
+              currency: agreementIn.currency
+            });
+          } catch (err) {
+            return sendError(res, 403, "authority grant rejected", { message: err?.message, code: err?.code ?? null });
+          }
+
+          const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
+          const payeeIdentity = await getAgentIdentityRecord({ tenantId, agentId: payeeAgentId });
+          if (!payeeIdentity) return sendError(res, 404, "payee agent identity not found");
+
+          const currency = String(agreementIn.currency ?? "USD").trim().toUpperCase();
+          const amountCents = Number(agreementIn.amountCents ?? 0);
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return sendError(res, 400, "toolCallAgreement.amountCents must be a positive safe integer");
+
+          let payerWallet = null;
+          let payeeWallet = null;
+          try {
+            const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
+            const basePayerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
+            const locked = lockAgentWalletEscrow({ wallet: basePayerWallet, amountCents, at: nowAt });
+
+            const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payeeAgentId });
+            const basePayeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
+
+            const released = releaseAgentWalletEscrowToPayee({ payerWallet: locked, payeeWallet: basePayeeWallet, amountCents, at: nowAt });
+            payerWallet = released.payerWallet;
+            payeeWallet = released.payeeWallet;
+          } catch (err) {
+            return sendError(res, 400, "wallet settlement rejected", { message: err?.message, code: err?.code ?? null });
+          }
+
+          const serverSigner = store.serverSigner;
+          const decisionRecord = buildSettlementDecisionRecordV1({
+            tenantId,
+            artifactId: createId("sdr"),
+            agreementId: agreementIn.artifactId,
+            agreementHash: agreementIn.agreementHash,
+            evidenceId: evidenceIn.artifactId,
+            evidenceHash: evidenceIn.evidenceHash,
+            decision: "approved",
+            modality: "deterministic",
+            verifier: { verifierId: "settld-api", version: "dev" },
+            policy: null,
+            decidedAt: nowAt,
+            signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
+          });
+
+          const receipt = buildSettlementReceiptV1({
+            tenantId,
+            artifactId: createId("rcp"),
+            decisionId: decisionRecord.artifactId,
+            decisionHash: decisionRecord.recordHash,
+            payerAgentId,
+            payeeAgentId,
+            amountCents,
+            currency,
+            settledAt: nowAt,
+            ledger: { kind: "agent_wallet", op: "escrow_release" },
+            signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
+          });
+
+          const finalizeArtifact = (artifactBody) => {
+            const { artifactHash: _h, ...bodyNoHash } = artifactBody ?? {};
+            const artifactHash = computeArtifactHash(bodyNoHash);
+            return { ...bodyNoHash, artifactHash };
+          };
+          const agreement = finalizeArtifact(agreementIn);
+          const evidence = finalizeArtifact(evidenceIn);
+          const decision = finalizeArtifact(decisionRecord);
+          const settlementReceipt = finalizeArtifact(receipt);
+
+          const responseBody = {
+            toolId,
+            agreement,
+            evidence,
+            decision,
+            receipt: settlementReceipt,
+            wallets: { payerWallet, payeeWallet }
+          };
+
+          const ops = [
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet },
+            { kind: "ARTIFACT_PUT", tenantId, artifact: agreement },
+            { kind: "ARTIFACT_PUT", tenantId, artifact: evidence },
+            { kind: "ARTIFACT_PUT", tenantId, artifact: decision },
+            { kind: "ARTIFACT_PUT", tenantId, artifact: settlementReceipt },
+            { kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } }
+          ];
+          await commitTx(ops);
+          return sendJson(res, 201, responseBody);
+        }
+
+        return sendError(res, 404, "not found");
+      }
+
       if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "tasks") {
         if (!(store.marketplaceTasks instanceof Map)) store.marketplaceTasks = new Map();
         if (!(store.marketplaceTaskBids instanceof Map)) store.marketplaceTaskBids = new Map();
@@ -21630,10 +21841,10 @@ export function createApi({
               });
             }
             await commitTx(ops);
-            const releasedAmountCentsRaw =
+            const settledVolumeAmountCentsRaw =
               settlement?.releasedAmountCents ??
               (String(settlement?.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.RELEASED ? settlement?.amountCents : 0);
-            const releasedAmountCents = Number.isSafeInteger(Number(releasedAmountCentsRaw)) ? Number(releasedAmountCentsRaw) : 0;
+            const settledVolumeAmountCents = Number.isSafeInteger(Number(settledVolumeAmountCentsRaw)) ? Number(settledVolumeAmountCentsRaw) : 0;
             await emitBillableUsageEventBestEffort(
               {
                 tenantId,
@@ -21641,7 +21852,7 @@ export function createApi({
                 eventType: BILLABLE_USAGE_EVENT_TYPE.SETTLED_VOLUME,
                 occurredAt: settlement?.resolvedAt ?? settledAt,
                 quantity: 1,
-                amountCents: Math.max(0, releasedAmountCents),
+                amountCents: Math.max(0, settledVolumeAmountCents),
                 currency: settlement?.currency ?? "USD",
                 runId,
                 settlementId: settlement?.settlementId ?? null,

@@ -47,6 +47,11 @@ These specs are written so an independent implementer can build a verifier witho
 - `AgentRunSettlement.v1.md` — deterministic run escrow/settlement contract.
 - `AuthorityGrant.v1.md` — signed delegation of spend/tool authority for agents and tool commerce.
 - `ToolManifest.v1.md` — signed tool definition for anti-rug-pull pinning.
+- `SettlementKernel.v1.md` — economic kernel overview (contract -> proof -> decision -> settlement).
+- `ToolCallAgreement.v1.md` — signed paid tool-call agreement (tool commerce contract).
+- `ToolCallEvidence.v1.md` — signed tool-call evidence bundle (proof).
+- `SettlementDecisionRecord.v1.md` — signed verifier decision binding agreement + evidence to a disposition.
+- `SettlementReceipt.v1.md` — signed settlement receipt binding decision to a transfer.
 - `ArbitrationCase.v1.md` — formal arbitration case contract with appeal linkage.
 - `ArbitrationVerdict.v1.md` — signed arbitration verdict contract with appeal references.
 - `AgentReputation.v1.md` — deterministic trust score snapshot derived from runs + settlement outcomes.

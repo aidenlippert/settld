@@ -97,6 +97,7 @@ export function normalizeSettlementPolicy(input) {
         amberReleaseRatePct: normalizeReleaseRatePct(rulesRaw.amberReleaseRatePct, 50),
         redReleaseRatePct: normalizeReleaseRatePct(rulesRaw.redReleaseRatePct, 0),
         maxAutoReleaseAmountCents: normalizeOptionalSafeInt(rulesRaw.maxAutoReleaseAmountCents, { min: 1 }),
+        disputeWindowHours: normalizeOptionalSafeInt(rulesRaw.disputeWindowHours, { min: 1, max: 24 * 365 }),
         manualReason: normalizeNullableString(rulesRaw.manualReason)
       }
     },

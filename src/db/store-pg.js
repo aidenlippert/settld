@@ -1569,6 +1569,7 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "MARKETPLACE_TASK_BIDS_SET",
       "TENANT_SETTLEMENT_POLICY_UPSERT",
       "IDEMPOTENCY_PUT",
+      "ARTIFACT_PUT",
       "OUTBOX_ENQUEUE",
       "INGEST_RECORDS_PUT"
     ]);
@@ -2374,6 +2375,10 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
         }
         if (op.kind === "IDEMPOTENCY_PUT") {
           await persistIdempotency(client, { key: op.key, value: op.value });
+        }
+        if (op.kind === "ARTIFACT_PUT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.artifact?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistArtifactRow(client, { tenantId, artifact: op.artifact });
         }
         if (op.kind === "OUTBOX_ENQUEUE") {
           await enqueueOutbox(client, { messages: op.messages });

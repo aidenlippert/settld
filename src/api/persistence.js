@@ -545,6 +545,25 @@ export function applyTxRecord(store, record) {
       continue;
     }
 
+    if (kind === "ARTIFACT_PUT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const artifact = op.artifact;
+      if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+        throw new TypeError("ARTIFACT_PUT requires artifact");
+      }
+      if (typeof store.putArtifact === "function") {
+        // Async function with no awaits for in-memory store; safe to call synchronously here.
+        void store.putArtifact({ tenantId, artifact });
+        continue;
+      }
+      if (!(store.artifacts instanceof Map)) store.artifacts = new Map();
+      const artifactId = artifact.artifactId ?? artifact.id ?? null;
+      if (typeof artifactId !== "string" || artifactId.trim() === "") throw new TypeError("ARTIFACT_PUT requires artifact.artifactId");
+      const key = makeScopedKey({ tenantId, id: String(artifactId) });
+      store.artifacts.set(key, { ...artifact, tenantId, artifactId: String(artifactId) });
+      continue;
+    }
+
     if (kind === "OUTBOX_ENQUEUE") {
       const { messages } = op;
       if (!Array.isArray(messages)) throw new TypeError("OUTBOX_ENQUEUE requires messages[]");
