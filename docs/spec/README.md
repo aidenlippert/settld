@@ -45,6 +45,7 @@ These specs are written so an independent implementer can build a verifier witho
 - `AgentRun.v1.md` — deterministic agent run snapshot contract.
 - `AgentEvent.v1.md` — append-only event envelope for agent runs.
 - `AgentRunSettlement.v1.md` — deterministic run escrow/settlement contract.
+- `AuthorityGrant.v1.md` — signed delegation of spend/tool authority for agents and tool commerce.
 - `ToolManifest.v1.md` — signed tool definition for anti-rug-pull pinning.
 - `ArbitrationCase.v1.md` — formal arbitration case contract with appeal linkage.
 - `ArbitrationVerdict.v1.md` — signed arbitration verdict contract with appeal references.

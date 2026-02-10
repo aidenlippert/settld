@@ -15,6 +15,7 @@ import { sha256Hex } from "../../src/core/crypto.js";
 import { computeAgentReputation, computeAgentReputationV2 } from "../../src/core/agent-reputation.js";
 import { buildInteractionDirectionMatrixV1 } from "../../src/core/interaction-directions.js";
 import { buildToolManifestV1 } from "../../src/core/tool-manifest.js";
+import { buildAuthorityGrantV1 } from "../../src/core/authority-grants.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -463,6 +464,23 @@ async function main() {
   });
   const toolManifestCanonical = canonicalJsonStringify(toolManifest);
 
+  const authorityGrant = buildAuthorityGrantV1({
+    tenantId,
+    grantId: "auth_vectors_0001",
+    grantedBy: { actorType: "human", actorId: "user_vectors_0001" },
+    grantedTo: { actorType: "agent", actorId: agentIdentity.agentId },
+    limits: {
+      currency: "USD",
+      maxPerTransactionCents: 5000,
+      toolIds: [toolManifest.toolId],
+      pinnedManifests: { [toolManifest.toolId]: toolManifest.manifestHash },
+      expiresAt: "2026-03-01T00:00:00.000Z"
+    },
+    signer,
+    at: generatedAt
+  });
+  const authorityGrantCanonical = canonicalJsonStringify(authorityGrant);
+
   const out = {
     schemaVersion: "ProtocolVectors.v1",
     generatedAt,
@@ -556,6 +574,14 @@ async function main() {
       signerKeyId: toolManifest.signature.signerKeyId,
       canonicalJson: toolManifestCanonical,
       sha256: sha256Hex(toolManifestCanonical)
+    },
+    authorityGrant: {
+      schemaVersion: authorityGrant.schemaVersion,
+      grantId: authorityGrant.grantId,
+      grantHash: authorityGrant.grantHash,
+      signerKeyId: authorityGrant.signature.signerKeyId,
+      canonicalJson: authorityGrantCanonical,
+      sha256: sha256Hex(authorityGrantCanonical)
     }
   };
 
