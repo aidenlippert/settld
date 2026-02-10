@@ -4,11 +4,15 @@ import os from "node:os";
 import path from "node:path";
 
 function npmCmd() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
+  // On Windows, npm is a .cmd shim; we run it via cmd.exe in sh() for reliability.
+  return "npm";
 }
 
 function sh(cmd, args, { cwd, env } = {}) {
-  const res = spawnSync(cmd, args, { cwd, env, encoding: "utf8" });
+  const isWin = process.platform === "win32";
+  const res = isWin
+    ? spawnSync("cmd.exe", ["/d", "/s", "/c", cmd, ...args], { cwd, env, encoding: "utf8" })
+    : spawnSync(cmd, args, { cwd, env, encoding: "utf8" });
   if (res.status !== 0) {
     const errText = (res.stderr || res.stdout || "").trim();
     const spawnErr = res.error ? `: ${res.error.message}` : "";
