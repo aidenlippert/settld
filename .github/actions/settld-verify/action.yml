@@ -121,7 +121,7 @@ runs:
             console.error(`unsupported/unknown bundle kind: ${kind || "(missing)"}`);
             process.exit(2);
           }
-	        ')"
+        ')"
 
         ARGS=(--format json --hash-concurrency "$HASH_CONCURRENCY")
         if [[ "$STRICT" == "true" ]]; then ARGS+=(--strict); fi
