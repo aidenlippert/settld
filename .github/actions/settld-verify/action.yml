@@ -79,7 +79,7 @@ runs:
             echo "trust_file not found: $TRUST_FILE" >&2
             exit 2
           fi
-          node --input-type=module -e '
+          TRUST_FILE="$TRUST_FILE" node --input-type=module -e '
             import fs from "node:fs";
             const p = process.env.TRUST_FILE;
             const t = JSON.parse(fs.readFileSync(p, "utf8"));
@@ -92,7 +92,7 @@ runs:
           ' >> "$GITHUB_ENV"
         fi
 
-        KIND_FLAG="$(node --input-type=module -e '
+        KIND_FLAG="$(BUNDLE_PATH="$BUNDLE_PATH" node --input-type=module -e '
           import fs from "node:fs";
           import path from "node:path";
           const dir = process.env.BUNDLE_PATH;
@@ -121,7 +121,7 @@ runs:
             console.error(`unsupported/unknown bundle kind: ${kind || "(missing)"}`);
             process.exit(2);
           }
-        ' BUNDLE_PATH="$BUNDLE_PATH")"
+        ')"
 
         ARGS=(--format json --hash-concurrency "$HASH_CONCURRENCY")
         if [[ "$STRICT" == "true" ]]; then ARGS+=(--strict); fi
