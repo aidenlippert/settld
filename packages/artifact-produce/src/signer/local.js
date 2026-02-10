@@ -25,7 +25,9 @@ export function loadKeypairsJsonFromFile({ keysPath, enforcePerms = true } = {})
   if (enforcePerms) {
     try {
       const st = fsSync.statSync(abs);
-      if (typeof st?.mode === "number" && hasAnyGroupOrOtherBits(st.mode)) {
+      // On Windows, st.mode is not a meaningful POSIX permission mask and is often reported
+      // with group/other bits set even for private files. Enforce perms only on POSIX.
+      if (process.platform !== "win32" && typeof st?.mode === "number" && hasAnyGroupOrOtherBits(st.mode)) {
         const err = new Error("refusing to use keypairs file with group/other permissions (expected 0600)");
         err.code = "KEYPAIRS_INSECURE_PERMISSIONS";
         err.path = abs;
@@ -87,4 +89,3 @@ export function createLocalSignerProvider({ keypairsJson } = {}) {
     }
   };
 }
-
