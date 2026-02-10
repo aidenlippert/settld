@@ -14,6 +14,7 @@ import { canonicalJsonStringify } from "../../src/core/canonical-json.js";
 import { sha256Hex } from "../../src/core/crypto.js";
 import { computeAgentReputation, computeAgentReputationV2 } from "../../src/core/agent-reputation.js";
 import { buildInteractionDirectionMatrixV1 } from "../../src/core/interaction-directions.js";
+import { buildToolManifestV1 } from "../../src/core/tool-manifest.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -437,6 +438,31 @@ async function main() {
   const interactionDirectionMatrix = buildInteractionDirectionMatrixV1();
   const interactionDirectionMatrixCanonical = canonicalJsonStringify(interactionDirectionMatrix);
 
+  const toolManifest = buildToolManifestV1({
+    tenantId,
+    toolId: "tool_vectors_translate_v1",
+    name: "Translate (Vectors)",
+    description: "vectorized tool manifest for hashing/signing interoperability",
+    tool: {
+      name: "translate",
+      description: "Translate input text to a target language.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text", "to"],
+        properties: {
+          text: { type: "string" },
+          to: { type: "string" }
+        }
+      }
+    },
+    transport: { kind: "mcp", url: "https://tools.settld.local/mcp" },
+    capabilities: ["translation"],
+    signer,
+    at: generatedAt
+  });
+  const toolManifestCanonical = canonicalJsonStringify(toolManifest);
+
   const out = {
     schemaVersion: "ProtocolVectors.v1",
     generatedAt,
@@ -522,6 +548,14 @@ async function main() {
       entityTypes: interactionDirectionMatrix.entityTypes,
       canonicalJson: interactionDirectionMatrixCanonical,
       sha256: sha256Hex(interactionDirectionMatrixCanonical)
+    },
+    toolManifest: {
+      schemaVersion: toolManifest.schemaVersion,
+      toolId: toolManifest.toolId,
+      manifestHash: toolManifest.manifestHash,
+      signerKeyId: toolManifest.signature.signerKeyId,
+      canonicalJson: toolManifestCanonical,
+      sha256: sha256Hex(toolManifestCanonical)
     }
   };
 

@@ -143,5 +143,13 @@
     ],
     "canonicalJson": "{\"directionalCount\":16,\"directions\":{\"agent\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true},\"human\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true},\"machine\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true},\"robot\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true}},\"entityTypes\":[\"agent\",\"human\",\"robot\",\"machine\"],\"schemaVersion\":\"InteractionDirectionMatrix.v1\"}",
     "sha256": "eb6726525b858f8a0ea293c498783a704816d50d39f205425b0bcba66fa5c24a"
+  },
+  "toolManifest": {
+    "schemaVersion": "ToolManifest.v1",
+    "toolId": "tool_vectors_translate_v1",
+    "manifestHash": "7b8b1d72e0bd29f8cb8070e31f2151ef445d11bc70551db0b4367d029712c1d3",
+    "signerKeyId": "key_282c80df2381d6831a92e89b",
+    "canonicalJson": "{\"capabilities\":[\"translation\"],\"createdAt\":\"2026-02-01T00:00:00.000Z\",\"description\":\"vectorized tool manifest for hashing/signing interoperability\",\"manifestHash\":\"7b8b1d72e0bd29f8cb8070e31f2151ef445d11bc70551db0b4367d029712c1d3\",\"metadata\":null,\"name\":\"Translate (Vectors)\",\"pricing\":null,\"schemaVersion\":\"ToolManifest.v1\",\"signature\":{\"signature\":\"2AryhR84qig8/whj4LVdaXeOIaWu/n9h96rDux0/u2DbHO3PhChrvtllaMX5Lip4q0fm1hpxftX4W2QEVwNABg==\",\"signedAt\":\"2026-02-01T00:00:00.000Z\",\"signerKeyId\":\"key_282c80df2381d6831a92e89b\"},\"tenantId\":\"tenant_vectors\",\"tool\":{\"description\":\"Translate input text to a target language.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"text\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}},\"required\":[\"text\",\"to\"],\"type\":\"object\"},\"name\":\"translate\"},\"toolId\":\"tool_vectors_translate_v1\",\"transport\":{\"kind\":\"mcp\",\"url\":\"https://tools.settld.local/mcp\"},\"updatedAt\":\"2026-02-01T00:00:00.000Z\"}",
+    "sha256": "587717c4effdcdeb40455695895d59c73bf89de312881b15a8af82672d31e9af"
   }
 }
