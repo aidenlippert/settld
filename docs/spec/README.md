@@ -50,8 +50,12 @@ These specs are written so an independent implementer can build a verifier witho
 - `SettlementKernel.v1.md` — economic kernel overview (contract -> proof -> decision -> settlement).
 - `ToolCallAgreement.v1.md` — signed paid tool-call agreement (tool commerce contract).
 - `ToolCallEvidence.v1.md` — signed tool-call evidence bundle (proof).
+- `FundingHold.v1.md` — server-signed funding hold (pre-authorization) for a specific agreement.
 - `SettlementDecisionRecord.v1.md` — signed verifier decision binding agreement + evidence to a disposition.
 - `SettlementReceipt.v1.md` — signed settlement receipt binding decision to a transfer.
+- `SettlementReceipt.v2.md` — settlement receipt with retention/holdback semantics for a challenge window.
+- `SettlementAdjustment.v1.md` — signed settlement adjustment (holdback release/refund/split) binding to a prior receipt.
+- `ToolCallDisputeOpen.v1.md` — counterparty-signed request to open arbitration on a tool-call receipt.
 - `ArbitrationCase.v1.md` — formal arbitration case contract with appeal linkage.
 - `ArbitrationVerdict.v1.md` — signed arbitration verdict contract with appeal references.
 - `AgentReputation.v1.md` — deterministic trust score snapshot derived from runs + settlement outcomes.

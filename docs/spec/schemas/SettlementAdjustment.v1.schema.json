@@ -1,0 +1,73 @@
+{
+  "$id": "https://settld.local/schemas/SettlementAdjustment.v1.schema.json",
+  "title": "SettlementAdjustment.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "artifactId",
+    "tenantId",
+    "agreement",
+    "receipt",
+    "payerAgentId",
+    "payeeAgentId",
+    "currency",
+    "kind",
+    "amounts",
+    "appliedAt",
+    "adjustmentHash",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "SettlementAdjustment.v1" },
+    "artifactType": { "const": "SettlementAdjustment.v1" },
+    "artifactId": { "type": "string", "minLength": 1 },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "agreementHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "receiptHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "receiptHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "payerAgentId": { "type": "string", "minLength": 1 },
+    "payeeAgentId": { "type": "string", "minLength": 1 },
+    "currency": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["holdback_release", "holdback_refund", "holdback_split"] },
+    "amounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["releaseToPayeeCents", "refundToPayerCents"],
+      "properties": {
+        "releaseToPayeeCents": { "type": "integer", "minimum": 0 },
+        "refundToPayerCents": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ledger": { "type": ["object", "null"], "additionalProperties": true },
+    "appliedAt": { "type": "string", "minLength": 1 },
+    "adjustmentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1 },
+        "signedAt": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

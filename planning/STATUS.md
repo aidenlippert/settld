@@ -19,3 +19,7 @@ Handy commands:
 
 - Evidence trackers remain as immutable evidence records (runbooks, gate outputs, tests).
 - We do not maintain a second in-repo “open/closed” backlog anymore.
+
+## Recent Evidence Trackers
+
+- S14-S19 shipped status is frozen in `planning/sprints/s14-s19-implementation-tracker.md` (evidence: code paths + tests + runbooks).

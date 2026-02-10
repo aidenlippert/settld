@@ -7,10 +7,12 @@ import {
   verifyToolCallAgreementV1,
   buildToolCallEvidenceV1,
   verifyToolCallEvidenceV1,
+  buildToolCallDisputeOpenV1,
+  verifyToolCallDisputeOpenV1,
   buildSettlementDecisionRecordV1,
   verifySettlementDecisionRecordV1,
-  buildSettlementReceiptV1,
-  verifySettlementReceiptV1
+  buildSettlementReceiptV2,
+  verifySettlementReceiptV2
 } from "../src/core/settlement-kernel.js";
 
 test("settlement kernel: signed objects verify and fail on tamper", () => {
@@ -81,7 +83,7 @@ test("settlement kernel: signed objects verify and fail on tamper", () => {
   });
   verifySettlementDecisionRecordV1({ record: decision, publicKeyPem: verifier.publicKeyPem });
 
-  const receipt = buildSettlementReceiptV1({
+  const receipt = buildSettlementReceiptV2({
     tenantId,
     artifactId: "sr_test_0001",
     agreementId: agreement.artifactId,
@@ -92,11 +94,31 @@ test("settlement kernel: signed objects verify and fail on tamper", () => {
     payeeAgentId: agreement.payeeAgentId,
     amountCents: agreement.amountCents,
     currency: agreement.currency,
+    agreementAmountCents: agreement.amountCents,
+    outcome: "paid",
+    retention: null,
     settledAt: "2026-02-01T00:00:04.000Z",
     ledger: { kind: "test" },
     signer: verifierSigner
   });
-  verifySettlementReceiptV1({ receipt, publicKeyPem: verifier.publicKeyPem });
+  verifySettlementReceiptV2({ receipt, publicKeyPem: verifier.publicKeyPem });
+
+  const disputeOpen = buildToolCallDisputeOpenV1({
+    tenantId,
+    artifactId: "tcd_test_0001",
+    toolId,
+    agreementId: agreement.artifactId,
+    agreementHash: agreement.agreementHash,
+    receiptId: receipt.artifactId,
+    receiptHash: receipt.receiptHash,
+    openedByAgentId: agreement.payerAgentId,
+    reasonCode: "quality",
+    reason: "bad output",
+    evidenceRefs: ["artifact:tce_test_0001"],
+    openedAt: "2026-02-01T00:00:04.500Z",
+    signer: payerSigner
+  });
+  verifyToolCallDisputeOpenV1({ disputeOpen, publicKeyPem: payer.publicKeyPem });
 
   assert.throws(() => {
     verifyToolCallAgreementV1({

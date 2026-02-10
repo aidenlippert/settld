@@ -27,6 +27,9 @@ It binds:
 - `callId`: payer-chosen unique identifier for the call (used to bind evidence to intent)
 - `inputHash`: sha256 of canonicalized tool-call input JSON
 - `acceptanceCriteria` (optional): deterministic acceptance checks for this call (latency/output constraints and optional deterministic verifier selection)
+- `settlementTerms` (optional): settlement semantics beyond "approve/reject"
+  - `holdbackBps` (0..10000)
+  - `challengeWindowMs` (>0; required when `holdbackBps > 0`)
 - `createdAt`
 
 ## agreementHash + signature

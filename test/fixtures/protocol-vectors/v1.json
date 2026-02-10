@@ -168,6 +168,14 @@
     "canonicalJson": "{\"acceptanceCriteria\":null,\"agreementHash\":\"38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea\",\"amountCents\":123,\"artifactId\":\"tca_det_0001\",\"artifactType\":\"ToolCallAgreement.v1\",\"authorityGrantHash\":\"47dd9eb6732cad998802a523e96219b762882340bd50ed3738641ced385f7b9c\",\"authorityGrantId\":\"auth_vectors_0001\",\"callId\":\"call_det_0001\",\"createdAt\":\"2026-02-01T00:00:00.000Z\",\"currency\":\"USD\",\"inputHash\":\"8a3d69d15070b56e8d821894c425ef02e14c8efd580f8fd2657c7c93ab7ad3b7\",\"payeeAgentId\":\"agt_vectors_payee\",\"payerAgentId\":\"agt_vectors_0001\",\"schemaVersion\":\"ToolCallAgreement.v1\",\"signature\":{\"signature\":\"hFU4xM1TfVeHi4OJj2dY/c4dyn7EVuVZSd3gl6ELfydV/KqfMWvV9yUeZ9PS8Yi7YqdwjrCyre8Za6gtmGDsBA==\",\"signedAt\":\"2026-02-01T00:00:00.000Z\",\"signerKeyId\":\"key_282c80df2381d6831a92e89b\"},\"tenantId\":\"tenant_vectors\",\"toolId\":\"tool_vectors_translate_v1\",\"toolManifestHash\":\"7b8b1d72e0bd29f8cb8070e31f2151ef445d11bc70551db0b4367d029712c1d3\"}",
     "sha256": "3495a57eaf872226d5ac5b1b333e7464841e504aa1885688f38091acf0d8c4ea"
   },
+  "fundingHold": {
+    "schemaVersion": "FundingHold.v1",
+    "artifactId": "hold_agmt_38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea",
+    "holdHash": "23cfc4757b435b95798247cdd38256893bdef4e0f5591d0b6153705e1c976799",
+    "signerKeyId": "key_282c80df2381d6831a92e89b",
+    "canonicalJson": "{\"agreement\":{\"agreementHash\":\"38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea\",\"artifactId\":\"tca_det_0001\"},\"amountCents\":123,\"artifactId\":\"hold_agmt_38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea\",\"artifactType\":\"FundingHold.v1\",\"currency\":\"USD\",\"expiresAt\":\"2026-02-01T00:10:00.000Z\",\"holdHash\":\"23cfc4757b435b95798247cdd38256893bdef4e0f5591d0b6153705e1c976799\",\"lockedAt\":\"2026-02-01T00:00:00.000Z\",\"payerAgentId\":\"agt_vectors_0001\",\"schemaVersion\":\"FundingHold.v1\",\"signature\":{\"signature\":\"epSuWeg+masmbxg3lLqGYHICypoyFMEgEogGiKD1+3xdEq7IED+yskQsD83wcgsJxP/UqzufOoNuWONhpPO4Aw==\",\"signedAt\":\"2026-02-01T00:00:00.000Z\",\"signerKeyId\":\"key_282c80df2381d6831a92e89b\"},\"tenantId\":\"tenant_vectors\"}",
+    "sha256": "9af70daba1503aeac2667513e3405b4b1750d4544c8fae60f0e4eae64dadea6e"
+  },
   "toolCallEvidence": {
     "schemaVersion": "ToolCallEvidence.v1",
     "artifactId": "tce_det_0001",
@@ -185,11 +193,19 @@
     "sha256": "155163a252c6adc703f95fbbeecafaedb9547763755c2e5e8f4a174b03d400ea"
   },
   "settlementReceipt": {
-    "schemaVersion": "SettlementReceipt.v1",
+    "schemaVersion": "SettlementReceipt.v2",
     "artifactId": "sr_det_0001",
-    "receiptHash": "1da9211c9f7b489fd1ebd593535ff2361158b752d7148fde0a755d15aeb38727",
+    "receiptHash": "9afcfca401c3d465fe683a5fa6ce8ac04e5190e0f4ec022d90bcf3274c5e1eb8",
     "signerKeyId": "key_282c80df2381d6831a92e89b",
-    "canonicalJson": "{\"agreement\":{\"agreementHash\":\"38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea\",\"artifactId\":\"tca_det_0001\"},\"artifactId\":\"sr_det_0001\",\"artifactType\":\"SettlementReceipt.v1\",\"decision\":{\"artifactId\":\"sdr_det_0001\",\"recordHash\":\"0b7bddcd3be8c94f6c9b5690b9f4d12f5b2c438118b97d0cf38c5dfad53ea582\"},\"ledger\":{\"kind\":\"agent_wallet\",\"op\":\"escrow_release\"},\"receiptHash\":\"1da9211c9f7b489fd1ebd593535ff2361158b752d7148fde0a755d15aeb38727\",\"schemaVersion\":\"SettlementReceipt.v1\",\"settledAt\":\"2026-02-01T00:00:00.000Z\",\"signature\":{\"signature\":\"976MfWBoRUiEf8Vv0lrcI60nwI3516GiQ02EpKoKSnyA91kYAIDNilaX2rfkxEuCJj2y8nZhNydUcT2bS/xsDQ==\",\"signedAt\":\"2026-02-01T00:00:00.000Z\",\"signerKeyId\":\"key_282c80df2381d6831a92e89b\"},\"tenantId\":\"tenant_vectors\",\"transfer\":{\"amountCents\":123,\"currency\":\"USD\",\"payeeAgentId\":\"agt_vectors_payee\",\"payerAgentId\":\"agt_vectors_0001\"}}",
-    "sha256": "d8df19a5ffa83c4c0097a808e705a9384f125836020c49db6c2c52a5ea1abd46"
+    "canonicalJson": "{\"agreement\":{\"agreementHash\":\"38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea\",\"artifactId\":\"tca_det_0001\"},\"agreementAmountCents\":123,\"artifactId\":\"sr_det_0001\",\"artifactType\":\"SettlementReceipt.v2\",\"decision\":{\"artifactId\":\"sdr_det_0001\",\"recordHash\":\"0b7bddcd3be8c94f6c9b5690b9f4d12f5b2c438118b97d0cf38c5dfad53ea582\"},\"ledger\":{\"kind\":\"agent_wallet\",\"op\":\"escrow_release\"},\"outcome\":\"paid\",\"receiptHash\":\"9afcfca401c3d465fe683a5fa6ce8ac04e5190e0f4ec022d90bcf3274c5e1eb8\",\"schemaVersion\":\"SettlementReceipt.v2\",\"settledAt\":\"2026-02-01T00:00:00.000Z\",\"signature\":{\"signature\":\"/yVsPI0R5gd6yE4eU7+eS+kU6dbVXN/PvkkW2wOG/yE1rm6VgVUQmZxiIOl8AixMbfZFs3ewVFRzLIytjSuoBA==\",\"signedAt\":\"2026-02-01T00:00:00.000Z\",\"signerKeyId\":\"key_282c80df2381d6831a92e89b\"},\"tenantId\":\"tenant_vectors\",\"transfer\":{\"amountCents\":123,\"currency\":\"USD\",\"payeeAgentId\":\"agt_vectors_payee\",\"payerAgentId\":\"agt_vectors_0001\"}}",
+    "sha256": "b945230338808e95719bd28758f29aae9e3c0e9d711334fcf2077f3952419a30"
+  },
+  "toolCallDisputeOpen": {
+    "schemaVersion": "ToolCallDisputeOpen.v1",
+    "artifactId": "tcd_det_0001",
+    "disputeHash": "28de4d72215c2f55677f9766398efcca9b9635b4866a7910777033458a2a5766",
+    "signerKeyId": "key_282c80df2381d6831a92e89b",
+    "canonicalJson": "{\"agreement\":{\"agreementHash\":\"38e4a24ad3ce2a39b0c16b58ec01c22c8b3c3368ce23659edffa02e2199ad7ea\",\"artifactId\":\"tca_det_0001\"},\"artifactId\":\"tcd_det_0001\",\"artifactType\":\"ToolCallDisputeOpen.v1\",\"disputeHash\":\"28de4d72215c2f55677f9766398efcca9b9635b4866a7910777033458a2a5766\",\"evidenceRefs\":[\"artifact:tce_det_0001\"],\"openedAt\":\"2026-02-01T00:00:00.000Z\",\"openedByAgentId\":\"agt_vectors_0001\",\"reason\":\"output failed acceptance\",\"reasonCode\":\"quality\",\"receipt\":{\"artifactId\":\"sr_det_0001\",\"receiptHash\":\"9afcfca401c3d465fe683a5fa6ce8ac04e5190e0f4ec022d90bcf3274c5e1eb8\"},\"schemaVersion\":\"ToolCallDisputeOpen.v1\",\"signature\":{\"signature\":\"VtedLIisD02SBdwPQhXpAPMdc8GFV7KXALtBvu5tOw1zsDRKz97tDzRrC/6v8B9eSkA61LcCW8zFxxe+m4flAA==\",\"signedAt\":\"2026-02-01T00:00:00.000Z\",\"signerKeyId\":\"key_282c80df2381d6831a92e89b\"},\"tenantId\":\"tenant_vectors\",\"toolId\":\"tool_vectors_translate_v1\"}",
+    "sha256": "c026b8f002c958c1e97c8be6fe222a3ac8ac2ebd046e2b7221941e8312fad05c"
   }
 }

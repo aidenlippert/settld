@@ -198,10 +198,15 @@ import {
 import { verifyToolManifestV1 } from "../core/tool-manifest.js";
 import { assertAuthorityGrantAllows, verifyAuthorityGrantV1 } from "../core/authority-grants.js";
 import {
+  buildFundingHoldV1,
+  buildSettlementAdjustmentV1,
   buildSettlementDecisionRecordV1,
-  buildSettlementReceiptV1,
+  buildSettlementReceiptV2,
   computeToolCallInputHashV1,
   evaluateToolCallAcceptanceV1,
+  verifyFundingHoldV1,
+  verifySettlementReceiptV2,
+  verifyToolCallDisputeOpenV1,
   verifyToolCallAgreementV1,
   verifyToolCallEvidenceV1
 } from "../core/settlement-kernel.js";
@@ -227,7 +232,7 @@ import {
   resolveBillingPlan
 } from "../core/billing-plans.js";
 import { buildOpenApiSpec } from "./openapi.js";
-import { RETENTION_CLEANUP_ADVISORY_LOCK_KEY } from "../core/maintenance-locks.js";
+import { MARKETPLACE_TOOL_HOLDBACKS_ADVISORY_LOCK_KEY, RETENTION_CLEANUP_ADVISORY_LOCK_KEY } from "../core/maintenance-locks.js";
 import { compareProtocolVersions, parseProtocolVersion, resolveProtocolPolicy } from "../core/protocol.js";
 import {
   CONTRACT_DOCUMENT_TYPE_V1,
@@ -3912,6 +3917,194 @@ export function createApi({
         } else if (locked && store && typeof store === "object") {
           try {
             store.__retentionCleanupLockHeld = false;
+          } catch {}
+        }
+      }
+    }
+  }
+
+  async function tickToolHoldbacks({
+    tenantId = DEFAULT_TENANT_ID,
+    maxRows = 200,
+    requireLock = false
+  } = {}) {
+    const startedMs = Date.now();
+    const scopedTenantId = normalizeTenant(tenantId ?? DEFAULT_TENANT_ID);
+    const scope = "tenant";
+
+    if (!Number.isSafeInteger(maxRows) || maxRows <= 0) throw new TypeError("maxRows must be a positive safe integer");
+    const safeMaxRows = Math.min(10_000, maxRows);
+
+    const lockKey = `${MARKETPLACE_TOOL_HOLDBACKS_ADVISORY_LOCK_KEY}:${scopedTenantId}`;
+    let locked = false;
+    let lockClient = null;
+
+    try {
+      if (requireLock) {
+        if (store?.kind === "pg" && store?.pg?.pool) {
+          lockClient = await store.pg.pool.connect();
+          const res = await lockClient.query("SELECT pg_try_advisory_lock(hashtext($1)) AS ok", [lockKey]);
+          locked = Boolean(res.rows[0]?.ok);
+          if (!locked) {
+            try {
+              lockClient.release();
+            } catch {}
+            lockClient = null;
+            const runtimeMs = Date.now() - startedMs;
+            logger.info("marketplace.tool_holdbacks.skip", { scope, tenantId: scopedTenantId, reason: "already_running", runtimeMs });
+            metricInc("maintenance_runs_total", { kind: "marketplace_tool_holdbacks", result: "already_running", scope }, 1);
+            return { ok: false, code: "MAINTENANCE_ALREADY_RUNNING", scope, tenantId: scopedTenantId, maxRows: safeMaxRows, runtimeMs };
+          }
+        } else {
+          store.__toolHoldbacksLockHeld = store.__toolHoldbacksLockHeld === true;
+          if (store.__toolHoldbacksLockHeld) {
+            const runtimeMs = Date.now() - startedMs;
+            logger.info("marketplace.tool_holdbacks.skip", { scope, tenantId: scopedTenantId, reason: "already_running", runtimeMs });
+            metricInc("maintenance_runs_total", { kind: "marketplace_tool_holdbacks", result: "already_running", scope }, 1);
+            return { ok: false, code: "MAINTENANCE_ALREADY_RUNNING", scope, tenantId: scopedTenantId, maxRows: safeMaxRows, runtimeMs };
+          }
+          store.__toolHoldbacksLockHeld = true;
+          locked = true;
+        }
+      }
+
+      const at = nowIso();
+      const nowMs = Date.parse(at);
+      const nowMsSafe = Number.isFinite(nowMs) ? nowMs : Date.now();
+
+      const receipts = typeof store.listArtifacts === "function"
+        ? await store.listArtifacts({ tenantId: scopedTenantId, artifactType: "SettlementReceipt.v2", limit: safeMaxRows, offset: 0 })
+        : [];
+
+      const processed = [];
+      let releasedCount = 0;
+
+      const finalizeArtifact = (artifactBody) => {
+        const { artifactHash: _h, ...bodyNoHash } = artifactBody ?? {};
+        const artifactHash = computeArtifactHash(bodyNoHash);
+        return { ...bodyNoHash, artifactHash };
+      };
+
+      for (const receipt of receipts) {
+        if (!receipt || typeof receipt !== "object") continue;
+        if (String(receipt.outcome ?? "") !== "paid") continue;
+        const retention = receipt.retention ?? null;
+        if (!retention || typeof retention !== "object") continue;
+        const heldAmountCents = Number(retention.heldAmountCents ?? 0);
+        if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) continue;
+        const challengeUntil = String(retention.challengeUntil ?? "");
+        const challengeMs = Date.parse(challengeUntil);
+        if (!Number.isFinite(challengeMs) || challengeMs > nowMsSafe) continue;
+
+        const agreementHash = String(receipt?.agreement?.agreementHash ?? "");
+        const agreementId = String(receipt?.agreement?.artifactId ?? "");
+        if (!agreementHash || !agreementId) continue;
+        const receiptId = String(receipt.artifactId ?? "");
+        const receiptHash = String(receipt.receiptHash ?? "");
+        if (!receiptId || !receiptHash) continue;
+
+        const payerAgentId = String(receipt?.transfer?.payerAgentId ?? "");
+        const payeeAgentId = String(receipt?.transfer?.payeeAgentId ?? "");
+        const currency = String(receipt?.transfer?.currency ?? "USD").trim().toUpperCase();
+        if (!payerAgentId || !payeeAgentId) continue;
+
+        const adjustmentArtifactId = `sadj_agmt_${agreementHash}_holdback_release`;
+        const verdictAdjustmentArtifactId = `sadj_agmt_${agreementHash}_holdback_verdict`;
+
+        const existingVerdictAdjustment = await store.getArtifact({ tenantId: scopedTenantId, artifactId: verdictAdjustmentArtifactId });
+        if (existingVerdictAdjustment) continue;
+
+        const disputeId = `dsp_agmt_${agreementHash}`;
+        const caseId = `arb_case_${disputeId}`;
+        try {
+          const disputeCase = await getArbitrationCaseRecord({ tenantId: scopedTenantId, caseId });
+          if (disputeCase) {
+            const status = normalizeArbitrationCaseStatus(disputeCase.status);
+            if (status !== ARBITRATION_CASE_STATUS.CLOSED) {
+              processed.push({ agreementHash, action: "skip", reason: "dispute_open", caseId });
+              continue;
+            }
+          }
+        } catch {
+          // Ignore dispute lookup failures; release tick is best-effort.
+        }
+
+        const existingAdjustment = await store.getArtifact({ tenantId: scopedTenantId, artifactId: adjustmentArtifactId });
+        if (existingAdjustment) continue;
+
+        let payerWallet = null;
+        let payeeWallet = null;
+        try {
+          const payerWalletExisting = await getAgentWalletRecord({ tenantId: scopedTenantId, agentId: payerAgentId });
+          const basePayerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId: scopedTenantId, agentId: payerAgentId, currency, at });
+          const payeeWalletExisting = await getAgentWalletRecord({ tenantId: scopedTenantId, agentId: payeeAgentId });
+          const basePayeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId: scopedTenantId, agentId: payeeAgentId, currency, at });
+          const released = releaseAgentWalletEscrowToPayee({ payerWallet: basePayerWallet, payeeWallet: basePayeeWallet, amountCents: heldAmountCents, at });
+          payerWallet = released.payerWallet;
+          payeeWallet = released.payeeWallet;
+        } catch (err) {
+          // Leave it for later retry.
+          processed.push({ agreementHash, action: "skip", reason: "wallet_rejected", code: err?.code ?? null });
+          continue;
+        }
+
+        const serverSigner = store.serverSigner;
+        const adjustment = buildSettlementAdjustmentV1({
+          tenantId: scopedTenantId,
+          artifactId: adjustmentArtifactId,
+          agreementId,
+          agreementHash,
+          receiptId,
+          receiptHash,
+          payerAgentId,
+          payeeAgentId,
+          currency,
+          kind: "holdback_release",
+          releaseToPayeeCents: heldAmountCents,
+          refundToPayerCents: 0,
+          appliedAt: at,
+          ledger: { kind: "agent_wallet", op: "holdback_release", txId: `tx_holdback_${agreementHash}` },
+          signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
+        });
+
+        const adjustmentArtifact = finalizeArtifact(adjustment);
+
+        try {
+          await commitTx([
+            { kind: "ARTIFACT_PUT", tenantId: scopedTenantId, artifact: adjustmentArtifact },
+            { kind: "AGENT_WALLET_UPSERT", tenantId: scopedTenantId, wallet: payerWallet },
+            { kind: "AGENT_WALLET_UPSERT", tenantId: scopedTenantId, wallet: payeeWallet }
+          ]);
+          releasedCount += 1;
+          processed.push({ agreementHash, action: "released", heldAmountCents, adjustmentArtifactId });
+        } catch (err) {
+          if (err?.code === "SETTLEMENT_ADJUSTMENT_ALREADY_EXISTS") {
+            processed.push({ agreementHash, action: "noop", reason: "already_applied" });
+            continue;
+          }
+          processed.push({ agreementHash, action: "skip", reason: "commit_failed", code: err?.code ?? null });
+          continue;
+        }
+      }
+
+      const runtimeMs = Date.now() - startedMs;
+      const summary = { ok: true, scope, tenantId: scopedTenantId, at, maxRows: safeMaxRows, runtimeMs, releasedCount, processed };
+      logger.info("marketplace.tool_holdbacks.done", summary);
+      metricInc("maintenance_runs_total", { kind: "marketplace_tool_holdbacks", result: "ok", scope }, 1);
+      if (releasedCount) metricInc("marketplace_tool_holdbacks_released_total", { tenant: scopedTenantId }, releasedCount);
+      return summary;
+    } finally {
+      if (requireLock) {
+        if (lockClient) {
+          try {
+            await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]);
+          } catch {}
+          try {
+            lockClient.release();
+          } catch {}
+        } else if (locked && store && typeof store === "object") {
+          try {
+            store.__toolHoldbacksLockHeld = false;
           } catch {}
         }
       }
@@ -15936,6 +16129,151 @@ export function createApi({
           });
         }
 
+        if (
+          parts[1] === "maintenance" &&
+          parts[2] === "marketplace" &&
+          parts[3] === "tool-holdbacks" &&
+          parts[4] === "run" &&
+          parts.length === 5 &&
+          req.method === "POST"
+        ) {
+          if (!requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE)) return sendError(res, 403, "forbidden");
+          if (typeof store.appendOpsAudit !== "function") return sendError(res, 501, "ops audit not supported for this store");
+
+          const body = (await readJsonBody(req)) ?? {};
+          const batchRaw = body?.batchSize ?? body?.maxRows ?? null;
+          const maxRows = batchRaw === null ? 200 : Number(batchRaw);
+          if (!Number.isSafeInteger(maxRows) || maxRows <= 0) return sendError(res, 400, "invalid batchSize", null, { code: "SCHEMA_INVALID" });
+
+          let result;
+          let outcome = "ok";
+          try {
+            result = await tickToolHoldbacks({ tenantId, maxRows, requireLock: true });
+            if (!result?.ok && result?.code === "MAINTENANCE_ALREADY_RUNNING") outcome = "already_running";
+          } catch (err) {
+            outcome = "error";
+            result = { ok: false, scope: "tenant", tenantId, maxRows, runtimeMs: null };
+            try {
+              await store.appendOpsAudit({
+                tenantId,
+                audit: makeOpsAudit({
+                  action: "MAINTENANCE_MARKETPLACE_TOOL_HOLDBACKS_RUN",
+                  targetType: "maintenance",
+                  targetId: "marketplace_tool_holdbacks",
+                  details: { path: "/ops/maintenance/marketplace/tool-holdbacks/run", outcome, maxRows, error: err?.message ?? String(err) }
+                })
+              });
+            } catch {}
+            return sendError(res, 500, "maintenance run failed", { message: err?.message });
+          }
+
+          try {
+            await store.appendOpsAudit({
+              tenantId,
+              audit: makeOpsAudit({
+                action: "MAINTENANCE_MARKETPLACE_TOOL_HOLDBACKS_RUN",
+                targetType: "maintenance",
+                targetId: "marketplace_tool_holdbacks",
+                details: {
+                  path: "/ops/maintenance/marketplace/tool-holdbacks/run",
+                  outcome,
+                  scope: result?.scope ?? "tenant",
+                  maxRows: Number(result?.maxRows ?? maxRows),
+                  runtimeMs: result?.runtimeMs ?? null,
+                  releasedCount: result?.releasedCount ?? 0,
+                  code: result?.code ?? null
+                }
+              })
+            });
+          } catch (err) {
+            return sendError(res, 500, "failed to write audit record", { message: err?.message }, { code: "AUDIT_LOG_FAILED" });
+          }
+
+          if (!result?.ok && result?.code === "MAINTENANCE_ALREADY_RUNNING") {
+            return sendError(res, 409, "maintenance already running", null, { code: "MAINTENANCE_ALREADY_RUNNING" });
+          }
+
+          return sendJson(res, 200, { ok: true, runtimeMs: result?.runtimeMs ?? null, releasedCount: result?.releasedCount ?? 0 });
+        }
+
+        if (
+          parts[1] === "marketplace" &&
+          parts[2] === "tools" &&
+          parts[3] &&
+          parts[4] === "disputes" &&
+          parts[5] &&
+          parts[6] === "assign" &&
+          parts.length === 7 &&
+          req.method === "POST"
+        ) {
+          if (!requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE)) return sendError(res, 403, "forbidden");
+          if (typeof store.appendOpsAudit !== "function") return sendError(res, 501, "ops audit not supported for this store");
+
+          const toolId = String(parts[3] ?? "");
+          const agreementHash = String(parts[5] ?? "").trim().toLowerCase();
+          if (!toolId) return sendError(res, 400, "toolId is required");
+          if (!/^[0-9a-f]{64}$/.test(agreementHash)) return sendError(res, 400, "invalid agreementHash");
+
+          const body = (await readJsonBody(req)) ?? {};
+          const arbiterAgentId =
+            typeof body?.arbiterAgentId === "string" && body.arbiterAgentId.trim() !== "" ? body.arbiterAgentId.trim() : null;
+          if (!arbiterAgentId) return sendError(res, 400, "arbiterAgentId is required");
+
+          const disputeId = `dsp_agmt_${agreementHash}`;
+          const caseId = `arb_case_${disputeId}`;
+
+          let arbitrationCase = null;
+          try {
+            arbitrationCase = await getArbitrationCaseRecord({ tenantId, caseId });
+          } catch (err) {
+            return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+          }
+          if (!arbitrationCase) return sendError(res, 404, "arbitration case not found");
+          if (String(arbitrationCase?.metadata?.toolId ?? "") !== toolId) return sendError(res, 400, "case toolId mismatch");
+
+          const arbiterIdentity = await getAgentIdentityRecord({ tenantId, agentId: arbiterAgentId });
+          if (!arbiterIdentity) return sendError(res, 404, "arbiter agent identity not found");
+
+          const nowAt = nowIso();
+          const nextCase = normalizeForCanonicalJson(
+            {
+              ...arbitrationCase,
+              arbiterAgentId,
+              status:
+                normalizeArbitrationCaseStatus(arbitrationCase.status) === ARBITRATION_CASE_STATUS.OPEN
+                  ? ARBITRATION_CASE_STATUS.UNDER_REVIEW
+                  : normalizeArbitrationCaseStatus(arbitrationCase.status),
+              revision: Number(arbitrationCase.revision ?? 0) + 1,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+
+          const responseBody = { toolId, agreementHash, disputeId, arbitrationCase: nextCase };
+          await commitTx([{ kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: nextCase }]);
+          try {
+            await store.appendOpsAudit({
+              tenantId,
+              audit: makeOpsAudit({
+                action: "MARKETPLACE_TOOL_DISPUTE_ASSIGN",
+                targetType: "arbitration_case",
+                targetId: caseId,
+                details: { path: `/ops/marketplace/tools/${toolId}/disputes/${agreementHash}/assign`, disputeId, arbiterAgentId }
+              })
+            });
+          } catch (err) {
+            return sendError(res, 500, "failed to write audit record", { message: err?.message }, { code: "AUDIT_LOG_FAILED" });
+          }
+
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: nextCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          return sendJson(res, 200, { ...responseBody, arbitrationCaseArtifact });
+        }
+
         if (parts[1] === "delegation" && parts[2] === "chains" && parts.length === 3 && req.method === "GET") {
           if (!requireScope(auth.scopes, OPS_SCOPES.OPS_READ)) return sendError(res, 403, "forbidden");
           const { limit, offset } = parsePagination({
@@ -19051,6 +19389,209 @@ export function createApi({
       }
 
       if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "tools") {
+        if (req.method === "POST" && marketplaceParts.length === 4 && marketplaceParts[3] === "hold") {
+          const toolId = marketplaceParts[2] ? String(marketplaceParts[2]) : "";
+          if (!toolId) return sendError(res, 400, "toolId is required");
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          let idempotencyKey = null;
+          try {
+            ({ idempotencyKey, idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (!idempotencyKey) return sendError(res, 400, "x-idempotency-key is required");
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const manifest = body?.toolManifest ?? null;
+          const grant = body?.authorityGrant ?? null;
+          const agreementIn = body?.toolCallAgreement ?? null;
+          if (!manifest) return sendError(res, 400, "toolManifest is required");
+          if (!grant) return sendError(res, 400, "authorityGrant is required");
+          if (!agreementIn) return sendError(res, 400, "toolCallAgreement is required");
+
+          const expiresAtIn = body?.expiresAt ?? undefined;
+          if (expiresAtIn !== undefined && expiresAtIn !== null) {
+            if (typeof expiresAtIn !== "string" || expiresAtIn.trim() === "" || !Number.isFinite(Date.parse(expiresAtIn))) {
+              return sendError(res, 400, "expiresAt must be an ISO date string");
+            }
+          }
+          if (expiresAtIn === null) return sendError(res, 400, "expiresAt must be omitted or an ISO date string");
+
+          const nowAt = nowIso();
+          const expiresAt =
+            expiresAtIn === undefined ? new Date(Date.parse(nowAt) + 15 * 60 * 1000).toISOString() : expiresAtIn;
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: manifest?.signature?.signerKeyId });
+            verifyToolManifestV1({ manifest, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid toolManifest", { message: err?.message });
+          }
+          if (String(manifest.toolId ?? "") !== toolId) return sendError(res, 400, "toolManifest.toolId must match toolId");
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: grant?.signature?.signerKeyId });
+            verifyAuthorityGrantV1({ grant, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid authorityGrant", { message: err?.message, code: err?.code ?? null });
+          }
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: agreementIn?.signature?.signerKeyId });
+            verifyToolCallAgreementV1({ agreement: agreementIn, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid toolCallAgreement", { message: err?.message });
+          }
+
+          if (String(agreementIn.toolId ?? "") !== toolId) return sendError(res, 400, "toolCallAgreement.toolId must match toolId");
+          if (String(agreementIn.toolManifestHash ?? "") !== String(manifest.manifestHash ?? "")) {
+            return sendError(res, 400, "toolCallAgreement.toolManifestHash must match toolManifest.manifestHash");
+          }
+          if (String(agreementIn.authorityGrantId ?? "") !== String(grant.grantId ?? "")) {
+            return sendError(res, 400, "toolCallAgreement.authorityGrantId must match authorityGrant.grantId");
+          }
+          if (String(agreementIn.authorityGrantHash ?? "") !== String(grant.grantHash ?? "")) {
+            return sendError(res, 400, "toolCallAgreement.authorityGrantHash must match authorityGrant.grantHash");
+          }
+
+          const agreementHash = String(agreementIn.agreementHash ?? "");
+          const holdArtifactId = `hold_agmt_${agreementHash}`;
+          const receiptArtifactId = `rcp_agmt_${agreementHash}`;
+
+          try {
+            const existingReceipt = await store.getArtifact({ tenantId, artifactId: receiptArtifactId });
+            if (existingReceipt) return sendError(res, 409, "agreement already settled");
+          } catch (err) {
+            return sendError(res, 400, "artifact lookup failed", { message: err?.message });
+          }
+
+          try {
+            const existingHold = await store.getArtifact({ tenantId, artifactId: holdArtifactId });
+            if (existingHold) {
+              const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: existingHold?.payerAgentId ?? "" });
+              const responseBody = {
+                toolId,
+                agreement: await store.getArtifact({ tenantId, artifactId: existingHold?.agreement?.artifactId ?? "" }),
+                fundingHold: existingHold,
+                wallets: { payerWallet: payerWalletExisting ?? null }
+              };
+              if (idemStoreKey) {
+                await commitTx([{ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }]);
+              }
+              return sendJson(res, 200, responseBody);
+            }
+          } catch (err) {
+            return sendError(res, 400, "artifact lookup failed", { message: err?.message });
+          }
+
+          const payerAgentId = String(agreementIn.payerAgentId ?? "");
+          if (!payerAgentId) return sendError(res, 400, "toolCallAgreement.payerAgentId is required");
+          if (String(grant.grantedTo?.actorType ?? "").toLowerCase() !== "agent") {
+            return sendError(res, 400, "authorityGrant.grantedTo.actorType must be agent");
+          }
+          if (String(grant.grantedTo?.actorId ?? "") !== payerAgentId) {
+            return sendError(res, 400, "authorityGrant.grantedTo.actorId must match toolCallAgreement.payerAgentId");
+          }
+
+          try {
+            assertAuthorityGrantAllows({
+              grant,
+              at: nowAt,
+              toolId,
+              manifestHash: manifest.manifestHash,
+              amountCents: agreementIn.amountCents,
+              currency: agreementIn.currency
+            });
+          } catch (err) {
+            return sendError(res, 403, "authority grant rejected", { message: err?.message, code: err?.code ?? null });
+          }
+
+          const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
+
+          const currency = String(agreementIn.currency ?? "USD").trim().toUpperCase();
+          const amountCents = Number(agreementIn.amountCents ?? 0);
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return sendError(res, 400, "toolCallAgreement.amountCents must be a positive safe integer");
+
+          let payerWallet = null;
+          try {
+            const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
+            const basePayerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
+            payerWallet = lockAgentWalletEscrow({ wallet: basePayerWallet, amountCents, at: nowAt });
+          } catch (err) {
+            return sendError(res, 400, "wallet escrow lock rejected", { message: err?.message, code: err?.code ?? null });
+          }
+
+          const serverSigner = store.serverSigner;
+          const hold = buildFundingHoldV1({
+            tenantId,
+            artifactId: holdArtifactId,
+            agreementId: agreementIn.artifactId,
+            agreementHash: agreementIn.agreementHash,
+            payerAgentId,
+            amountCents,
+            currency,
+            lockedAt: nowAt,
+            expiresAt,
+            signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
+          });
+
+          const finalizeArtifact = (artifactBody) => {
+            const { artifactHash: _h, ...bodyNoHash } = artifactBody ?? {};
+            const artifactHash = computeArtifactHash(bodyNoHash);
+            return { ...bodyNoHash, artifactHash };
+          };
+
+          const agreement = finalizeArtifact(agreementIn);
+          const fundingHold = finalizeArtifact(hold);
+
+          const responseBody = {
+            toolId,
+            agreement,
+            fundingHold,
+            wallets: { payerWallet }
+          };
+
+          const ops = [
+            // Put hold first so DB-backed mode is fail-closed under concurrency (no double-lock).
+            { kind: "ARTIFACT_PUT", tenantId, artifact: fundingHold },
+            { kind: "ARTIFACT_PUT", tenantId, artifact: agreement },
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+            { kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } }
+          ];
+
+          try {
+            await commitTx(ops);
+          } catch (err) {
+            if (err?.code === "FUNDING_HOLD_ALREADY_EXISTS") {
+              const existingHold = await store.getArtifact({ tenantId, artifactId: holdArtifactId });
+              if (existingHold) {
+                const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: existingHold?.payerAgentId ?? "" });
+                return sendJson(res, 200, {
+                  toolId,
+                  agreement: await store.getArtifact({ tenantId, artifactId: existingHold?.agreement?.artifactId ?? "" }),
+                  fundingHold: existingHold,
+                  wallets: { payerWallet: payerWalletExisting ?? null }
+                });
+              }
+            }
+            throw err;
+          }
+
+          return sendJson(res, 201, responseBody);
+        }
+
         if (req.method === "POST" && marketplaceParts.length === 4 && marketplaceParts[3] === "settle") {
           const toolId = marketplaceParts[2] ? String(marketplaceParts[2]) : "";
           if (!toolId) return sendError(res, 400, "toolId is required");
@@ -19112,6 +19653,7 @@ export function createApi({
           const agreementHash = String(agreementIn.agreementHash ?? "");
           const decisionArtifactId = `sdr_agmt_${agreementHash}`;
           const receiptArtifactId = `rcp_agmt_${agreementHash}`;
+          const holdArtifactId = `hold_agmt_${agreementHash}`;
           try {
             const existingReceipt = await store.getArtifact({ tenantId, artifactId: receiptArtifactId });
             if (existingReceipt) {
@@ -19120,6 +19662,7 @@ export function createApi({
               const existingEvidence = existingDecision
                 ? await store.getArtifact({ tenantId, artifactId: existingDecision?.evidence?.artifactId ?? "" })
                 : null;
+              const existingHold = await store.getArtifact({ tenantId, artifactId: holdArtifactId });
               const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: existingReceipt?.transfer?.payerAgentId ?? "" });
               const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: existingReceipt?.transfer?.payeeAgentId ?? "" });
               return sendJson(res, 200, {
@@ -19128,6 +19671,7 @@ export function createApi({
                 evidence: existingEvidence ?? null,
                 decision: existingDecision ?? null,
                 receipt: existingReceipt,
+                fundingHold: existingHold ?? null,
                 wallets: { payerWallet: payerWalletExisting ?? null, payeeWallet: payeeWalletExisting ?? null }
               });
             }
@@ -19214,35 +19758,84 @@ export function createApi({
           const amountCents = Number(agreementIn.amountCents ?? 0);
           if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return sendError(res, 400, "toolCallAgreement.amountCents must be a positive safe integer");
 
+          let fundingHold = null;
+          try {
+            fundingHold = await store.getArtifact({ tenantId, artifactId: holdArtifactId });
+          } catch (err) {
+            return sendError(res, 400, "artifact lookup failed", { message: err?.message });
+          }
+          if (!fundingHold) return sendError(res, 409, "funding hold required (pre-authorize before settling)");
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: fundingHold?.signature?.signerKeyId });
+            verifyFundingHoldV1({ hold: fundingHold, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid fundingHold", { message: err?.message });
+          }
+          if (String(fundingHold?.agreement?.artifactId ?? "") !== String(agreementIn.artifactId ?? "")) {
+            return sendError(res, 400, "fundingHold.agreement.artifactId must match toolCallAgreement.artifactId");
+          }
+          if (String(fundingHold?.agreement?.agreementHash ?? "") !== String(agreementIn.agreementHash ?? "")) {
+            return sendError(res, 400, "fundingHold.agreement.agreementHash must match toolCallAgreement.agreementHash");
+          }
+          if (String(fundingHold?.payerAgentId ?? "") !== payerAgentId) {
+            return sendError(res, 400, "fundingHold.payerAgentId must match toolCallAgreement.payerAgentId");
+          }
+          if (String(fundingHold?.currency ?? "").trim().toUpperCase() !== currency) {
+            return sendError(res, 400, "fundingHold.currency must match toolCallAgreement.currency");
+          }
+          if (Number(fundingHold?.amountCents ?? 0) !== amountCents) {
+            return sendError(res, 400, "fundingHold.amountCents must match toolCallAgreement.amountCents");
+          }
+          const expiresAt = fundingHold?.expiresAt ?? null;
+          const holdExpired =
+            typeof expiresAt === "string" && expiresAt.trim() !== "" && Number.isFinite(Date.parse(expiresAt)) && Date.parse(nowAt) > Date.parse(expiresAt);
+
           let acceptance = null;
           try {
-            acceptance = evaluateToolCallAcceptanceV1({ agreement: agreementIn, evidence: evidenceIn });
+            acceptance = holdExpired
+              ? { ok: false, modality: "cryptographic", reasonCodes: ["hold_expired"], evaluationSummary: { holdExpired: true, expiresAt } }
+              : evaluateToolCallAcceptanceV1({ agreement: agreementIn, evidence: evidenceIn });
           } catch (err) {
             return sendError(res, 400, "acceptance evaluation failed", { message: err?.message });
           }
 
           const decisionValue = acceptance.ok ? "approved" : "rejected";
 
+          const holdbackBpsRaw = agreementIn?.settlementTerms?.holdbackBps ?? null;
+          const challengeWindowMsRaw = agreementIn?.settlementTerms?.challengeWindowMs ?? null;
+          const holdbackBps = holdbackBpsRaw === null || holdbackBpsRaw === undefined ? 0 : Number(holdbackBpsRaw);
+          const challengeWindowMs = holdbackBps > 0 ? Number(challengeWindowMsRaw) : 0;
+          const holdbackCents =
+            decisionValue === "approved" && holdbackBps > 0 ? Math.floor((amountCents * holdbackBps) / 10_000) : 0;
+          const payoutCents = decisionValue === "approved" ? amountCents - holdbackCents : 0;
+          const challengeUntil =
+            decisionValue === "approved" && holdbackCents > 0
+              ? new Date(Date.parse(nowAt) + challengeWindowMs).toISOString()
+              : null;
+
           let payerWallet = null;
           let payeeWallet = null;
-          if (decisionValue === "approved") {
-            try {
-              const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
-              const basePayerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
-              const locked = lockAgentWalletEscrow({ wallet: basePayerWallet, amountCents, at: nowAt });
+          try {
+            const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
+            const basePayerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
+            const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payeeAgentId });
+            const basePayeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
 
-              const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payeeAgentId });
-              const basePayeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
-
-              const released = releaseAgentWalletEscrowToPayee({ payerWallet: locked, payeeWallet: basePayeeWallet, amountCents, at: nowAt });
-              payerWallet = released.payerWallet;
-              payeeWallet = released.payeeWallet;
-            } catch (err) {
-              return sendError(res, 400, "wallet settlement rejected", { message: err?.message, code: err?.code ?? null });
+            if (decisionValue === "approved") {
+              if (payoutCents > 0) {
+                const released = releaseAgentWalletEscrowToPayee({ payerWallet: basePayerWallet, payeeWallet: basePayeeWallet, amountCents: payoutCents, at: nowAt });
+                payerWallet = released.payerWallet;
+                payeeWallet = released.payeeWallet;
+              } else {
+                payerWallet = basePayerWallet;
+                payeeWallet = basePayeeWallet;
+              }
+            } else {
+              payerWallet = refundAgentWalletEscrow({ wallet: basePayerWallet, amountCents, at: nowAt });
+              payeeWallet = basePayeeWallet;
             }
-          } else {
-            payerWallet = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
-            payeeWallet = await getAgentWalletRecord({ tenantId, agentId: payeeAgentId });
+          } catch (err) {
+            return sendError(res, 400, "wallet settlement rejected", { message: err?.message, code: err?.code ?? null });
           }
 
           const serverSigner = store.serverSigner;
@@ -19263,7 +19856,8 @@ export function createApi({
             signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
           });
 
-          const receipt = buildSettlementReceiptV1({
+          const receiptOutcome = decisionValue === "approved" ? "paid" : holdExpired ? "expired" : "not_paid";
+          const receipt = buildSettlementReceiptV2({
             tenantId,
             artifactId: receiptArtifactId,
             agreementId: agreementIn.artifactId,
@@ -19272,10 +19866,23 @@ export function createApi({
             decisionHash: decisionRecord.recordHash,
             payerAgentId,
             payeeAgentId,
-            amountCents: decisionValue === "approved" ? amountCents : 0,
+            amountCents: receiptOutcome === "paid" ? payoutCents : 0,
             currency,
+            agreementAmountCents: amountCents,
+            outcome: receiptOutcome,
+            retention:
+              receiptOutcome === "paid" && holdbackCents > 0
+                ? { heldAmountCents: holdbackCents, holdbackBps, challengeWindowMs, challengeUntil }
+                : null,
             settledAt: nowAt,
-            ledger: { kind: "agent_wallet", op: decisionValue === "approved" ? "escrow_release" : "no_transfer", txId: `tx_agmt_${agreementHash}` },
+            ledger: {
+              kind: "agent_wallet",
+              op: receiptOutcome === "paid" ? (holdbackCents > 0 ? "escrow_release_partial" : "escrow_release") : "escrow_refund",
+              txId: `tx_agmt_${agreementHash}`,
+              payoutCents: receiptOutcome === "paid" ? payoutCents : 0,
+              heldCents: receiptOutcome === "paid" ? holdbackCents : 0,
+              challengeUntil
+            },
             signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
           });
 
@@ -19293,6 +19900,7 @@ export function createApi({
             toolId,
             agreement,
             evidence,
+            fundingHold,
             decision,
             receipt: settlementReceipt,
             wallets: { payerWallet, payeeWallet }
@@ -19304,12 +19912,8 @@ export function createApi({
             { kind: "ARTIFACT_PUT", tenantId, artifact: decision },
             { kind: "ARTIFACT_PUT", tenantId, artifact: agreement },
             { kind: "ARTIFACT_PUT", tenantId, artifact: evidence },
-            ...(decisionValue === "approved"
-              ? [
-                  { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
-                  { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet }
-                ]
-              : []),
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet },
             { kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } }
           ];
           try {
@@ -19324,6 +19928,7 @@ export function createApi({
                 const existingEvidence = existingDecision
                   ? await store.getArtifact({ tenantId, artifactId: existingDecision?.evidence?.artifactId ?? "" })
                   : null;
+                const existingHold = await store.getArtifact({ tenantId, artifactId: holdArtifactId });
                 const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: existingReceipt?.transfer?.payerAgentId ?? "" });
                 const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: existingReceipt?.transfer?.payeeAgentId ?? "" });
                 return sendJson(res, 200, {
@@ -19332,6 +19937,7 @@ export function createApi({
                   evidence: existingEvidence ?? null,
                   decision: existingDecision ?? null,
                   receipt: existingReceipt,
+                  fundingHold: existingHold ?? null,
                   wallets: { payerWallet: payerWalletExisting ?? null, payeeWallet: payeeWalletExisting ?? null }
                 });
               }
@@ -19339,6 +19945,431 @@ export function createApi({
             throw err;
           }
           return sendJson(res, 201, responseBody);
+        }
+
+        if (req.method === "POST" && marketplaceParts.length === 5 && marketplaceParts[3] === "disputes" && marketplaceParts[4] === "open") {
+          const toolId = marketplaceParts[2] ? String(marketplaceParts[2]) : "";
+          if (!toolId) return sendError(res, 400, "toolId is required");
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          let idempotencyKey = null;
+          try {
+            ({ idempotencyKey, idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (!idempotencyKey) return sendError(res, 400, "x-idempotency-key is required");
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const agreementIn = body?.toolCallAgreement ?? null;
+          const disputeOpenIn = body?.disputeOpen ?? null;
+          if (!agreementIn) return sendError(res, 400, "toolCallAgreement is required");
+          if (!disputeOpenIn) return sendError(res, 400, "disputeOpen is required");
+
+          const nowAt = nowIso();
+
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: agreementIn?.signature?.signerKeyId });
+            verifyToolCallAgreementV1({ agreement: agreementIn, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid toolCallAgreement", { message: err?.message });
+          }
+          if (String(agreementIn.toolId ?? "") !== toolId) return sendError(res, 400, "toolCallAgreement.toolId must match toolId");
+
+          const agreementHash = String(agreementIn.agreementHash ?? "");
+          const receiptArtifactId = `rcp_agmt_${agreementHash}`;
+          const disputeId = `dsp_agmt_${agreementHash}`;
+          const caseId = `arb_case_${disputeId}`;
+          const runId = `run_tool_${agreementHash}`;
+
+          let receipt = null;
+          try {
+            receipt = await store.getArtifact({ tenantId, artifactId: receiptArtifactId });
+          } catch (err) {
+            return sendError(res, 400, "artifact lookup failed", { message: err?.message });
+          }
+          if (!receipt) return sendError(res, 409, "dispute requires a settled receipt");
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: receipt?.signature?.signerKeyId });
+            verifySettlementReceiptV2({ receipt, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid settlement receipt", { message: err?.message });
+          }
+
+          if (String(receipt?.agreement?.agreementHash ?? "") !== agreementHash) {
+            return sendError(res, 400, "settlement receipt agreementHash must match toolCallAgreement.agreementHash");
+          }
+          if (String(receipt?.outcome ?? "") !== "paid") return sendError(res, 409, "dispute requires a paid receipt with retention");
+          const retention = receipt?.retention ?? null;
+          if (!retention || typeof retention !== "object") return sendError(res, 409, "dispute requires a paid receipt with retention");
+          const heldAmountCents = Number(retention.heldAmountCents ?? 0);
+          if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) return sendError(res, 409, "dispute requires a positive heldAmountCents");
+          const challengeUntil = String(retention.challengeUntil ?? "");
+          if (!challengeUntil || !Number.isFinite(Date.parse(challengeUntil))) return sendError(res, 409, "receipt retention challengeUntil is invalid");
+          if (Date.parse(nowAt) > Date.parse(challengeUntil)) return sendError(res, 409, "challenge window has closed");
+
+          let disputeOpen = null;
+          try {
+            const signerKeyId = String(disputeOpenIn?.signature?.signerKeyId ?? "");
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId });
+            verifyToolCallDisputeOpenV1({ disputeOpen: disputeOpenIn, publicKeyPem });
+            disputeOpen = disputeOpenIn;
+          } catch (err) {
+            return sendError(res, 400, "invalid disputeOpen", { message: err?.message });
+          }
+
+          if (String(disputeOpen.toolId ?? "") !== toolId) return sendError(res, 400, "disputeOpen.toolId must match toolId");
+          if (String(disputeOpen.agreement?.artifactId ?? "") !== String(agreementIn.artifactId ?? "")) {
+            return sendError(res, 400, "disputeOpen.agreement.artifactId must match toolCallAgreement.artifactId");
+          }
+          if (String(disputeOpen.agreement?.agreementHash ?? "") !== String(agreementIn.agreementHash ?? "")) {
+            return sendError(res, 400, "disputeOpen.agreement.agreementHash must match toolCallAgreement.agreementHash");
+          }
+          if (String(disputeOpen.receipt?.artifactId ?? "") !== String(receipt.artifactId ?? "")) {
+            return sendError(res, 400, "disputeOpen.receipt.artifactId must match settlement receipt");
+          }
+          if (String(disputeOpen.receipt?.receiptHash ?? "") !== String(receipt.receiptHash ?? "")) {
+            return sendError(res, 400, "disputeOpen.receipt.receiptHash must match settlement receipt");
+          }
+
+          const openedByAgentId = String(disputeOpen.openedByAgentId ?? "");
+          if (!openedByAgentId) return sendError(res, 400, "disputeOpen.openedByAgentId is required");
+          if (openedByAgentId !== String(receipt?.transfer?.payerAgentId ?? "") && openedByAgentId !== String(receipt?.transfer?.payeeAgentId ?? "")) {
+            return sendError(res, 403, "disputeOpen.openedByAgentId must be a receipt counterparty");
+          }
+          const openedAt = String(disputeOpen.openedAt ?? "");
+          if (!openedAt || !Number.isFinite(Date.parse(openedAt))) return sendError(res, 400, "disputeOpen.openedAt must be an ISO date-time");
+          if (Date.parse(openedAt) > Date.parse(challengeUntil)) return sendError(res, 409, "disputeOpen must be opened within the challenge window");
+
+          const claimantAgentId = openedByAgentId;
+          const respondentAgentId = claimantAgentId === String(receipt?.transfer?.payerAgentId ?? "")
+            ? String(receipt?.transfer?.payeeAgentId ?? "")
+            : String(receipt?.transfer?.payerAgentId ?? "");
+          if (!respondentAgentId) return sendError(res, 400, "receipt counterparties are invalid");
+
+          let claimantIdentity = null;
+          try {
+            claimantIdentity = await getAgentIdentityRecord({ tenantId, agentId: claimantAgentId });
+          } catch (err) {
+            return sendError(res, 400, "invalid dispute claimant", { message: err?.message });
+          }
+          if (!claimantIdentity) return sendError(res, 404, "dispute claimant agent identity not found");
+
+          // Require the dispute signer key to be the claimant's registered key.
+          const expectedClaimantKeyId = String(claimantIdentity?.keys?.keyId ?? "");
+          if (expectedClaimantKeyId && String(disputeOpen?.signature?.signerKeyId ?? "") !== expectedClaimantKeyId) {
+            return sendError(res, 403, "disputeOpen signerKeyId does not match claimant agent key");
+          }
+
+          let existingCase = null;
+          try {
+            existingCase = await getArbitrationCaseRecord({ tenantId, caseId });
+          } catch (err) {
+            return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+          }
+          if (existingCase) {
+            const responseBody = { toolId, agreementHash, disputeId, arbitrationCase: existingCase, receipt };
+            if (idemStoreKey) {
+              await commitTx([{ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }]);
+            }
+            return sendJson(res, 200, responseBody);
+          }
+
+          const disputeOpenArtifactId = `tcd_agmt_${agreementHash}`;
+          if (String(disputeOpen.artifactId ?? "") !== disputeOpenArtifactId) {
+            return sendError(res, 400, `disputeOpen.artifactId must be ${disputeOpenArtifactId}`);
+          }
+
+          const finalizeArtifact = (artifactBody) => {
+            const { artifactHash: _h, ...bodyNoHash } = artifactBody ?? {};
+            const artifactHash = computeArtifactHash(bodyNoHash);
+            return { ...bodyNoHash, artifactHash };
+          };
+          const disputeOpenArtifact = finalizeArtifact(disputeOpen);
+
+          const arbitrationCase = normalizeForCanonicalJson(
+            {
+              schemaVersion: "ArbitrationCase.v1",
+              caseId,
+              tenantId: normalizeTenant(tenantId),
+              runId,
+              settlementId: receiptArtifactId,
+              disputeId,
+              claimantAgentId,
+              respondentAgentId,
+              status: "open",
+              openedAt,
+              closedAt: null,
+              summary: disputeOpen.reason ?? null,
+              evidenceRefs: Array.isArray(disputeOpen.evidenceRefs) ? disputeOpen.evidenceRefs : [],
+              verdictId: null,
+              verdictHash: null,
+              metadata: {
+                caseType: "tool_call",
+                toolId,
+                agreementId: agreementIn.artifactId,
+                agreementHash,
+                receiptId: receipt.artifactId,
+                receiptHash: receipt.receiptHash,
+                challengeUntil,
+                disputeOpenArtifactId
+              },
+              revision: 1,
+              createdAt: nowAt,
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+
+          const responseBody = { toolId, agreementHash, disputeId, arbitrationCase, receipt, disputeOpen: disputeOpenArtifact };
+          const ops = [
+            { kind: "ARTIFACT_PUT", tenantId, artifact: disputeOpenArtifact },
+            { kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase },
+            { kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } }
+          ];
+          await commitTx(ops);
+
+          let arbitrationCaseArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+
+          return sendJson(res, 201, { ...responseBody, arbitrationCaseArtifact });
+        }
+
+        if (req.method === "POST" && marketplaceParts.length === 6 && marketplaceParts[3] === "disputes" && marketplaceParts[5] === "verdict") {
+          const toolId = marketplaceParts[2] ? String(marketplaceParts[2]) : "";
+          const agreementHash = marketplaceParts[4] ? String(marketplaceParts[4]).trim().toLowerCase() : "";
+          if (!toolId) return sendError(res, 400, "toolId is required");
+          if (!/^[0-9a-f]{64}$/.test(agreementHash)) return sendError(res, 400, "invalid agreementHash");
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          let idempotencyKey = null;
+          try {
+            ({ idempotencyKey, idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (!idempotencyKey) return sendError(res, 400, "x-idempotency-key is required");
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const disputeId = `dsp_agmt_${agreementHash}`;
+          const caseId = `arb_case_${disputeId}`;
+          const receiptArtifactId = `rcp_agmt_${agreementHash}`;
+
+          let arbitrationCase = null;
+          try {
+            arbitrationCase = await getArbitrationCaseRecord({ tenantId, caseId });
+          } catch (err) {
+            return sendError(res, 501, "arbitration cases not supported for this store", { message: err?.message });
+          }
+          if (!arbitrationCase) return sendError(res, 404, "arbitration case not found");
+          if (String(arbitrationCase?.metadata?.toolId ?? "") !== toolId) return sendError(res, 400, "case toolId mismatch");
+
+          const currentStatus = normalizeArbitrationCaseStatus(arbitrationCase.status);
+          if (currentStatus === ARBITRATION_CASE_STATUS.CLOSED) return sendError(res, 409, "arbitration case already closed");
+
+          if (!arbitrationCase.arbiterAgentId) return sendError(res, 409, "arbiterAgentId not assigned");
+
+          let receipt = null;
+          try {
+            receipt = await store.getArtifact({ tenantId, artifactId: receiptArtifactId });
+          } catch (err) {
+            return sendError(res, 400, "artifact lookup failed", { message: err?.message });
+          }
+          if (!receipt) return sendError(res, 409, "verdict requires a settled receipt");
+          try {
+            const publicKeyPem = await loadSignerPublicKeyPem({ tenantId, signerKeyId: receipt?.signature?.signerKeyId });
+            verifySettlementReceiptV2({ receipt, publicKeyPem });
+          } catch (err) {
+            return sendError(res, 400, "invalid settlement receipt", { message: err?.message });
+          }
+          if (String(receipt?.agreement?.agreementHash ?? "") !== agreementHash) {
+            return sendError(res, 400, "receipt agreementHash mismatch");
+          }
+          const retention = receipt?.retention ?? null;
+          if (!retention || typeof retention !== "object") return sendError(res, 409, "receipt has no retention to adjust");
+          const heldAmountCents = Number(retention.heldAmountCents ?? 0);
+          if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) return sendError(res, 409, "receipt heldAmountCents invalid");
+
+          // Idempotency: only one verdict adjustment per agreement.
+          const autoReleaseAdjustmentArtifactId = `sadj_agmt_${agreementHash}_holdback_release`;
+          const existingAutoRelease = await store.getArtifact({ tenantId, artifactId: autoReleaseAdjustmentArtifactId });
+          if (existingAutoRelease) return sendError(res, 409, "holdback already released");
+          const verdictAdjustmentArtifactId = `sadj_agmt_${agreementHash}_holdback_verdict`;
+          const existingAdjustment = await store.getArtifact({ tenantId, artifactId: verdictAdjustmentArtifactId });
+          if (existingAdjustment) {
+            const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: receipt?.transfer?.payerAgentId ?? "" });
+            const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: receipt?.transfer?.payeeAgentId ?? "" });
+            const responseBody = { toolId, agreementHash, disputeId, arbitrationCase, receipt, adjustment: existingAdjustment, wallets: { payerWallet: payerWalletExisting ?? null, payeeWallet: payeeWalletExisting ?? null } };
+            if (idemStoreKey) {
+              await commitTx([{ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }]);
+            }
+            return sendJson(res, 200, responseBody);
+          }
+
+          let signedArbitrationVerdict = null;
+          try {
+            signedArbitrationVerdict = await parseSignedArbitrationVerdict({
+              tenantId,
+              runId: arbitrationCase.runId,
+              settlement: { settlementId: arbitrationCase.settlementId, disputeId: arbitrationCase.disputeId },
+              disputeId: arbitrationCase.disputeId,
+              arbitrationVerdictInput: body?.arbitrationVerdict
+            });
+            if (String(signedArbitrationVerdict.caseId ?? "") !== String(caseId)) throw new TypeError("arbitrationVerdict.caseId must match caseId");
+            if (String(signedArbitrationVerdict.arbiterAgentId ?? "") !== String(arbitrationCase.arbiterAgentId ?? "")) {
+              throw new TypeError("arbitrationVerdict.arbiterAgentId must match arbitrationCase.arbiterAgentId");
+            }
+            const caseEvidenceRefs = Array.isArray(arbitrationCase.evidenceRefs) ? arbitrationCase.evidenceRefs : [];
+            const verdictEvidenceRefs = Array.isArray(signedArbitrationVerdict.evidenceRefs) ? signedArbitrationVerdict.evidenceRefs : [];
+            const allowed = new Set(caseEvidenceRefs.map((v) => String(v)));
+            for (const ref of verdictEvidenceRefs) {
+              if (allowed.size && !allowed.has(String(ref))) throw new TypeError("arbitrationVerdict.evidenceRefs must be a subset of arbitrationCase.evidenceRefs");
+            }
+          } catch (err) {
+            return sendError(res, 400, "invalid arbitrationVerdict", { message: err?.message });
+          }
+
+          const payoutPct = Number(signedArbitrationVerdict.releaseRatePct ?? 0);
+          const releaseToPayeeCents = Math.floor((heldAmountCents * payoutPct) / 100);
+          const refundToPayerCents = heldAmountCents - releaseToPayeeCents;
+
+          const payerAgentId = String(receipt?.transfer?.payerAgentId ?? "");
+          const payeeAgentId = String(receipt?.transfer?.payeeAgentId ?? "");
+          const currency = String(receipt?.transfer?.currency ?? "USD").trim().toUpperCase();
+          if (!payerAgentId || !payeeAgentId) return sendError(res, 400, "receipt counterparties are invalid");
+
+          const nowAt = nowIso();
+          let payerWallet = null;
+          let payeeWallet = null;
+          try {
+            const payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
+            let basePayerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
+            const payeeWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payeeAgentId });
+            let basePayeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
+
+            if (releaseToPayeeCents > 0) {
+              const released = releaseAgentWalletEscrowToPayee({ payerWallet: basePayerWallet, payeeWallet: basePayeeWallet, amountCents: releaseToPayeeCents, at: nowAt });
+              basePayerWallet = released.payerWallet;
+              basePayeeWallet = released.payeeWallet;
+            }
+            if (refundToPayerCents > 0) {
+              basePayerWallet = refundAgentWalletEscrow({ wallet: basePayerWallet, amountCents: refundToPayerCents, at: nowAt });
+            }
+            payerWallet = basePayerWallet;
+            payeeWallet = basePayeeWallet;
+          } catch (err) {
+            return sendError(res, 400, "wallet adjustment rejected", { message: err?.message, code: err?.code ?? null });
+          }
+
+          const kind = releaseToPayeeCents > 0 && refundToPayerCents > 0 ? "holdback_split" : releaseToPayeeCents > 0 ? "holdback_release" : "holdback_refund";
+          const serverSigner = store.serverSigner;
+          const adjustmentCore = buildSettlementAdjustmentV1({
+            tenantId,
+            artifactId: verdictAdjustmentArtifactId,
+            agreementId: String(arbitrationCase?.metadata?.agreementId ?? receipt?.agreement?.artifactId ?? ""),
+            agreementHash,
+            receiptId: receipt.artifactId,
+            receiptHash: receipt.receiptHash,
+            payerAgentId,
+            payeeAgentId,
+            currency,
+            kind,
+            releaseToPayeeCents,
+            refundToPayerCents,
+            appliedAt: nowAt,
+            ledger: { kind: "agent_wallet", op: "holdback_verdict", txId: `tx_holdback_verdict_${agreementHash}`, releaseToPayeeCents, refundToPayerCents },
+            signer: { keyId: serverSigner.keyId, privateKeyPem: serverSigner.privateKeyPem }
+          });
+          const finalizeArtifact = (artifactBody) => {
+            const { artifactHash: _h, ...bodyNoHash } = artifactBody ?? {};
+            const artifactHash = computeArtifactHash(bodyNoHash);
+            return { ...bodyNoHash, artifactHash };
+          };
+          const adjustment = finalizeArtifact(adjustmentCore);
+
+          const nextCase = normalizeForCanonicalJson(
+            {
+              ...arbitrationCase,
+              status: ARBITRATION_CASE_STATUS.CLOSED,
+              verdictId: signedArbitrationVerdict.verdictId,
+              verdictHash: signedArbitrationVerdict.verdictHash,
+              summary: signedArbitrationVerdict.rationale ?? arbitrationCase.summary ?? null,
+              closedAt: nowAt,
+              revision: Number(arbitrationCase.revision ?? 0) + 1,
+              updatedAt: nowAt,
+              metadata: {
+                ...(arbitrationCase?.metadata && typeof arbitrationCase.metadata === "object" ? arbitrationCase.metadata : {}),
+                verdictOutcome: signedArbitrationVerdict.outcome ?? null,
+                verdictReleaseRatePct: signedArbitrationVerdict.releaseRatePct ?? null,
+                verdictIssuedAt: signedArbitrationVerdict.issuedAt ?? nowAt,
+                verdictSignerKeyId: signedArbitrationVerdict.signerKeyId ?? null,
+                holdbackApplied: true
+              }
+            },
+            { path: "$" }
+          );
+
+          const responseBody = {
+            toolId,
+            agreementHash,
+            disputeId,
+            arbitrationCase: nextCase,
+            receipt,
+            adjustment,
+            wallets: { payerWallet, payeeWallet }
+          };
+          const ops = [
+            { kind: "ARTIFACT_PUT", tenantId, artifact: adjustment },
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet },
+            { kind: "ARBITRATION_CASE_UPSERT", tenantId, caseId, arbitrationCase: nextCase },
+            { kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }
+          ];
+          await commitTx(ops);
+
+          let arbitrationCaseArtifact = null;
+          let arbitrationVerdictArtifact = null;
+          try {
+            arbitrationCaseArtifact = await emitArbitrationCaseArtifact({ tenantId, arbitrationCase: nextCase, at: nowAt });
+          } catch {
+            arbitrationCaseArtifact = null;
+          }
+          try {
+            arbitrationVerdictArtifact = await emitArbitrationVerdictArtifact({
+              tenantId,
+              runId: nextCase.runId,
+              settlement: { settlementId: nextCase.settlementId, disputeId: nextCase.disputeId },
+              arbitrationVerdict: signedArbitrationVerdict
+            });
+          } catch {
+            arbitrationVerdictArtifact = null;
+          }
+
+          return sendJson(res, 200, { ...responseBody, arbitrationCaseArtifact, arbitrationVerdictArtifact });
         }
 
         return sendError(res, 404, "not found");
@@ -26505,12 +27536,13 @@ export function createApi({
     tickDispatch,
     tickOperatorQueue,
     tickRobotHealth,
-    tickJobAccounting,
-    tickEvidenceRetention,
-    tickRetentionCleanup,
-    tickBillingStripeSync,
-    tickProof,
-    tickArtifacts,
-    tickDeliveries
-  };
+	    tickJobAccounting,
+	    tickEvidenceRetention,
+	    tickRetentionCleanup,
+	    tickToolHoldbacks,
+	    tickBillingStripeSync,
+	    tickProof,
+	    tickArtifacts,
+	    tickDeliveries
+	  };
 }

@@ -1,0 +1,72 @@
+{
+  "$id": "https://settld.local/schemas/ToolCallDisputeOpen.v1.schema.json",
+  "title": "ToolCallDisputeOpen.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "artifactId",
+    "tenantId",
+    "toolId",
+    "agreement",
+    "receipt",
+    "openedByAgentId",
+    "evidenceRefs",
+    "openedAt",
+    "disputeHash",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ToolCallDisputeOpen.v1" },
+    "artifactType": { "const": "ToolCallDisputeOpen.v1" },
+    "artifactId": { "type": "string", "minLength": 1 },
+    "tenantId": { "type": "string", "minLength": 1 },
+    "toolId": { "type": "string", "minLength": 1 },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "agreementHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "receiptHash"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "receiptHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "openedByAgentId": { "type": "string", "minLength": 1 },
+    "reasonCode": { "type": ["string", "null"], "minLength": 1 },
+    "reason": { "type": ["string", "null"], "minLength": 1 },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 1000,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "openedAt": { "type": "string", "minLength": 1 },
+    "disputeHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1 },
+        "signedAt": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+

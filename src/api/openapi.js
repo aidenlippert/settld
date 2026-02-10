@@ -2506,9 +2506,48 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
+      "/marketplace/tools/{toolId}/hold": {
+        post: {
+          summary: "Create a funding hold (pre-authorization) for a paid tool call agreement",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "toolId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["toolManifest", "authorityGrant", "toolCallAgreement"],
+                  properties: {
+                    toolManifest: { type: "object", additionalProperties: true },
+                    authorityGrant: { type: "object", additionalProperties: true },
+                    toolCallAgreement: { type: "object", additionalProperties: true },
+                    expiresAt: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            201: { description: "Created", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            200: { description: "OK", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
       "/marketplace/tools/{toolId}/settle": {
         post: {
-          summary: "Settle a paid tool call (kernel: contract -> proof -> decision -> settlement)",
+          summary: "Settle a paid tool call (requires FundingHold preauth; kernel: contract -> proof -> decision -> settlement)",
           parameters: [
             TenantHeader,
             ProtocolHeader,
@@ -2537,6 +2576,115 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           },
           responses: {
             201: { description: "Created", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/marketplace/tools/{toolId}/disputes/open": {
+        post: {
+          summary: "Open a tool-call dispute (counterparty-signed; freezes holdback auto-release until verdict)",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "toolId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["toolCallAgreement", "disputeOpen"],
+                  properties: {
+                    toolCallAgreement: { type: "object", additionalProperties: true },
+                    disputeOpen: { type: "object", additionalProperties: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            201: { description: "Created", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            200: { description: "OK", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/marketplace/tools/{toolId}/disputes/{agreementHash}/verdict": {
+        post: {
+          summary: "Submit an arbitration verdict for a tool-call dispute (arbiter-signed; applies held escrow split/refund/release)",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "toolId", in: "path", required: true, schema: { type: "string" } },
+            { name: "agreementHash", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["arbitrationVerdict"],
+                  properties: {
+                    arbitrationVerdict: { type: "object", additionalProperties: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/ops/marketplace/tools/{toolId}/disputes/{agreementHash}/assign": {
+        post: {
+          summary: "Assign an arbiter agent to a tool-call dispute (ops override)",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "toolId", in: "path", required: true, schema: { type: "string" } },
+            { name: "agreementHash", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["arbiterAgentId"],
+                  properties: {
+                    arbiterAgentId: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
             400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
             403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
             404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },

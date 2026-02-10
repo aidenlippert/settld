@@ -54,13 +54,16 @@ async function runAutotickOnce() {
     if (typeof api.tickDeliveries === "function") {
       await api.tickDeliveries({ maxMessages: autotickMaxMessages });
     }
-    if (typeof api.tickBillingStripeSync === "function") {
-      await api.tickBillingStripeSync({ maxRows: autotickMaxMessages });
-    }
-    autotickLastSuccessAt = new Date().toISOString();
-    try {
-      store.__autotickLastSuccessAt = autotickLastSuccessAt;
-    } catch {}
+	    if (typeof api.tickBillingStripeSync === "function") {
+	      await api.tickBillingStripeSync({ maxRows: autotickMaxMessages });
+	    }
+	    if (typeof api.tickToolHoldbacks === "function") {
+	      await api.tickToolHoldbacks({ maxRows: autotickMaxMessages, requireLock: true });
+	    }
+	    autotickLastSuccessAt = new Date().toISOString();
+	    try {
+	      store.__autotickLastSuccessAt = autotickLastSuccessAt;
+	    } catch {}
   } catch (err) {
     logger.error("autotick failed", { err });
   } finally {

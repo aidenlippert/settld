@@ -38,6 +38,15 @@
     "callId": { "type": "string", "minLength": 1 },
     "inputHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "acceptanceCriteria": { "type": ["object", "null"], "additionalProperties": true },
+    "settlementTerms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["holdbackBps", "challengeWindowMs"],
+      "properties": {
+        "holdbackBps": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "challengeWindowMs": { "type": "integer", "minimum": 1 }
+      }
+    },
     "createdAt": { "type": "string", "minLength": 1 },
     "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "signature": {

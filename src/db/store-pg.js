@@ -2016,16 +2016,33 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
 	    } catch (err) {
 	      // Under concurrency, two workers may attempt to persist the same artifact at the same time. Treat this as
 	      // idempotent when the existing row's hash matches, and retryable otherwise.
-	      if (err?.code === "23505") {
-	        // Settlement receipts must be uniqueness-enforced for correctness: if a receipt already exists for an
-	        // agreement-hash-bound id, fail the transaction so wallet postings can't double-apply under races.
-	        if (artifactType === "SettlementReceipt.v1" && String(artifactId).startsWith("rcp_agmt_")) {
-	          const conflict = new Error("settlement receipt already exists");
-	          conflict.code = "SETTLEMENT_RECEIPT_ALREADY_EXISTS";
-	          conflict.artifactId = String(artifactId);
-	          conflict.artifactHash = String(artifactHash);
-	          throw conflict;
-	        }
+		      if (err?.code === "23505") {
+		        // Funding holds must be uniqueness-enforced for correctness: if a hold already exists for an
+		        // agreement-hash-bound id, fail the transaction so escrow locks can't double-apply under races.
+		        if (artifactType === "FundingHold.v1" && String(artifactId).startsWith("hold_agmt_")) {
+		          const conflict = new Error("funding hold already exists");
+		          conflict.code = "FUNDING_HOLD_ALREADY_EXISTS";
+		          conflict.artifactId = String(artifactId);
+		          conflict.artifactHash = String(artifactHash);
+		          throw conflict;
+		        }
+		        // Settlement receipts must be uniqueness-enforced for correctness: if a receipt already exists for an
+		        // agreement-hash-bound id, fail the transaction so wallet postings can't double-apply under races.
+		        if ((artifactType === "SettlementReceipt.v1" || artifactType === "SettlementReceipt.v2") && String(artifactId).startsWith("rcp_agmt_")) {
+		          const conflict = new Error("settlement receipt already exists");
+		          conflict.code = "SETTLEMENT_RECEIPT_ALREADY_EXISTS";
+		          conflict.artifactId = String(artifactId);
+		          conflict.artifactHash = String(artifactHash);
+		          throw conflict;
+		        }
+		        // Settlement adjustments mutate escrow/wallet state; fail-closed on agreement-hash-bound ids so retries/races can't double-apply.
+		        if (artifactType === "SettlementAdjustment.v1" && String(artifactId).startsWith("sadj_agmt_")) {
+		          const conflict = new Error("settlement adjustment already exists");
+		          conflict.code = "SETTLEMENT_ADJUSTMENT_ALREADY_EXISTS";
+		          conflict.artifactId = String(artifactId);
+		          conflict.artifactHash = String(artifactHash);
+		          throw conflict;
+		        }
 	        if (sourceEventId) {
 	          const bySource = await client.query(
 	            "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",

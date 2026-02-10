@@ -1,21 +1,25 @@
 {
   "schemaVersion": "ProtocolV1Freeze.v1",
   "files": {
-    "test/fixtures/protocol-vectors/v1.json": "ea578a90f8f4f2dd1ded28c42d35738b0c9b82f8c7f7297b5ada2f841039fa73",
+    "test/fixtures/protocol-vectors/v1.json": "d51ce3fd2bbb8228f2f8f88b07e9b1509da8e3e44e0c9835beb8bcedacb7e38e",
     "docs/spec/schemas/BundleHeadAttestation.v1.schema.json": "101345071099e8bc0daebe4d39f09e68c1c439f20d5f9d5ef817b1e8ef32555d",
     "docs/spec/schemas/FinancePackBundleManifest.v1.schema.json": "05ec300543ae87b231462906b9df8253b1cbdec9170df4e962451b5d0580aeea",
     "docs/spec/schemas/GovernancePolicy.v1.schema.json": "457769d80327ec6ea77cce1335d182f2f3e27619f4665eab12f13aa584aebd8f",
     "docs/spec/schemas/ProofBundleManifest.v1.schema.json": "3714da0fdebd30a0ccad532af5629b65bcaec80e13fc6dd565c38dc8673ba044",
     "docs/spec/schemas/PublicKeys.v1.schema.json": "9407919238468fcc2fdce9078b421b6353778a31c4d76d677bc3b8eb9b32b940",
     "docs/spec/schemas/RevocationList.v1.schema.json": "d73756a538f210b3883c2e7427432145ae9e21e884780ee49c5ed485b80dd667",
+    "docs/spec/schemas/FundingHold.v1.schema.json": "033716ced216a48daf2950a5575d743b6e8732f83d81930983581a29629b7e85",
     "docs/spec/schemas/SettlementDecisionRecord.v1.schema.json": "d668aab4174b24a2d5a36a169233937b07699966ab29abab595c3daae78ba5c0",
     "docs/spec/schemas/SettlementReceipt.v1.schema.json": "de5e991821d7975afc20df08df6710790c2b3f37a95a95fa8a8366717ec316de",
+    "docs/spec/schemas/SettlementReceipt.v2.schema.json": "3e5a6d326c7ebedfcef52017d83a70d3491753a59ffe27411b447fa2d019af9f",
+    "docs/spec/schemas/SettlementAdjustment.v1.schema.json": "9044f6f0ae61e80db57d9d1f09d4baa28eb40f5fd5bc261e20ab0cc885b19e9c",
     "docs/spec/schemas/TimestampProof.v1.schema.json": "8eeefd57e961d85b0e8157e1c43bea6f71c6005582beed035fa12bd88cbbc75a",
-    "docs/spec/schemas/ToolCallAgreement.v1.schema.json": "433157a9dfdaf237b2ddc9387c190748322a73003c9c7616a749417f5155f15f",
+    "docs/spec/schemas/ToolCallAgreement.v1.schema.json": "2c5ff27bbc3c5589df8d849bb86fe56e57270e65e6cb57d70af3859423cac29e",
     "docs/spec/schemas/ToolCallEvidence.v1.schema.json": "220e8787eb8a3c504ce2c5d86081b4bf137d11c38975d21e656b9a9cea727326",
     "docs/spec/schemas/VerificationReport.v1.schema.json": "b6f83cadf1c1c2001da201143e27f9a2abef0d410360cb91c7c02dd23b177aa6",
     "docs/spec/schemas/VerifyAboutOutput.v1.schema.json": "198bdc2a795cf1416068649ff506f06f8f0c5292359dc100d95ad83623509e79",
     "docs/spec/schemas/VerifyCliOutput.v1.schema.json": "81674c1874c5458828091dcc1c9a6ce0b77b65789a63b397640e39b69e01911b",
-    "docs/spec/schemas/ProduceCliOutput.v1.schema.json": "667352d95de61c6f5444609edbb087c9522c1d2e3d0896a89c2a6d44297c3292"
+    "docs/spec/schemas/ProduceCliOutput.v1.schema.json": "667352d95de61c6f5444609edbb087c9522c1d2e3d0896a89c2a6d44297c3292",
+    "docs/spec/schemas/ToolCallDisputeOpen.v1.schema.json": "e2e55a8daf90ea079747e681e302232a37dbfa745a4354dda2d17afec24a4716"
   }
 }

@@ -17,10 +17,12 @@ import { buildInteractionDirectionMatrixV1 } from "../../src/core/interaction-di
 import { buildToolManifestV1 } from "../../src/core/tool-manifest.js";
 import { buildAuthorityGrantV1 } from "../../src/core/authority-grants.js";
 import {
+  buildFundingHoldV1,
+  buildToolCallDisputeOpenV1,
   buildToolCallAgreementV1,
   buildToolCallEvidenceV1,
   buildSettlementDecisionRecordV1,
-  buildSettlementReceiptV1
+  buildSettlementReceiptV2
 } from "../../src/core/settlement-kernel.js";
 
 function bytes(text) {
@@ -505,6 +507,20 @@ async function main() {
   });
   const toolCallAgreementCanonical = canonicalJsonStringify(toolCallAgreement);
 
+  const fundingHold = buildFundingHoldV1({
+    tenantId,
+    artifactId: `hold_agmt_${toolCallAgreement.agreementHash}`,
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    payerAgentId: toolCallAgreement.payerAgentId,
+    amountCents: toolCallAgreement.amountCents,
+    currency: toolCallAgreement.currency,
+    lockedAt: generatedAt,
+    expiresAt: "2026-02-01T00:10:00.000Z",
+    signer
+  });
+  const fundingHoldCanonical = canonicalJsonStringify(fundingHold);
+
   const toolCallEvidence = buildToolCallEvidenceV1({
     tenantId,
     artifactId: "tce_det_0001",
@@ -540,7 +556,7 @@ async function main() {
   });
   const settlementDecisionRecordCanonical = canonicalJsonStringify(settlementDecisionRecord);
 
-  const settlementReceipt = buildSettlementReceiptV1({
+  const settlementReceipt = buildSettlementReceiptV2({
     tenantId,
     artifactId: "sr_det_0001",
     agreementId: toolCallAgreement.artifactId,
@@ -551,11 +567,31 @@ async function main() {
     payeeAgentId: toolCallAgreement.payeeAgentId,
     amountCents: toolCallAgreement.amountCents,
     currency: toolCallAgreement.currency,
+    agreementAmountCents: toolCallAgreement.amountCents,
+    outcome: "paid",
+    retention: null,
     settledAt: generatedAt,
     ledger: { kind: "agent_wallet", op: "escrow_release" },
     signer
   });
   const settlementReceiptCanonical = canonicalJsonStringify(settlementReceipt);
+
+  const toolCallDisputeOpen = buildToolCallDisputeOpenV1({
+    tenantId,
+    artifactId: "tcd_det_0001",
+    toolId: toolManifest.toolId,
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    receiptId: settlementReceipt.artifactId,
+    receiptHash: settlementReceipt.receiptHash,
+    openedByAgentId: toolCallAgreement.payerAgentId,
+    reasonCode: "quality",
+    reason: "output failed acceptance",
+    evidenceRefs: [`artifact:${toolCallEvidence.artifactId}`],
+    openedAt: generatedAt,
+    signer
+  });
+  const toolCallDisputeOpenCanonical = canonicalJsonStringify(toolCallDisputeOpen);
 
   const out = {
     schemaVersion: "ProtocolVectors.v1",
@@ -667,6 +703,14 @@ async function main() {
       canonicalJson: toolCallAgreementCanonical,
       sha256: sha256Hex(toolCallAgreementCanonical)
     },
+    fundingHold: {
+      schemaVersion: fundingHold.schemaVersion,
+      artifactId: fundingHold.artifactId,
+      holdHash: fundingHold.holdHash,
+      signerKeyId: fundingHold.signature.signerKeyId,
+      canonicalJson: fundingHoldCanonical,
+      sha256: sha256Hex(fundingHoldCanonical)
+    },
     toolCallEvidence: {
       schemaVersion: toolCallEvidence.schemaVersion,
       artifactId: toolCallEvidence.artifactId,
@@ -690,6 +734,14 @@ async function main() {
       signerKeyId: settlementReceipt.signature.signerKeyId,
       canonicalJson: settlementReceiptCanonical,
       sha256: sha256Hex(settlementReceiptCanonical)
+    },
+    toolCallDisputeOpen: {
+      schemaVersion: toolCallDisputeOpen.schemaVersion,
+      artifactId: toolCallDisputeOpen.artifactId,
+      disputeHash: toolCallDisputeOpen.disputeHash,
+      signerKeyId: toolCallDisputeOpen.signature.signerKeyId,
+      canonicalJson: toolCallDisputeOpenCanonical,
+      sha256: sha256Hex(toolCallDisputeOpenCanonical)
     }
   };
 
