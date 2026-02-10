@@ -2566,6 +2566,11 @@
                 "nullable": true,
                 "minimum": 1
               },
+              "disputeWindowHours": {
+                "type": "integer",
+                "nullable": true,
+                "minimum": 1
+              },
               "manualReason": {
                 "type": "string",
                 "nullable": true
@@ -2760,6 +2765,11 @@
                     "maximum": 100
                   },
                   "maxAutoReleaseAmountCents": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1
+                  },
+                  "disputeWindowHours": {
                     "type": "integer",
                     "nullable": true,
                     "minimum": 1
@@ -4699,6 +4709,11 @@
                     "nullable": true,
                     "minimum": 1
                   },
+                  "disputeWindowHours": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1
+                  },
                   "manualReason": {
                     "type": "string",
                     "nullable": true
@@ -5069,6 +5084,11 @@
                           "maximum": 100
                         },
                         "maxAutoReleaseAmountCents": {
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": 1
+                        },
+                        "disputeWindowHours": {
                           "type": "integer",
                           "nullable": true,
                           "minimum": 1
@@ -6103,6 +6123,11 @@
                     "nullable": true,
                     "minimum": 1
                   },
+                  "disputeWindowHours": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1
+                  },
                   "manualReason": {
                     "type": "string",
                     "nullable": true
@@ -6491,6 +6516,11 @@
                     "nullable": true,
                     "minimum": 1
                   },
+                  "disputeWindowHours": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1
+                  },
                   "manualReason": {
                     "type": "string",
                     "nullable": true
@@ -6859,6 +6889,11 @@
                               "maximum": 100
                             },
                             "maxAutoReleaseAmountCents": {
+                              "type": "integer",
+                              "nullable": true,
+                              "minimum": 1
+                            },
+                            "disputeWindowHours": {
                               "type": "integer",
                               "nullable": true,
                               "minimum": 1
@@ -9694,6 +9729,11 @@
                             "maximum": 100
                           },
                           "maxAutoReleaseAmountCents": {
+                            "type": "integer",
+                            "nullable": true,
+                            "minimum": 1
+                          },
+                          "disputeWindowHours": {
                             "type": "integer",
                             "nullable": true,
                             "minimum": 1
@@ -13158,6 +13198,11 @@
                                     "nullable": true,
                                     "minimum": 1
                                   },
+                                  "disputeWindowHours": {
+                                    "type": "integer",
+                                    "nullable": true,
+                                    "minimum": 1
+                                  },
                                   "manualReason": {
                                     "type": "string",
                                     "nullable": true
@@ -13551,6 +13596,11 @@
                                   "nullable": true,
                                   "minimum": 1
                                 },
+                                "disputeWindowHours": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
                                 "manualReason": {
                                   "type": "string",
                                   "nullable": true
@@ -13737,6 +13787,11 @@
                                   "maximum": 100
                                 },
                                 "maxAutoReleaseAmountCents": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
+                                "disputeWindowHours": {
                                   "type": "integer",
                                   "nullable": true,
                                   "minimum": 1
@@ -14054,6 +14109,11 @@
                                   "nullable": true,
                                   "minimum": 1
                                 },
+                                "disputeWindowHours": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
                                 "manualReason": {
                                   "type": "string",
                                   "nullable": true
@@ -14108,6 +14168,195 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/tools/{toolId}/settle": {
+      "post": {
+        "summary": "Settle a paid tool call (kernel: contract -> proof -> decision -> settlement)",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "toolId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "toolManifest",
+                  "authorityGrant",
+                  "toolCallAgreement",
+                  "toolCallEvidence"
+                ],
+                "properties": {
+                  "toolManifest": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "authorityGrant": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "toolCallAgreement": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "toolCallEvidence": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -14417,6 +14666,11 @@
                                     "maximum": 100
                                   },
                                   "maxAutoReleaseAmountCents": {
+                                    "type": "integer",
+                                    "nullable": true,
+                                    "minimum": 1
+                                  },
+                                  "disputeWindowHours": {
                                     "type": "integer",
                                     "nullable": true,
                                     "minimum": 1
@@ -14789,6 +15043,11 @@
                                               "maximum": 100
                                             },
                                             "maxAutoReleaseAmountCents": {
+                                              "type": "integer",
+                                              "nullable": true,
+                                              "minimum": 1
+                                            },
+                                            "disputeWindowHours": {
                                               "type": "integer",
                                               "nullable": true,
                                               "minimum": 1
@@ -15594,6 +15853,11 @@
                                   "nullable": true,
                                   "minimum": 1
                                 },
+                                "disputeWindowHours": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
                                 "manualReason": {
                                   "type": "string",
                                   "nullable": true
@@ -15962,6 +16226,11 @@
                                             "maximum": 100
                                           },
                                           "maxAutoReleaseAmountCents": {
+                                            "type": "integer",
+                                            "nullable": true,
+                                            "minimum": 1
+                                          },
+                                          "disputeWindowHours": {
                                             "type": "integer",
                                             "nullable": true,
                                             "minimum": 1
@@ -16765,6 +17034,11 @@
                                   "nullable": true,
                                   "minimum": 1
                                 },
+                                "disputeWindowHours": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
                                 "manualReason": {
                                   "type": "string",
                                   "nullable": true
@@ -17133,6 +17407,11 @@
                                             "maximum": 100
                                           },
                                           "maxAutoReleaseAmountCents": {
+                                            "type": "integer",
+                                            "nullable": true,
+                                            "minimum": 1
+                                          },
+                                          "disputeWindowHours": {
                                             "type": "integer",
                                             "nullable": true,
                                             "minimum": 1
@@ -17564,6 +17843,11 @@
                                         "nullable": true,
                                         "minimum": 1
                                       },
+                                      "disputeWindowHours": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "minimum": 1
+                                      },
                                       "manualReason": {
                                         "type": "string",
                                         "nullable": true
@@ -17796,6 +18080,11 @@
                                   "maximum": 100
                                 },
                                 "maxAutoReleaseAmountCents": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
+                                "disputeWindowHours": {
                                   "type": "integer",
                                   "nullable": true,
                                   "minimum": 1
@@ -18975,6 +19264,11 @@
                                       "nullable": true,
                                       "minimum": 1
                                     },
+                                    "disputeWindowHours": {
+                                      "type": "integer",
+                                      "nullable": true,
+                                      "minimum": 1
+                                    },
                                     "manualReason": {
                                       "type": "string",
                                       "nullable": true
@@ -19343,6 +19637,11 @@
                                                 "maximum": 100
                                               },
                                               "maxAutoReleaseAmountCents": {
+                                                "type": "integer",
+                                                "nullable": true,
+                                                "minimum": 1
+                                              },
+                                              "disputeWindowHours": {
                                                 "type": "integer",
                                                 "nullable": true,
                                                 "minimum": 1
@@ -20580,6 +20879,11 @@
                                   "maximum": 100
                                 },
                                 "maxAutoReleaseAmountCents": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
+                                "disputeWindowHours": {
                                   "type": "integer",
                                   "nullable": true,
                                   "minimum": 1
@@ -32678,6 +32982,11 @@
                                   "nullable": true,
                                   "minimum": 1
                                 },
+                                "disputeWindowHours": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
                                 "manualReason": {
                                   "type": "string",
                                   "nullable": true
@@ -34081,6 +34390,11 @@
                                   "maximum": 100
                                 },
                                 "maxAutoReleaseAmountCents": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 1
+                                },
+                                "disputeWindowHours": {
                                   "type": "integer",
                                   "nullable": true,
                                   "minimum": 1
@@ -35818,6 +36132,11 @@
                                       "maximum": 100
                                     },
                                     "maxAutoReleaseAmountCents": {
+                                      "type": "integer",
+                                      "nullable": true,
+                                      "minimum": 1
+                                    },
+                                    "disputeWindowHours": {
                                       "type": "integer",
                                       "nullable": true,
                                       "minimum": 1

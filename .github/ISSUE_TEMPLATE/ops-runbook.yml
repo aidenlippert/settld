@@ -1,0 +1,39 @@
+name: Ops / Runbook
+description: Operational hardening or runbook changes (gates, drills, alerts, cutovers)
+title: "[ops] <short summary>"
+labels: ["type:ops"]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "prio:p0 (release/go-live blocking)"
+        - "prio:p1"
+        - "prio:p2"
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: changes
+    attributes:
+      label: Changes (runbook/gate/alert)
+      description: What files/scripts/workflows will change?
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: What commands or CI jobs prove it works?
+      render: bash
+    validations:
+      required: true
+

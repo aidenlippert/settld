@@ -15,6 +15,10 @@ permissions:
   packages: write
   id-token: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release_gate:
     runs-on: ubuntu-latest
@@ -24,9 +28,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
         run: npm ci
@@ -45,6 +51,39 @@ jobs:
           set -euo pipefail
           npm run -s sdk:smoke
           npm run -s sdk:smoke:py
+
+      - name: Run billing smoke gate (staging)
+        env:
+          SETTLD_BASE_URL: ${{ secrets.SETTLD_STAGING_BASE_URL }}
+          PROXY_OPS_TOKEN: ${{ secrets.SETTLD_STAGING_OPS_TOKEN }}
+          PROXY_BILLING_STRIPE_SECRET_KEY: ${{ secrets.SETTLD_STAGING_STRIPE_SECRET_KEY }}
+          SETTLD_TENANT_ID: tenant_release_${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if npm run -s dev:billing:smoke:prod | tee billing-smoke-prod.log; then
+            jq -n \
+              --arg checkedAt "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg tenant "${SETTLD_TENANT_ID:-}" \
+              '{ok:true, checkedAt:$checkedAt, tenant:$tenant}' > billing-smoke-status.json
+          else
+            status=$?
+            jq -n \
+              --arg checkedAt "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg tenant "${SETTLD_TENANT_ID:-}" \
+              --argjson exitCode "$status" \
+              '{ok:false, checkedAt:$checkedAt, tenant:$tenant, exitCode:$exitCode}' > billing-smoke-status.json
+            exit "$status"
+          fi
+
+      - name: Upload billing smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-smoke-${{ github.run_id }}
+          path: |
+            billing-smoke-prod.log
+            billing-smoke-status.json
+          if-no-files-found: warn
 
   docker_image:
     needs: [release_gate]

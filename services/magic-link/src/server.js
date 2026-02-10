@@ -55,7 +55,21 @@ import { MAGIC_LINK_RENDER_MODEL_ALLOWLIST_V1, buildPublicInvoiceClaimFromClaimJ
 import { listTenantRunRecordRowsBestEffort, readRunRecordBestEffort, runStoreModeInfo, updateRunRecordDecisionBestEffort, writeRunRecordV1 } from "./run-records.js";
 import { buildS3ObjectUrl, s3PutObject } from "./s3.js";
 import { loadLatestBuyerNotificationStatusBestEffort, sendBuyerVerificationNotifications } from "./buyer-notifications.js";
-import { createTenantProfile, generateTenantIdFromName, loadTenantProfileBestEffort, markTenantOnboardingProgress, onboardingMetricsFromProfile } from "./tenant-onboarding.js";
+import {
+  createTenantProfile,
+  generateTenantIdFromName,
+  loadTenantProfileBestEffort,
+  markTenantOnboardingProgress,
+  onboardingMetricsFromProfile,
+  recordTenantOnboardingEvent,
+  listTenantProfilesBestEffort,
+  onboardingCohortMetricsFromProfiles
+} from "./tenant-onboarding.js";
+import {
+  buildOnboardingEmailSequenceStatus,
+  dispatchOnboardingEmailSequenceBestEffort,
+  loadOnboardingEmailSequenceStateBestEffort
+} from "./onboarding-email-sequence.js";
 import { createVerifyQueue } from "./verify-queue.js";
 import {
   getTenantIdByStripeCustomerId,
@@ -243,6 +257,15 @@ function formatMoneyFromCentsString({ currency, cents }) {
     return `$${dollars}.${centsPart}`;
   }
   return `${cur} ${raw} cents`;
+}
+
+function formatUsdFromCents(cents) {
+  const n = Number.isInteger(cents) ? cents : 0;
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  const major = Math.floor(abs / 100);
+  const minor = String(abs % 100).padStart(2, "0");
+  return `${sign}$${major}.${minor}`;
 }
 
 function statusFromCliOutput(cliOut) {
@@ -542,6 +565,7 @@ const INTEGRATION_PROVIDER_NAME_SET = new Set(INTEGRATION_PROVIDER_NAMES);
 const WEBHOOK_RETRY_PROVIDER_NAMES = ["slack", "zapier", "defaultRelay", "webhook"];
 const WEBHOOK_RETRY_PROVIDER_NAME_SET = new Set(WEBHOOK_RETRY_PROVIDER_NAMES);
 const WEBHOOK_RETRY_ALERT_EVENT = "ops.webhook_retry.dead_letter_threshold";
+const BILLING_USAGE_ALERT_THRESHOLD_PCTS = [80, 100];
 
 function normalizeWebhookEvents(rawEvents) {
   const rows = Array.isArray(rawEvents) ? rawEvents : [];
@@ -762,6 +786,8 @@ const buyerOtpTtlSeconds = Number.parseInt(String(process.env.MAGIC_LINK_BUYER_O
 const buyerOtpMaxAttempts = Number.parseInt(String(process.env.MAGIC_LINK_BUYER_OTP_MAX_ATTEMPTS ?? "10"), 10);
 const buyerOtpDeliveryMode = String(process.env.MAGIC_LINK_BUYER_OTP_DELIVERY_MODE ?? "record").trim().toLowerCase();
 const buyerSessionTtlSeconds = Number.parseInt(String(process.env.MAGIC_LINK_BUYER_SESSION_TTL_SECONDS ?? String(24 * 3600)), 10);
+const onboardingEmailSequenceEnabled = String(process.env.MAGIC_LINK_ONBOARDING_EMAIL_SEQUENCE_ENABLED ?? "1").trim() !== "0";
+const onboardingEmailSequenceDeliveryModeRaw = String(process.env.MAGIC_LINK_ONBOARDING_EMAIL_DELIVERY_MODE ?? "").trim().toLowerCase();
 const paymentTriggerRetryIntervalMs = Number.parseInt(String(process.env.MAGIC_LINK_PAYMENT_TRIGGER_RETRY_INTERVAL_MS ?? "2000"), 10);
 const paymentTriggerMaxAttempts = Number.parseInt(String(process.env.MAGIC_LINK_PAYMENT_TRIGGER_MAX_ATTEMPTS ?? "5"), 10);
 const paymentTriggerRetryBackoffMs = Number.parseInt(String(process.env.MAGIC_LINK_PAYMENT_TRIGGER_RETRY_BACKOFF_MS ?? "5000"), 10);
@@ -776,6 +802,8 @@ const smtpUser = process.env.MAGIC_LINK_SMTP_USER ? String(process.env.MAGIC_LIN
 const smtpPass = process.env.MAGIC_LINK_SMTP_PASS ? String(process.env.MAGIC_LINK_SMTP_PASS) : "";
 const smtpFrom = process.env.MAGIC_LINK_SMTP_FROM ? String(process.env.MAGIC_LINK_SMTP_FROM).trim() : "";
 const smtpConfig = smtpHost && smtpFrom ? { host: smtpHost, port: smtpPort, secure: smtpSecure, starttls: smtpStarttls, user: smtpUser, pass: smtpPass, from: smtpFrom } : null;
+const onboardingEmailSequenceDeliveryMode =
+  onboardingEmailSequenceDeliveryModeRaw || (smtpConfig ? "smtp" : "record");
 
 if (!Number.isInteger(port) || port < 0) throw new Error("MAGIC_LINK_PORT must be an integer >= 0");
 if (!host || typeof host !== "string") throw new Error("MAGIC_LINK_HOST must be a string");
@@ -865,6 +893,13 @@ if (!Number.isInteger(buyerOtpTtlSeconds) || buyerOtpTtlSeconds <= 0) throw new 
 if (!Number.isInteger(buyerOtpMaxAttempts) || buyerOtpMaxAttempts < 1) throw new Error("MAGIC_LINK_BUYER_OTP_MAX_ATTEMPTS must be an integer >= 1");
 if (buyerOtpDeliveryMode !== "record" && buyerOtpDeliveryMode !== "log" && buyerOtpDeliveryMode !== "smtp") throw new Error("MAGIC_LINK_BUYER_OTP_DELIVERY_MODE must be record|log|smtp");
 if (!Number.isInteger(buyerSessionTtlSeconds) || buyerSessionTtlSeconds <= 0) throw new Error("MAGIC_LINK_BUYER_SESSION_TTL_SECONDS must be a positive integer");
+if (
+  onboardingEmailSequenceDeliveryMode !== "record" &&
+  onboardingEmailSequenceDeliveryMode !== "log" &&
+  onboardingEmailSequenceDeliveryMode !== "smtp"
+) {
+  throw new Error("MAGIC_LINK_ONBOARDING_EMAIL_DELIVERY_MODE must be record|log|smtp");
+}
 if (!Number.isInteger(paymentTriggerRetryIntervalMs) || paymentTriggerRetryIntervalMs < 100) throw new Error("MAGIC_LINK_PAYMENT_TRIGGER_RETRY_INTERVAL_MS must be an integer >= 100");
 if (!Number.isInteger(paymentTriggerMaxAttempts) || paymentTriggerMaxAttempts < 1) throw new Error("MAGIC_LINK_PAYMENT_TRIGGER_MAX_ATTEMPTS must be an integer >= 1");
 if (!Number.isInteger(paymentTriggerRetryBackoffMs) || paymentTriggerRetryBackoffMs < 0) throw new Error("MAGIC_LINK_PAYMENT_TRIGGER_RETRY_BACKOFF_MS must be an integer >= 0");
@@ -909,6 +944,7 @@ metrics.declareCounter("webhook_retry_retries_total", null);
 metrics.declareCounter("webhook_retry_dead_letter_total", null);
 metrics.declareCounter("webhook_retry_deliveries_total", null);
 metrics.declareCounter("webhook_retry_dead_letter_alerts_total", null);
+metrics.declareCounter("billing_usage_threshold_alerts_total", null);
 metrics.declareCounter("login_otp_requests_total", null);
 metrics.declareCounter("decision_otp_requests_total", null);
 metrics.declareCounter("buyer_notification_deliveries_total", null);
@@ -2996,7 +3032,13 @@ async function handleUploadToTenant(req, res, { url, tenantId, vendorMeta, authM
         errorsCount: Array.isArray(fail.errors) ? fail.errors.length : 0,
         warningsCount: Array.isArray(fail.warnings) ? fail.warnings.length : 0
       };
-      await appendUsageRecord({ dataDir, tenantId, monthKey, record: usageRecord });
+      const usageSummary = await appendUsageRecord({ dataDir, tenantId, monthKey, record: usageRecord });
+      await emitBillingUsageThresholdAlertsBestEffort({
+        tenantId,
+        monthKey,
+        usageSummary,
+        entitlements: resolveTenantEntitlementsFromSettings(tenantSettings)
+      });
 
       const event = Boolean(fail.verificationOk) ? "verification.completed" : "verification.failed";
       const payload = buildWebhookPayload({ event, tenantId, token, zipSha256, zipBytes, modeResolved, modeRequested, cliOut: fail, publicBaseUrl });
@@ -3027,12 +3069,21 @@ async function handleUploadToTenant(req, res, { url, tenantId, vendorMeta, authM
         deliveryResults: webhookResults
       });
       const buyerNotifications = await notifyBuyersForRunBestEffort({ tenantId, token, runId: runIdRequested, tenantSettings, publicSummary, cliOut: fail });
-      await markTenantOnboardingProgress({
+      const onboardingProgress = await markTenantOnboardingProgress({
         dataDir,
         tenantId,
         isSample: authMethod === "onboarding-sample",
         verificationOk: Boolean(fail.verificationOk),
         at: finishedAt
+      });
+      await dispatchOnboardingEmailSequenceBestEffort({
+        dataDir,
+        tenantId,
+        profile: onboardingProgress?.profile ?? null,
+        enabled: onboardingEmailSequenceEnabled,
+        deliveryMode: onboardingEmailSequenceDeliveryMode,
+        smtpConfig,
+        publicBaseUrl
       });
       const autoDecision = await runAutoDecisionBestEffort({
         token,
@@ -3297,7 +3348,13 @@ async function handleUploadToTenant(req, res, { url, tenantId, vendorMeta, authM
       errorsCount: Array.isArray(cliOut.errors) ? cliOut.errors.length : 0,
       warningsCount: Array.isArray(cliOut.warnings) ? cliOut.warnings.length : 0
     };
-    await appendUsageRecord({ dataDir, tenantId, monthKey, record: usageRecord });
+    const usageSummary = await appendUsageRecord({ dataDir, tenantId, monthKey, record: usageRecord });
+    await emitBillingUsageThresholdAlertsBestEffort({
+      tenantId,
+      monthKey,
+      usageSummary,
+      entitlements: resolveTenantEntitlementsFromSettings(tenantSettings)
+    });
 
     const event = Boolean(cliOut.verificationOk) ? "verification.completed" : "verification.failed";
     const payload = buildWebhookPayload({ event, tenantId, token, zipSha256, zipBytes, modeResolved, modeRequested, cliOut, publicBaseUrl });
@@ -3328,12 +3385,21 @@ async function handleUploadToTenant(req, res, { url, tenantId, vendorMeta, authM
       deliveryResults: webhookResults
     });
     const buyerNotifications = await notifyBuyersForRunBestEffort({ tenantId, token, runId: runIdRequested, tenantSettings, publicSummary, cliOut });
-    await markTenantOnboardingProgress({
+    const onboardingProgress = await markTenantOnboardingProgress({
       dataDir,
       tenantId,
       isSample: authMethod === "onboarding-sample",
       verificationOk: Boolean(cliOut.verificationOk),
       at: finishedAt
+    });
+    await dispatchOnboardingEmailSequenceBestEffort({
+      dataDir,
+      tenantId,
+      profile: onboardingProgress?.profile ?? null,
+      enabled: onboardingEmailSequenceEnabled,
+      deliveryMode: onboardingEmailSequenceDeliveryMode,
+      smtpConfig,
+      publicBaseUrl
     });
     const autoDecision = await runAutoDecisionBestEffort({
       token,
@@ -4082,6 +4148,28 @@ async function handleTenantCreate(req, res) {
   const relay = ensureDefaultEventRelayWebhook({ settings: settingsBase, tenantId });
   await saveTenantSettings({ dataDir, tenantId, settings: relay.settings, settingsKey });
 
+  let onboardingEmailSequence = null;
+  try {
+    const sequenceDispatch = await dispatchOnboardingEmailSequenceBestEffort({
+      dataDir,
+      tenantId,
+      profile: created.profile,
+      enabled: onboardingEmailSequenceEnabled,
+      deliveryMode: onboardingEmailSequenceDeliveryMode,
+      smtpConfig,
+      publicBaseUrl
+    });
+    onboardingEmailSequence = buildOnboardingEmailSequenceStatus({
+      tenantId,
+      profile: created.profile,
+      state: sequenceDispatch?.state ?? null,
+      enabled: onboardingEmailSequenceEnabled,
+      deliveryMode: onboardingEmailSequenceDeliveryMode
+    });
+  } catch {
+    onboardingEmailSequence = null;
+  }
+
   try {
     await appendAuditRecord({
       dataDir,
@@ -4106,13 +4194,20 @@ async function handleTenantCreate(req, res) {
     integrationsUrl: `/v1/tenants/${tenantId}/integrations`,
     settlementPoliciesUrl: `/v1/tenants/${tenantId}/settlement-policies`,
     metricsUrl: `/v1/tenants/${tenantId}/onboarding-metrics`,
-    profile: onboardingMetricsFromProfile(created.profile)
+    profile: onboardingMetricsFromProfile(created.profile),
+    onboardingEmailSequence
   });
 }
 
-async function handleTenantOnboardingMetrics(req, res, tenantId) {
+async function handleTenantOnboardingMetrics(req, res, tenantId, url) {
   const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
   if (!auth.ok) return;
+
+  const cohortLimitRaw = url?.searchParams?.get("cohortLimit");
+  const cohortLimit = cohortLimitRaw === null ? 12 : Number.parseInt(String(cohortLimitRaw), 10);
+  if (!Number.isInteger(cohortLimit) || cohortLimit < 1 || cohortLimit > 60) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_COHORT_LIMIT", message: "cohortLimit must be 1..60" });
+  }
 
   const profile = await loadTenantProfileBestEffort({ dataDir, tenantId });
   const metricsBody =
@@ -4125,14 +4220,257 @@ async function handleTenantOnboardingMetrics(req, res, tenantId) {
       activatedAt: null,
       firstUploadAt: null,
       firstVerifiedAt: null,
-      timeToFirstVerifiedMs: null
+      firstSampleUploadAt: null,
+      firstSampleVerifiedAt: null,
+      firstBuyerLinkSharedAt: null,
+      firstBuyerLinkOpenedAt: null,
+      firstReferralLinkSharedAt: null,
+      firstReferralSignupAt: null,
+      timeToFirstVerifiedMs: null,
+      referral: {
+        linkSharedCount: 0,
+        signupCount: 0,
+        conversionRatePct: 0
+      },
+      funnel: {
+        reachedStages: 0,
+        totalStages: 0,
+        completionPct: 0,
+        nextStageKey: null,
+        droppedOffStageKey: null,
+        stages: []
+      },
+      events: {
+        count: 0,
+        latestEvent: null
+      }
     };
-  return sendJson(res, 200, { ok: true, ...metricsBody, generatedAt: nowIso() });
+  const allProfiles = await listTenantProfilesBestEffort({ dataDir, limit: 5000 });
+  const cohortRows = onboardingCohortMetricsFromProfiles(allProfiles, { limit: cohortLimit });
+  const cohortMonth = metricsBody?.createdAt && /^[0-9]{4}-[0-9]{2}/.test(String(metricsBody.createdAt))
+    ? String(metricsBody.createdAt).slice(0, 7)
+    : null;
+  const cohortCurrent = cohortMonth ? cohortRows.find((row) => row.cohortMonth === cohortMonth) ?? null : null;
+  const sequenceState = await loadOnboardingEmailSequenceStateBestEffort({ dataDir, tenantId });
+  const onboardingEmailSequence = buildOnboardingEmailSequenceStatus({
+    tenantId,
+    profile,
+    state: sequenceState,
+    enabled: onboardingEmailSequenceEnabled,
+    deliveryMode: onboardingEmailSequenceDeliveryMode
+  });
+  return sendJson(res, 200, {
+    ok: true,
+    ...metricsBody,
+    cohort: {
+      cohortMonth,
+      current: cohortCurrent,
+      rows: cohortRows,
+      totalProfiles: allProfiles.length
+    },
+    onboardingEmailSequence,
+    generatedAt: nowIso()
+  });
+}
+
+async function handleTenantOnboardingEvent(req, res, tenantId) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+
+  let json = null;
+  try {
+    json = await readJsonBody(req, { maxBytes: 20_000 });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: err?.code ?? "INVALID_REQUEST", message: err?.message ?? "invalid request" });
+  }
+  if (!json || typeof json !== "object" || Array.isArray(json)) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "body must be an object" });
+  }
+
+  const eventType = typeof json.eventType === "string" ? json.eventType.trim() : "";
+  if (!eventType) return sendJson(res, 400, { ok: false, code: "EVENT_TYPE_REQUIRED", message: "eventType is required" });
+  const at = json.at === undefined || json.at === null || String(json.at).trim() === "" ? null : String(json.at).trim();
+  if (at !== null && !Number.isFinite(Date.parse(at))) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_AT", message: "at must be an ISO date-time" });
+  }
+  const source = typeof json.source === "string" && json.source.trim() !== "" ? json.source.trim() : null;
+  const metadata = json.metadata === undefined ? null : json.metadata;
+  if (metadata !== null && (!metadata || typeof metadata !== "object" || Array.isArray(metadata))) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_METADATA", message: "metadata must be an object" });
+  }
+
+  const recorded = await recordTenantOnboardingEvent({
+    dataDir,
+    tenantId,
+    eventType,
+    at,
+    source,
+    metadata
+  });
+  if (!recorded.ok) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_EVENT", message: recorded.error ?? "invalid onboarding event" });
+  }
+
+  const metrics = onboardingMetricsFromProfile(recorded.profile);
+  let onboardingEmailSequence = null;
+  try {
+    const sequenceDispatch = await dispatchOnboardingEmailSequenceBestEffort({
+      dataDir,
+      tenantId,
+      profile: recorded.profile,
+      enabled: onboardingEmailSequenceEnabled,
+      deliveryMode: onboardingEmailSequenceDeliveryMode,
+      smtpConfig,
+      publicBaseUrl
+    });
+    onboardingEmailSequence = buildOnboardingEmailSequenceStatus({
+      tenantId,
+      profile: recorded.profile,
+      state: sequenceDispatch?.state ?? null,
+      enabled: onboardingEmailSequenceEnabled,
+      deliveryMode: onboardingEmailSequenceDeliveryMode
+    });
+  } catch {
+    onboardingEmailSequence = null;
+  }
+  return sendJson(res, 200, {
+    ok: true,
+    tenantId,
+    eventType,
+    at: metrics?.events?.latestEvent?.at ?? nowIso(),
+    metrics,
+    onboardingEmailSequence
+  });
 }
 
 const TENANT_SETTLEMENT_POLICY_SCHEMA_VERSION = "TenantSettlementPolicy.v1";
 const TENANT_SETTLEMENT_POLICY_REGISTRY_SCHEMA_VERSION = "TenantSettlementPolicyRegistry.v1";
 const MARKETPLACE_SETTLEMENT_POLICY_REF_SCHEMA_VERSION = "MarketplaceSettlementPolicyRef.v1";
+const TENANT_SETTLEMENT_POLICY_ROLLOUT_SCHEMA_VERSION = "TenantSettlementPolicyRollout.v1";
+const SETTLEMENT_POLICY_ROLLOUT_STAGE = Object.freeze({
+  DRAFT: "draft",
+  CANARY: "canary",
+  ACTIVE: "active"
+});
+const SETTLEMENT_POLICY_ROLLOUT_HISTORY_LIMIT = 200;
+const SETTLEMENT_POLICY_PRESET_SCHEMA_VERSION = "TenantSettlementPolicyPreset.v1";
+
+const TENANT_SETTLEMENT_POLICY_PRESET_PACKS = Object.freeze([
+  Object.freeze({
+    presetId: "balanced_guardrails_v1",
+    schemaVersion: SETTLEMENT_POLICY_PRESET_SCHEMA_VERSION,
+    presetVersion: 1,
+    name: "Balanced Guardrails",
+    description: "Production default with moderate holdbacks and a standard dispute window.",
+    policyId: "market.preset.balanced-v1",
+    verificationMethod: Object.freeze({ mode: "deterministic" }),
+    controls: Object.freeze({
+      maxAutoReleaseAmountCents: 150_000,
+      holdbackRatePct: Object.freeze({ green: 10, amber: 60, red: 100 }),
+      disputeWindowHours: 72
+    }),
+    policy: Object.freeze({
+      mode: "automatic",
+      rules: Object.freeze({
+        requireDeterministicVerification: true,
+        autoReleaseOnGreen: true,
+        autoReleaseOnAmber: true,
+        autoReleaseOnRed: false,
+        greenReleaseRatePct: 90,
+        amberReleaseRatePct: 40,
+        redReleaseRatePct: 0,
+        maxAutoReleaseAmountCents: 150_000,
+        disputeWindowHours: 72,
+        manualReason: "Escalate unresolved disagreements after dispute window."
+      })
+    })
+  }),
+  Object.freeze({
+    presetId: "high_autonomy_low_risk_v1",
+    schemaVersion: SETTLEMENT_POLICY_PRESET_SCHEMA_VERSION,
+    presetVersion: 1,
+    name: "High Autonomy (Low Risk)",
+    description: "Fast auto-settlement with larger spend caps and short dispute windows.",
+    policyId: "market.preset.high-autonomy-v1",
+    verificationMethod: Object.freeze({ mode: "deterministic" }),
+    controls: Object.freeze({
+      maxAutoReleaseAmountCents: 300_000,
+      holdbackRatePct: Object.freeze({ green: 0, amber: 40, red: 100 }),
+      disputeWindowHours: 24
+    }),
+    policy: Object.freeze({
+      mode: "automatic",
+      rules: Object.freeze({
+        requireDeterministicVerification: true,
+        autoReleaseOnGreen: true,
+        autoReleaseOnAmber: true,
+        autoReleaseOnRed: false,
+        greenReleaseRatePct: 100,
+        amberReleaseRatePct: 60,
+        redReleaseRatePct: 0,
+        maxAutoReleaseAmountCents: 300_000,
+        disputeWindowHours: 24,
+        manualReason: "Escalate only when automated checks fail."
+      })
+    })
+  }),
+  Object.freeze({
+    presetId: "manual_review_high_risk_v1",
+    schemaVersion: SETTLEMENT_POLICY_PRESET_SCHEMA_VERSION,
+    presetVersion: 1,
+    name: "Manual Review (High Risk)",
+    description: "Conservative controls with strict holdbacks and long dispute windows.",
+    policyId: "market.preset.manual-review-v1",
+    verificationMethod: Object.freeze({ mode: "deterministic" }),
+    controls: Object.freeze({
+      maxAutoReleaseAmountCents: 50_000,
+      holdbackRatePct: Object.freeze({ green: 30, amber: 100, red: 100 }),
+      disputeWindowHours: 168
+    }),
+    policy: Object.freeze({
+      mode: "manual-review",
+      rules: Object.freeze({
+        requireDeterministicVerification: true,
+        autoReleaseOnGreen: false,
+        autoReleaseOnAmber: false,
+        autoReleaseOnRed: false,
+        greenReleaseRatePct: 70,
+        amberReleaseRatePct: 0,
+        redReleaseRatePct: 0,
+        maxAutoReleaseAmountCents: 50_000,
+        disputeWindowHours: 168,
+        manualReason: "High-risk workflow requires operator review."
+      })
+    })
+  })
+]);
+
+function parseSettlementPolicyPresetId(rawValue, { fieldPath = "presetId" } = {}) {
+  const value = String(rawValue ?? "").trim();
+  if (!value) throw new TypeError(`${fieldPath} is required`);
+  if (value.length > 128) throw new TypeError(`${fieldPath} must be <= 128 chars`);
+  if (!/^[A-Za-z0-9._:-]+$/.test(value)) throw new TypeError(`${fieldPath} must match [A-Za-z0-9._:-]+`);
+  return value;
+}
+
+function listTenantSettlementPolicyPresetPacks() {
+  return TENANT_SETTLEMENT_POLICY_PRESET_PACKS.map((row) => ({
+    presetId: row.presetId,
+    schemaVersion: row.schemaVersion,
+    presetVersion: row.presetVersion,
+    name: row.name,
+    description: row.description,
+    policyId: row.policyId,
+    verificationMethod: row.verificationMethod,
+    controls: row.controls,
+    policy: row.policy
+  }));
+}
+
+function getTenantSettlementPolicyPresetPackById(presetId) {
+  const id = String(presetId ?? "").trim();
+  return TENANT_SETTLEMENT_POLICY_PRESET_PACKS.find((row) => row.presetId === id) ?? null;
+}
 
 function parseSettlementPolicyRegistryId(rawValue, { fieldPath = "policyId" } = {}) {
   const value = String(rawValue ?? "").trim();
@@ -4170,6 +4508,34 @@ function parseSettlementRunStatus(rawValue, { fieldPath = "runStatus", allowNull
   return status;
 }
 
+function parseSettlementPolicyRolloutStage(rawValue, { fieldPath = "stage", allowNull = false } = {}) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") {
+    if (allowNull) return null;
+    throw new TypeError(`${fieldPath} is required`);
+  }
+  const stage = String(rawValue).trim().toLowerCase();
+  if (
+    stage !== SETTLEMENT_POLICY_ROLLOUT_STAGE.DRAFT &&
+    stage !== SETTLEMENT_POLICY_ROLLOUT_STAGE.CANARY &&
+    stage !== SETTLEMENT_POLICY_ROLLOUT_STAGE.ACTIVE
+  ) {
+    throw new TypeError(`${fieldPath} must be draft|canary|active`);
+  }
+  return stage;
+}
+
+function parseSettlementPolicyRolloutPercent(rawValue, { fieldPath = "rolloutPercent", allowNull = false } = {}) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") {
+    if (allowNull) return null;
+    throw new TypeError(`${fieldPath} is required`);
+  }
+  const parsed = Number(rawValue);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 100) {
+    throw new TypeError(`${fieldPath} must be an integer within 0..100`);
+  }
+  return parsed;
+}
+
 function tenantSettlementPolicyRegistryPath({ tenantId }) {
   return path.join(dataDir, "tenants", tenantId, "settlement_policies.json");
 }
@@ -4185,6 +4551,7 @@ function defaultTenantSettlementPolicyRegistry({ tenantId }) {
     schemaVersion: TENANT_SETTLEMENT_POLICY_REGISTRY_SCHEMA_VERSION,
     tenantId,
     defaultPolicyRef: null,
+    rollout: defaultTenantSettlementPolicyRollout({ activePolicyRef: null }),
     policies: []
   };
 }
@@ -4247,6 +4614,300 @@ function normalizeTenantSettlementPolicyRef(record) {
   };
 }
 
+function parseTenantSettlementPolicyRefInput(input, { fieldPath = "policyRef", allowNull = false } = {}) {
+  if (input === null || input === undefined || input === "") {
+    if (allowNull) return null;
+    throw new TypeError(`${fieldPath} is required`);
+  }
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError(`${fieldPath} must be an object`);
+  }
+  const policyId = parseSettlementPolicyRegistryId(input.policyId, { fieldPath: `${fieldPath}.policyId` });
+  const policyVersion = parseSettlementPolicyVersion(input.policyVersion, { fieldPath: `${fieldPath}.policyVersion` });
+  return { policyId, policyVersion };
+}
+
+function cloneTenantSettlementPolicyRef(ref) {
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
+  const parsed = parseTenantSettlementPolicyRefInput(ref, { allowNull: true });
+  if (!parsed) return null;
+  return {
+    schemaVersion: MARKETPLACE_SETTLEMENT_POLICY_REF_SCHEMA_VERSION,
+    source: "tenant_registry",
+    policyId: parsed.policyId,
+    policyVersion: parsed.policyVersion,
+    policyHash:
+      typeof ref.policyHash === "string" && ref.policyHash.trim() !== ""
+        ? String(ref.policyHash).trim().toLowerCase()
+        : null,
+    verificationMethodHash:
+      typeof ref.verificationMethodHash === "string" && ref.verificationMethodHash.trim() !== ""
+        ? String(ref.verificationMethodHash).trim().toLowerCase()
+        : null
+  };
+}
+
+function settlementPolicyRefEquals(a, b) {
+  const left = cloneTenantSettlementPolicyRef(a);
+  const right = cloneTenantSettlementPolicyRef(b);
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return String(left.policyId) === String(right.policyId) && Number(left.policyVersion) === Number(right.policyVersion);
+}
+
+function defaultTenantSettlementPolicyRollout({ activePolicyRef = null } = {}) {
+  return {
+    schemaVersion: TENANT_SETTLEMENT_POLICY_ROLLOUT_SCHEMA_VERSION,
+    stages: {
+      draft: null,
+      canary: { policyRef: null, rolloutPercent: 0 },
+      active: cloneTenantSettlementPolicyRef(activePolicyRef)
+    },
+    history: []
+  };
+}
+
+function getRolloutPolicyRecordFromRef({ registry, ref }) {
+  const parsed = cloneTenantSettlementPolicyRef(ref);
+  if (!parsed) return null;
+  return getTenantSettlementPolicyRecord({
+    registry,
+    policyId: parsed.policyId,
+    policyVersion: parsed.policyVersion
+  });
+}
+
+function rolloutRefFromRegistryOrNull({ registry, ref }) {
+  const record = getRolloutPolicyRecordFromRef({ registry, ref });
+  return record ? normalizeTenantSettlementPolicyRef(record) : null;
+}
+
+function normalizeTenantSettlementPolicyRollout({ rollout, registry, activeFallbackRef = null } = {}) {
+  const out = defaultTenantSettlementPolicyRollout({ activePolicyRef: activeFallbackRef });
+  const source = rollout && typeof rollout === "object" && !Array.isArray(rollout) ? rollout : {};
+  const stages = source.stages && typeof source.stages === "object" && !Array.isArray(source.stages) ? source.stages : {};
+
+  out.stages.draft = rolloutRefFromRegistryOrNull({ registry, ref: stages.draft });
+
+  const canarySource = stages.canary && typeof stages.canary === "object" && !Array.isArray(stages.canary) ? stages.canary : {};
+  const canaryRef = rolloutRefFromRegistryOrNull({ registry, ref: canarySource.policyRef ?? null });
+  let canaryPercent = 0;
+  try {
+    canaryPercent = parseSettlementPolicyRolloutPercent(canarySource.rolloutPercent, { allowNull: true }) ?? 0;
+  } catch {
+    canaryPercent = 0;
+  }
+  out.stages.canary = {
+    policyRef: canaryRef,
+    rolloutPercent: canaryRef ? Math.max(1, canaryPercent || 10) : 0
+  };
+
+  out.stages.active = rolloutRefFromRegistryOrNull({ registry, ref: stages.active ?? activeFallbackRef ?? null });
+  if (!out.stages.active && activeFallbackRef) {
+    out.stages.active = rolloutRefFromRegistryOrNull({ registry, ref: activeFallbackRef }) ?? null;
+  }
+
+  const historyRows = Array.isArray(source.history) ? source.history : [];
+  const normalizedHistory = [];
+  for (const row of historyRows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    let stage = null;
+    try {
+      stage = parseSettlementPolicyRolloutStage(row.stage ?? null, { allowNull: true });
+    } catch {
+      stage = null;
+    }
+    let rolloutPercent = null;
+    try {
+      rolloutPercent = parseSettlementPolicyRolloutPercent(row.rolloutPercent ?? null, { allowNull: true });
+    } catch {
+      rolloutPercent = null;
+    }
+    const at = typeof row.at === "string" && row.at.trim() !== "" && Number.isFinite(Date.parse(row.at)) ? row.at : nowIso();
+    const action = typeof row.action === "string" && row.action.trim() !== "" ? safeTruncate(row.action.trim(), { max: 80 }) : "update";
+    const note =
+      typeof row.note === "string" && row.note.trim() !== ""
+        ? safeTruncate(row.note.trim(), { max: 500 })
+        : null;
+    const actorEmail =
+      typeof row.actorEmail === "string" && row.actorEmail.trim() !== ""
+        ? safeTruncate(row.actorEmail.trim(), { max: 320 })
+        : null;
+    normalizedHistory.push({
+      at,
+      action,
+      stage,
+      fromPolicyRef: cloneTenantSettlementPolicyRef(row.fromPolicyRef ?? null),
+      toPolicyRef: cloneTenantSettlementPolicyRef(row.toPolicyRef ?? null),
+      rolloutPercent,
+      note,
+      actorEmail
+    });
+  }
+  out.history = normalizedHistory.slice(-SETTLEMENT_POLICY_ROLLOUT_HISTORY_LIMIT);
+  return out;
+}
+
+function appendSettlementPolicyRolloutHistory({ rollout, entry }) {
+  if (!rollout || typeof rollout !== "object" || Array.isArray(rollout)) return;
+  if (!Array.isArray(rollout.history)) rollout.history = [];
+  rollout.history.push({
+    at:
+      typeof entry?.at === "string" && Number.isFinite(Date.parse(entry.at))
+        ? entry.at
+        : nowIso(),
+    action:
+      typeof entry?.action === "string" && entry.action.trim() !== ""
+        ? safeTruncate(entry.action.trim(), { max: 80 })
+        : "update",
+    stage: (() => {
+      try {
+        return parseSettlementPolicyRolloutStage(entry?.stage ?? null, { allowNull: true });
+      } catch {
+        return null;
+      }
+    })(),
+    fromPolicyRef: cloneTenantSettlementPolicyRef(entry?.fromPolicyRef ?? null),
+    toPolicyRef: cloneTenantSettlementPolicyRef(entry?.toPolicyRef ?? null),
+    rolloutPercent: (() => {
+      try {
+        return parseSettlementPolicyRolloutPercent(entry?.rolloutPercent ?? null, { allowNull: true });
+      } catch {
+        return null;
+      }
+    })(),
+    note:
+      typeof entry?.note === "string" && entry.note.trim() !== ""
+        ? safeTruncate(entry.note.trim(), { max: 500 })
+        : null,
+    actorEmail:
+      typeof entry?.actorEmail === "string" && entry.actorEmail.trim() !== ""
+        ? safeTruncate(entry.actorEmail.trim(), { max: 320 })
+        : null
+  });
+  if (rollout.history.length > SETTLEMENT_POLICY_ROLLOUT_HISTORY_LIMIT) {
+    rollout.history = rollout.history.slice(-SETTLEMENT_POLICY_ROLLOUT_HISTORY_LIMIT);
+  }
+}
+
+function settlementPolicyRefToKey(ref) {
+  const parsed = cloneTenantSettlementPolicyRef(ref);
+  if (!parsed) return null;
+  return `${parsed.policyId}@${parsed.policyVersion}`;
+}
+
+function normalizeSettlementPolicyRolloutNote(rawValue) {
+  if (rawValue === null || rawValue === undefined) return null;
+  const value = String(rawValue).trim();
+  if (!value) return null;
+  return safeTruncate(value, { max: 500 });
+}
+
+function parseTenantSettlementPolicyRefFromBody(body, { fieldPath = "policyRef", allowNull = false } = {}) {
+  const obj = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const directRef = obj.policyRef && typeof obj.policyRef === "object" && !Array.isArray(obj.policyRef) ? obj.policyRef : null;
+  const input =
+    directRef ??
+    (obj.policyId !== undefined || obj.policyVersion !== undefined
+      ? { policyId: obj.policyId, policyVersion: obj.policyVersion }
+      : null);
+  return parseTenantSettlementPolicyRefInput(input, { fieldPath, allowNull });
+}
+
+function flattenSettlementPolicyDiffObject(value, { pathPrefix = "", out = new Map() } = {}) {
+  if (value === null || value === undefined) {
+    out.set(pathPrefix || "$", null);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    out.set(pathPrefix || "$", value);
+    return out;
+  }
+  if (typeof value !== "object") {
+    out.set(pathPrefix || "$", value);
+    return out;
+  }
+  const keys = Object.keys(value).sort(cmpString);
+  if (!keys.length) {
+    out.set(pathPrefix || "$", {});
+    return out;
+  }
+  for (const key of keys) {
+    const next = pathPrefix ? `${pathPrefix}.${key}` : key;
+    flattenSettlementPolicyDiffObject(value[key], { pathPrefix: next, out });
+  }
+  return out;
+}
+
+function settlementPolicyDiffValueEquals(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function buildTenantSettlementPolicyDiff({ fromPolicy, toPolicy, includeUnchanged = false, limit = 200 } = {}) {
+  const left = fromPolicy && typeof fromPolicy === "object" && !Array.isArray(fromPolicy) ? fromPolicy : {};
+  const right = toPolicy && typeof toPolicy === "object" && !Array.isArray(toPolicy) ? toPolicy : {};
+  const leftMap = flattenSettlementPolicyDiffObject(left);
+  const rightMap = flattenSettlementPolicyDiffObject(right);
+  const paths = [...new Set([...leftMap.keys(), ...rightMap.keys()])].sort(cmpString);
+
+  const changes = [];
+  let changedCount = 0;
+  let addedCount = 0;
+  let removedCount = 0;
+  let unchangedCount = 0;
+  for (const pathName of paths) {
+    const hasBefore = leftMap.has(pathName);
+    const hasAfter = rightMap.has(pathName);
+    const beforeValue = hasBefore ? leftMap.get(pathName) : null;
+    const afterValue = hasAfter ? rightMap.get(pathName) : null;
+    const equal = hasBefore === hasAfter && settlementPolicyDiffValueEquals(beforeValue, afterValue);
+    if (equal) {
+      unchangedCount += 1;
+      if (!includeUnchanged) continue;
+      changes.push({ path: pathName, kind: "unchanged", fromValue: beforeValue, toValue: afterValue });
+      continue;
+    }
+    if (!hasBefore && hasAfter) {
+      addedCount += 1;
+      changes.push({ path: pathName, kind: "added", fromValue: null, toValue: afterValue });
+      continue;
+    }
+    if (hasBefore && !hasAfter) {
+      removedCount += 1;
+      changes.push({ path: pathName, kind: "removed", fromValue: beforeValue, toValue: null });
+      continue;
+    }
+    changedCount += 1;
+    changes.push({ path: pathName, kind: "changed", fromValue: beforeValue, toValue: afterValue });
+  }
+
+  return {
+    summary: {
+      totalPaths: paths.length,
+      changed: changedCount,
+      added: addedCount,
+      removed: removedCount,
+      unchanged: unchangedCount,
+      includeUnchanged: Boolean(includeUnchanged)
+    },
+    changes: changes.slice(0, Math.max(1, limit)),
+    limited: changes.length > Math.max(1, limit)
+  };
+}
+
+function findSettlementPolicyRollbackTargetRef({ rollout, currentActiveRef }) {
+  const historyRows = Array.isArray(rollout?.history) ? [...rollout.history] : [];
+  for (let idx = historyRows.length - 1; idx >= 0; idx -= 1) {
+    const row = historyRows[idx];
+    if (!row || row.stage !== SETTLEMENT_POLICY_ROLLOUT_STAGE.ACTIVE) continue;
+    const fromRef = cloneTenantSettlementPolicyRef(row.fromPolicyRef ?? null);
+    if (!fromRef) continue;
+    if (settlementPolicyRefEquals(fromRef, currentActiveRef)) continue;
+    return fromRef;
+  }
+  return null;
+}
+
 async function loadTenantSettlementPolicyRegistry({ tenantId }) {
   const fp = tenantSettlementPolicyRegistryPath({ tenantId });
   try {
@@ -4265,10 +4926,24 @@ async function loadTenantSettlementPolicyRegistry({ tenantId }) {
       defaultRef &&
       normalizedPolicies.find((row) => row.policyId === String(defaultRef.policyId ?? "") && Number(row.policyVersion) === Number(defaultRef.policyVersion)) ||
       null;
+    const activeFallbackRef = defaultRecord ? normalizeTenantSettlementPolicyRef(defaultRecord) : null;
+    const rollout = normalizeTenantSettlementPolicyRollout({
+      rollout: parsed.rollout,
+      registry: { policies: normalizedPolicies },
+      activeFallbackRef
+    });
+    const activeRecord = rollout.stages.active
+      ? normalizedPolicies.find(
+          (row) =>
+            row.policyId === String(rollout.stages.active.policyId ?? "") &&
+            Number(row.policyVersion) === Number(rollout.stages.active.policyVersion)
+        ) ?? null
+      : null;
     return {
       schemaVersion: TENANT_SETTLEMENT_POLICY_REGISTRY_SCHEMA_VERSION,
       tenantId,
-      defaultPolicyRef: defaultRecord ? normalizeTenantSettlementPolicyRef(defaultRecord) : null,
+      defaultPolicyRef: activeRecord ? normalizeTenantSettlementPolicyRef(activeRecord) : activeFallbackRef,
+      rollout,
       policies: normalizedPolicies
     };
   } catch {
@@ -4286,14 +4961,27 @@ async function saveTenantSettlementPolicyRegistry({ tenantId, registry }) {
   }
   normalizedPolicies.sort(settlementPolicyRecordSort);
   const defaultRef = registry?.defaultPolicyRef && typeof registry.defaultPolicyRef === "object" && !Array.isArray(registry.defaultPolicyRef) ? registry.defaultPolicyRef : null;
-  const defaultRecord =
+  const fallbackDefaultRecord =
     defaultRef &&
     normalizedPolicies.find((row) => row.policyId === String(defaultRef.policyId ?? "") && Number(row.policyVersion) === Number(defaultRef.policyVersion)) ||
     null;
+  const rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry?.rollout,
+    registry: { policies: normalizedPolicies },
+    activeFallbackRef: fallbackDefaultRecord ? normalizeTenantSettlementPolicyRef(fallbackDefaultRecord) : null
+  });
+  const defaultRecord = rollout.stages.active
+    ? normalizedPolicies.find(
+        (row) =>
+          row.policyId === String(rollout.stages.active.policyId ?? "") &&
+          Number(row.policyVersion) === Number(rollout.stages.active.policyVersion)
+      ) ?? null
+    : fallbackDefaultRecord;
   const out = {
     schemaVersion: TENANT_SETTLEMENT_POLICY_REGISTRY_SCHEMA_VERSION,
     tenantId,
     defaultPolicyRef: defaultRecord ? normalizeTenantSettlementPolicyRef(defaultRecord) : null,
+    rollout,
     policies: normalizedPolicies
   };
   await ensureDir(fp);
@@ -4365,15 +5053,43 @@ async function handleTenantSettlementPoliciesState(req, res, tenantId, url) {
     used: Array.isArray(registry?.policies) ? registry.policies.length : 0
   });
   const policies = listTenantSettlementPolicyRecords({ registry, policyId });
+  const rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry?.rollout,
+    registry,
+    activeFallbackRef: registry?.defaultPolicyRef ?? null
+  });
+  registry.rollout = rollout;
+  registry.defaultPolicyRef = rollout.stages.active ?? registry.defaultPolicyRef ?? null;
   const policyIds = [...new Set((registry.policies ?? []).map((row) => String(row.policyId ?? "")))].filter(Boolean).sort(cmpString);
   const selected =
-    (registry.defaultPolicyRef && getTenantSettlementPolicyRecord({
+    (rollout.stages.active && getTenantSettlementPolicyRecord({
       registry,
-      policyId: registry.defaultPolicyRef.policyId,
-      policyVersion: registry.defaultPolicyRef.policyVersion
+      policyId: rollout.stages.active.policyId,
+      policyVersion: rollout.stages.active.policyVersion
     })) ||
     policies[0] ||
     null;
+  const draftPolicy = rollout.stages.draft
+    ? getTenantSettlementPolicyRecord({
+        registry,
+        policyId: rollout.stages.draft.policyId,
+        policyVersion: rollout.stages.draft.policyVersion
+      })
+    : null;
+  const canaryPolicy = rollout.stages.canary?.policyRef
+    ? getTenantSettlementPolicyRecord({
+        registry,
+        policyId: rollout.stages.canary.policyRef.policyId,
+        policyVersion: rollout.stages.canary.policyRef.policyVersion
+      })
+    : null;
+  const activePolicy = rollout.stages.active
+    ? getTenantSettlementPolicyRecord({
+        registry,
+        policyId: rollout.stages.active.policyId,
+        policyVersion: rollout.stages.active.policyVersion
+      })
+    : null;
   return sendJson(res, 200, {
     ok: true,
     tenantId,
@@ -4384,19 +5100,39 @@ async function handleTenantSettlementPoliciesState(req, res, tenantId, url) {
       maxPolicyVersions: policyVersionQuota
     },
     defaultPolicyRef: registry.defaultPolicyRef ?? null,
+    rollout,
+    rolloutStagePolicies: {
+      draft: draftPolicy,
+      canary: canaryPolicy,
+      active: activePolicy
+    },
+    rolloutHistory: Array.isArray(rollout.history) ? rollout.history.slice(-50).reverse() : [],
     selectedPolicy: selected,
     policyIds,
     policies
   });
 }
 
-async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
+async function handleTenantSettlementPolicyPresets(req, res, tenantId) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+  const presets = listTenantSettlementPolicyPresetPacks();
+  return sendJson(res, 200, {
+    ok: true,
+    tenantId,
+    schemaVersion: "TenantSettlementPolicyPresetCatalog.v1",
+    generatedAt: nowIso(),
+    presets
+  });
+}
+
+async function handleTenantSettlementPolicyPresetApply(req, res, tenantId) {
   const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
   if (!auth.ok) return;
 
   let body = null;
   try {
-    body = await readJsonBody(req, { maxBytes: 200_000 });
+    body = await readJsonBody(req, { maxBytes: 50_000 });
   } catch (err) {
     return sendJson(res, 400, { ok: false, code: err?.code ?? "INVALID_REQUEST", message: err?.message ?? "invalid request" });
   }
@@ -4404,16 +5140,79 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
     return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "body must be an object" });
   }
 
+  let presetId = null;
+  try {
+    presetId = parseSettlementPolicyPresetId(body.presetId, { fieldPath: "presetId" });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_PRESET_ID", message: err?.message ?? "invalid presetId" });
+  }
+  const preset = getTenantSettlementPolicyPresetPackById(presetId);
+  if (!preset) return sendJson(res, 404, { ok: false, code: "PRESET_NOT_FOUND", message: "preset not found" });
+
+  const setAsDefault = body.setAsDefault === undefined ? true : body.setAsDefault === true;
+  const policyIdRaw = body.policyId === undefined || body.policyId === null || String(body.policyId).trim() === "" ? preset.policyId : body.policyId;
+  const descriptionRaw = body.description === undefined ? preset.description : body.description;
+  const metadataMerged = {
+    presetId: preset.presetId,
+    presetVersion: preset.presetVersion,
+    presetName: preset.name,
+    controls: preset.controls
+  };
+  if (body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)) {
+    Object.assign(metadataMerged, body.metadata);
+  }
+
+  const applyBody = {
+    policyId: policyIdRaw,
+    policyVersion: body.policyVersion ?? undefined,
+    description: descriptionRaw,
+    setAsDefault,
+    verificationMethod: preset.verificationMethod,
+    policy: preset.policy,
+    metadata: metadataMerged
+  };
+  const result = await upsertTenantSettlementPolicyRecord({
+    tenantId,
+    body: applyBody,
+    principal: auth.principal,
+    auditActionOverride: "TENANT_SETTLEMENT_POLICY_PRESET_APPLIED",
+    historyNoteOverride: `preset applied: ${preset.presetId}`,
+    source: "preset_apply"
+  });
+  if (!result.ok) return sendJson(res, result.statusCode, result.payload);
+
+  return sendJson(res, result.statusCode, {
+    ...result.payload,
+    preset: {
+      presetId: preset.presetId,
+      presetVersion: preset.presetVersion,
+      name: preset.name
+    }
+  });
+}
+
+async function upsertTenantSettlementPolicyRecord({
+  tenantId,
+  body,
+  principal = null,
+  auditActionOverride = null,
+  historyNoteOverride = null,
+  source = "manual_upsert"
+} = {}) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, statusCode: 400, payload: { ok: false, code: "INVALID_REQUEST", message: "body must be an object" } };
+  }
+
   let policyId = null;
   try {
     policyId = parseSettlementPolicyRegistryId(body.policyId, { fieldPath: "policyId" });
   } catch (err) {
-    return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_ID", message: err?.message ?? "invalid policyId" });
+    return { ok: false, statusCode: 400, payload: { ok: false, code: "INVALID_POLICY_ID", message: err?.message ?? "invalid policyId" } };
   }
 
   const rawPolicy = body.policy;
   if (!rawPolicy || typeof rawPolicy !== "object" || Array.isArray(rawPolicy)) {
-    return sendJson(res, 400, { ok: false, code: "INVALID_POLICY", message: "policy is required" });
+    return { ok: false, statusCode: 400, payload: { ok: false, code: "INVALID_POLICY", message: "policy is required" } };
   }
 
   const registry = await loadTenantSettlementPolicyRegistry({ tenantId });
@@ -4436,7 +5235,7 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
       nextVersion = parseSettlementPolicyVersion(explicitVersionInput, { fieldPath: "policyVersion" });
     }
   } catch (err) {
-    return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_VERSION", message: err?.message ?? "invalid policyVersion" });
+    return { ok: false, statusCode: 400, payload: { ok: false, code: "INVALID_POLICY_VERSION", message: err?.message ?? "invalid policyVersion" } };
   }
 
   let verificationMethod = null;
@@ -4452,7 +5251,7 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
     policyHash = computeSettlementPolicyHash(policy);
     verificationMethodHash = computeVerificationMethodHash(verificationMethod);
   } catch (err) {
-    return sendJson(res, 400, { ok: false, code: "INVALID_SETTLEMENT_POLICY", message: err?.message ?? "invalid policy" });
+    return { ok: false, statusCode: 400, payload: { ok: false, code: "INVALID_SETTLEMENT_POLICY", message: err?.message ?? "invalid policy" } };
   }
 
   const description =
@@ -4467,16 +5266,20 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
     (String(existing.policyHash ?? "") !== String(policyHash ?? "") ||
       String(existing.verificationMethodHash ?? "") !== String(verificationMethodHash ?? ""))
   ) {
-    return sendJson(res, 409, { ok: false, code: "POLICY_VERSION_CONFLICT", message: "policy version already exists with different hashes" });
+    return {
+      ok: false,
+      statusCode: 409,
+      payload: { ok: false, code: "POLICY_VERSION_CONFLICT", message: "policy version already exists with different hashes" }
+    };
   }
 
   const policyVersionsUsed = Array.isArray(registry?.policies) ? registry.policies.length : 0;
   const policyVersionLimit = normalizeEntitlementLimit(entitlements?.limits?.maxPolicyVersions);
   if (!existing && policyVersionLimit !== null && policyVersionsUsed >= policyVersionLimit) {
-    return sendJson(
-      res,
-      403,
-      buildEntitlementLimitExceededResponse({
+    return {
+      ok: false,
+      statusCode: 403,
+      payload: buildEntitlementLimitExceededResponse({
         tenantId,
         entitlements,
         featureKey: "maxPolicyVersions",
@@ -4484,7 +5287,7 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
         used: policyVersionsUsed,
         message: `maxPolicyVersions limit reached (${policyVersionsUsed}/${policyVersionLimit}) for plan ${entitlements.plan}`
       })
-    );
+    };
   }
 
   const nowAt = nowIso();
@@ -4507,8 +5310,42 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
   const byKey = new Map((registry.policies ?? []).map((row) => [`${row.policyId}:${row.policyVersion}`, row]));
   byKey.set(key, record);
   registry.policies = [...byKey.values()].sort(settlementPolicyRecordSort);
-  if (Boolean(body.setAsDefault) || !registry.defaultPolicyRef) {
+  registry.rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry.rollout,
+    registry,
+    activeFallbackRef: registry.defaultPolicyRef ?? null
+  });
+  registry.rollout.stages.draft = normalizeTenantSettlementPolicyRef(record);
+  const shouldSetActive = Boolean(body.setAsDefault) || !registry.rollout.stages.active;
+  if (shouldSetActive) {
+    const beforeActive = cloneTenantSettlementPolicyRef(registry.rollout.stages.active);
+    registry.rollout.stages.active = normalizeTenantSettlementPolicyRef(record);
     registry.defaultPolicyRef = normalizeTenantSettlementPolicyRef(record);
+    appendSettlementPolicyRolloutHistory({
+      rollout: registry.rollout,
+      entry: {
+        at: nowAt,
+        action: beforeActive ? "active_promoted" : "active_initialized",
+        stage: SETTLEMENT_POLICY_ROLLOUT_STAGE.ACTIVE,
+        fromPolicyRef: beforeActive,
+        toPolicyRef: registry.rollout.stages.active,
+        note: historyNoteOverride ?? (Boolean(body.setAsDefault) ? "setAsDefault on upsert" : "first active policy"),
+        actorEmail: principal?.email ?? null
+      }
+    });
+  } else {
+    appendSettlementPolicyRolloutHistory({
+      rollout: registry.rollout,
+      entry: {
+        at: nowAt,
+        action: "draft_updated",
+        stage: SETTLEMENT_POLICY_ROLLOUT_STAGE.DRAFT,
+        fromPolicyRef: null,
+        toPolicyRef: registry.rollout.stages.draft,
+        note: historyNoteOverride ?? "policy version upserted",
+        actorEmail: principal?.email ?? null
+      }
+    });
   }
   const saved = await saveTenantSettlementPolicyRegistry({ tenantId, registry });
 
@@ -4518,23 +5355,54 @@ async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
       tenantId,
       record: {
         at: nowIso(),
-        action: existing ? "TENANT_SETTLEMENT_POLICY_UPDATED" : "TENANT_SETTLEMENT_POLICY_CREATED",
-        actor: { method: auth.principal?.method ?? null, email: auth.principal?.email ?? null, role: auth.principal?.role ?? null },
+        action: auditActionOverride ?? (existing ? "TENANT_SETTLEMENT_POLICY_UPDATED" : "TENANT_SETTLEMENT_POLICY_CREATED"),
+        actor: { method: principal?.method ?? null, email: principal?.email ?? null, role: principal?.role ?? null },
         targetType: "tenant_settlement_policy",
         targetId: `${policyId}@${nextVersion}`,
-        details: { policyId, policyVersion: nextVersion, policyHash, verificationMethodHash, setAsDefault: Boolean(body.setAsDefault) }
+        details: {
+          policyId,
+          policyVersion: nextVersion,
+          policyHash,
+          verificationMethodHash,
+          setAsDefault: Boolean(body.setAsDefault),
+          source
+        }
       }
     });
   } catch {
     // ignore
   }
 
-  return sendJson(res, existing ? 200 : 201, {
+  return {
     ok: true,
+    statusCode: existing ? 200 : 201,
+    payload: {
+      ok: true,
+      tenantId,
+      policy: record,
+      defaultPolicyRef: saved.defaultPolicyRef
+    }
+  };
+}
+
+async function handleTenantSettlementPolicyUpsert(req, res, tenantId) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+
+  let body = null;
+  try {
+    body = await readJsonBody(req, { maxBytes: 200_000 });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: err?.code ?? "INVALID_REQUEST", message: err?.message ?? "invalid request" });
+  }
+
+  const result = await upsertTenantSettlementPolicyRecord({
     tenantId,
-    policy: record,
-    defaultPolicyRef: saved.defaultPolicyRef
+    body,
+    principal: auth.principal,
+    source: "manual_upsert"
   });
+  return sendJson(res, result.statusCode, result.payload);
 }
 
 async function handleTenantSettlementPolicySetDefault(req, res, tenantId) {
@@ -4564,7 +5432,24 @@ async function handleTenantSettlementPolicySetDefault(req, res, tenantId) {
   const record = getTenantSettlementPolicyRecord({ registry, policyId, policyVersion });
   if (!record) return sendJson(res, 404, { ok: false, code: "POLICY_NOT_FOUND", message: "policy version not found" });
 
+  registry.rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry.rollout,
+    registry,
+    activeFallbackRef: registry.defaultPolicyRef ?? null
+  });
+  const previousActive = cloneTenantSettlementPolicyRef(registry.rollout.stages.active);
+  registry.rollout.stages.active = normalizeTenantSettlementPolicyRef(record);
   registry.defaultPolicyRef = normalizeTenantSettlementPolicyRef(record);
+  appendSettlementPolicyRolloutHistory({
+    rollout: registry.rollout,
+    entry: {
+      action: "default_set",
+      stage: SETTLEMENT_POLICY_ROLLOUT_STAGE.ACTIVE,
+      fromPolicyRef: previousActive,
+      toPolicyRef: registry.rollout.stages.active,
+      actorEmail: auth.principal?.email ?? null
+    }
+  });
   const saved = await saveTenantSettlementPolicyRegistry({ tenantId, registry });
 
   try {
@@ -4585,6 +5470,386 @@ async function handleTenantSettlementPolicySetDefault(req, res, tenantId) {
   }
 
   return sendJson(res, 200, { ok: true, tenantId, defaultPolicyRef: saved.defaultPolicyRef, policy: record });
+}
+
+async function handleTenantSettlementPolicyRollout(req, res, tenantId) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+
+  let body = null;
+  try {
+    body = await readJsonBody(req, { maxBytes: 30_000 });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: err?.code ?? "INVALID_REQUEST", message: err?.message ?? "invalid request" });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "body must be an object" });
+  }
+
+  let stage = null;
+  try {
+    stage = parseSettlementPolicyRolloutStage(body.stage, { fieldPath: "stage" });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_STAGE", message: err?.message ?? "invalid stage" });
+  }
+  const note = normalizeSettlementPolicyRolloutNote(body.note);
+  const clear = Boolean(body.clear);
+
+  const registry = await loadTenantSettlementPolicyRegistry({ tenantId });
+  registry.rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry.rollout,
+    registry,
+    activeFallbackRef: registry.defaultPolicyRef ?? null
+  });
+
+  const nowAt = nowIso();
+  let fromPolicyRef = null;
+  let toPolicyRef = null;
+  let action = "rollout_updated";
+  let rolloutPercent = null;
+
+  if (stage === SETTLEMENT_POLICY_ROLLOUT_STAGE.DRAFT) {
+    fromPolicyRef = cloneTenantSettlementPolicyRef(registry.rollout.stages.draft);
+    if (clear) {
+      toPolicyRef = null;
+      registry.rollout.stages.draft = null;
+      action = "draft_cleared";
+    } else {
+      let policyRef = null;
+      try {
+        policyRef = parseTenantSettlementPolicyRefFromBody(body, { fieldPath: "policyRef" });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_REFERENCE", message: err?.message ?? "invalid policy reference" });
+      }
+      const record = getTenantSettlementPolicyRecord({
+        registry,
+        policyId: policyRef.policyId,
+        policyVersion: policyRef.policyVersion
+      });
+      if (!record) return sendJson(res, 404, { ok: false, code: "POLICY_NOT_FOUND", message: "policy version not found" });
+      toPolicyRef = normalizeTenantSettlementPolicyRef(record);
+      registry.rollout.stages.draft = toPolicyRef;
+      action = "draft_selected";
+    }
+  } else if (stage === SETTLEMENT_POLICY_ROLLOUT_STAGE.CANARY) {
+    fromPolicyRef = cloneTenantSettlementPolicyRef(registry.rollout.stages.canary?.policyRef ?? null);
+    if (clear) {
+      toPolicyRef = null;
+      registry.rollout.stages.canary = { policyRef: null, rolloutPercent: 0 };
+      action = "canary_cleared";
+      rolloutPercent = 0;
+    } else {
+      let policyRef = null;
+      try {
+        policyRef = parseTenantSettlementPolicyRefFromBody(body, { fieldPath: "policyRef" });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_REFERENCE", message: err?.message ?? "invalid policy reference" });
+      }
+      const record = getTenantSettlementPolicyRecord({
+        registry,
+        policyId: policyRef.policyId,
+        policyVersion: policyRef.policyVersion
+      });
+      if (!record) return sendJson(res, 404, { ok: false, code: "POLICY_NOT_FOUND", message: "policy version not found" });
+      toPolicyRef = normalizeTenantSettlementPolicyRef(record);
+      try {
+        rolloutPercent = parseSettlementPolicyRolloutPercent(body.rolloutPercent, { allowNull: true });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, code: "INVALID_ROLLOUT_PERCENT", message: err?.message ?? "invalid rolloutPercent" });
+      }
+      if (rolloutPercent === null) {
+        const existingPercent = Number(registry.rollout.stages.canary?.rolloutPercent ?? 0);
+        rolloutPercent = settlementPolicyRefEquals(fromPolicyRef, toPolicyRef) && existingPercent > 0 ? existingPercent : 10;
+      }
+      rolloutPercent = Math.max(1, Math.min(100, rolloutPercent));
+      registry.rollout.stages.canary = { policyRef: toPolicyRef, rolloutPercent };
+      action = "canary_updated";
+    }
+  } else {
+    let policyRef = null;
+    try {
+      policyRef = parseTenantSettlementPolicyRefFromBody(body, { fieldPath: "policyRef" });
+    } catch (err) {
+      return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_REFERENCE", message: err?.message ?? "invalid policy reference" });
+    }
+    const record = getTenantSettlementPolicyRecord({
+      registry,
+      policyId: policyRef.policyId,
+      policyVersion: policyRef.policyVersion
+    });
+    if (!record) return sendJson(res, 404, { ok: false, code: "POLICY_NOT_FOUND", message: "policy version not found" });
+    fromPolicyRef = cloneTenantSettlementPolicyRef(registry.rollout.stages.active);
+    toPolicyRef = normalizeTenantSettlementPolicyRef(record);
+    registry.rollout.stages.active = toPolicyRef;
+    registry.defaultPolicyRef = toPolicyRef;
+    action = settlementPolicyRefEquals(fromPolicyRef, toPolicyRef) ? "active_confirmed" : "active_promoted";
+  }
+
+  appendSettlementPolicyRolloutHistory({
+    rollout: registry.rollout,
+    entry: {
+      at: nowAt,
+      action,
+      stage,
+      fromPolicyRef,
+      toPolicyRef,
+      rolloutPercent,
+      note,
+      actorEmail: auth.principal?.email ?? null
+    }
+  });
+  const saved = await saveTenantSettlementPolicyRegistry({ tenantId, registry });
+
+  try {
+    await appendAuditRecord({
+      dataDir,
+      tenantId,
+      record: {
+        at: nowIso(),
+        action: "TENANT_SETTLEMENT_POLICY_ROLLOUT_UPDATED",
+        actor: { method: auth.principal?.method ?? null, email: auth.principal?.email ?? null, role: auth.principal?.role ?? null },
+        targetType: "tenant_settlement_policy_rollout",
+        targetId: stage,
+        details: { stage, action, fromPolicyRef, toPolicyRef, rolloutPercent, note }
+      }
+    });
+  } catch {
+    // ignore
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    tenantId,
+    stage,
+    action,
+    rollout: saved.rollout,
+    defaultPolicyRef: saved.defaultPolicyRef ?? null,
+    rolloutHistory: Array.isArray(saved.rollout?.history) ? saved.rollout.history.slice(-50).reverse() : []
+  });
+}
+
+async function handleTenantSettlementPolicyRollback(req, res, tenantId) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+
+  let body = null;
+  try {
+    body = await readJsonBody(req, { maxBytes: 30_000 });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: err?.code ?? "INVALID_REQUEST", message: err?.message ?? "invalid request" });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
+
+  const note = normalizeSettlementPolicyRolloutNote(body.note);
+  const registry = await loadTenantSettlementPolicyRegistry({ tenantId });
+  registry.rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry.rollout,
+    registry,
+    activeFallbackRef: registry.defaultPolicyRef ?? null
+  });
+
+  const currentActiveRef = cloneTenantSettlementPolicyRef(registry.rollout.stages.active);
+  if (!currentActiveRef) {
+    return sendJson(res, 409, { ok: false, code: "ACTIVE_POLICY_NOT_SET", message: "active policy is not set" });
+  }
+
+  let explicitTargetRef = null;
+  try {
+    explicitTargetRef = parseTenantSettlementPolicyRefFromBody(body, { fieldPath: "policyRef", allowNull: true });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_REFERENCE", message: err?.message ?? "invalid policy reference" });
+  }
+
+  let targetRef = null;
+  if (explicitTargetRef) {
+    const record = getTenantSettlementPolicyRecord({
+      registry,
+      policyId: explicitTargetRef.policyId,
+      policyVersion: explicitTargetRef.policyVersion
+    });
+    if (!record) return sendJson(res, 404, { ok: false, code: "POLICY_NOT_FOUND", message: "rollback target not found" });
+    targetRef = normalizeTenantSettlementPolicyRef(record);
+  } else {
+    const inferredRef = findSettlementPolicyRollbackTargetRef({
+      rollout: registry.rollout,
+      currentActiveRef
+    });
+    if (inferredRef) {
+      const record = getTenantSettlementPolicyRecord({
+        registry,
+        policyId: inferredRef.policyId,
+        policyVersion: inferredRef.policyVersion
+      });
+      if (record) targetRef = normalizeTenantSettlementPolicyRef(record);
+    }
+  }
+
+  if (!targetRef) {
+    return sendJson(res, 409, {
+      ok: false,
+      code: "ROLLBACK_TARGET_NOT_FOUND",
+      message: "no previous active policy is available for rollback"
+    });
+  }
+
+  if (settlementPolicyRefEquals(currentActiveRef, targetRef)) {
+    return sendJson(res, 200, {
+      ok: true,
+      tenantId,
+      action: "rollback_noop",
+      rollbackTargetRef: targetRef,
+      rollout: registry.rollout,
+      defaultPolicyRef: registry.defaultPolicyRef ?? null,
+      rolloutHistory: Array.isArray(registry.rollout?.history) ? registry.rollout.history.slice(-50).reverse() : []
+    });
+  }
+
+  registry.rollout.stages.active = targetRef;
+  registry.defaultPolicyRef = targetRef;
+  appendSettlementPolicyRolloutHistory({
+    rollout: registry.rollout,
+    entry: {
+      at: nowIso(),
+      action: "active_rollback",
+      stage: SETTLEMENT_POLICY_ROLLOUT_STAGE.ACTIVE,
+      fromPolicyRef: currentActiveRef,
+      toPolicyRef: targetRef,
+      note,
+      actorEmail: auth.principal?.email ?? null
+    }
+  });
+  const saved = await saveTenantSettlementPolicyRegistry({ tenantId, registry });
+
+  try {
+    await appendAuditRecord({
+      dataDir,
+      tenantId,
+      record: {
+        at: nowIso(),
+        action: "TENANT_SETTLEMENT_POLICY_ROLLBACK",
+        actor: { method: auth.principal?.method ?? null, email: auth.principal?.email ?? null, role: auth.principal?.role ?? null },
+        targetType: "tenant_settlement_policy_rollout",
+        targetId: "active",
+        details: { fromPolicyRef: currentActiveRef, toPolicyRef: targetRef, note }
+      }
+    });
+  } catch {
+    // ignore
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    tenantId,
+    action: "active_rollback",
+    rollbackTargetRef: targetRef,
+    rollout: saved.rollout,
+    defaultPolicyRef: saved.defaultPolicyRef ?? null,
+    rolloutHistory: Array.isArray(saved.rollout?.history) ? saved.rollout.history.slice(-50).reverse() : []
+  });
+}
+
+async function handleTenantSettlementPolicyDiff(req, res, tenantId, url) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+
+  const limitRaw = url.searchParams.get("limit");
+  const limit = limitRaw === null ? 200 : Number.parseInt(String(limitRaw), 10);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 2_000) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_LIMIT", message: "limit must be 1..2000" });
+  }
+  const includeUnchangedRaw = url.searchParams.get("includeUnchanged");
+  const includeUnchanged = includeUnchangedRaw === "1" || includeUnchangedRaw === "true";
+
+  const registry = await loadTenantSettlementPolicyRegistry({ tenantId });
+  registry.rollout = normalizeTenantSettlementPolicyRollout({
+    rollout: registry.rollout,
+    registry,
+    activeFallbackRef: registry.defaultPolicyRef ?? null
+  });
+
+  const fromPolicyIdRaw = url.searchParams.get("fromPolicyId");
+  const fromPolicyVersionRaw = url.searchParams.get("fromPolicyVersion");
+  const toPolicyIdRaw = url.searchParams.get("toPolicyId");
+  const toPolicyVersionRaw = url.searchParams.get("toPolicyVersion");
+
+  let fromRef = null;
+  let toRef = null;
+  try {
+    const hasFromInput = fromPolicyIdRaw !== null || fromPolicyVersionRaw !== null;
+    const hasToInput = toPolicyIdRaw !== null || toPolicyVersionRaw !== null;
+    if (hasFromInput) {
+      fromRef = parseTenantSettlementPolicyRefInput(
+        { policyId: fromPolicyIdRaw, policyVersion: fromPolicyVersionRaw },
+        { fieldPath: "fromPolicyRef" }
+      );
+    } else {
+      fromRef = cloneTenantSettlementPolicyRef(registry.rollout.stages.active ?? registry.defaultPolicyRef ?? null);
+    }
+    if (hasToInput) {
+      toRef = parseTenantSettlementPolicyRefInput(
+        { policyId: toPolicyIdRaw, policyVersion: toPolicyVersionRaw },
+        { fieldPath: "toPolicyRef" }
+      );
+    } else {
+      toRef = cloneTenantSettlementPolicyRef(registry.rollout.stages.draft ?? registry.rollout.stages.active ?? registry.defaultPolicyRef ?? null);
+    }
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: "INVALID_POLICY_REFERENCE", message: err?.message ?? "invalid policy reference" });
+  }
+
+  if (!fromRef || !toRef) {
+    return sendJson(res, 409, {
+      ok: false,
+      code: "DIFF_POLICY_REFERENCE_REQUIRED",
+      message: "from/to policy references are required (provide query params or configure active/draft stage)"
+    });
+  }
+
+  const fromRecord = getTenantSettlementPolicyRecord({
+    registry,
+    policyId: fromRef.policyId,
+    policyVersion: fromRef.policyVersion
+  });
+  if (!fromRecord) return sendJson(res, 404, { ok: false, code: "FROM_POLICY_NOT_FOUND", message: "from policy version not found" });
+  const toRecord = getTenantSettlementPolicyRecord({
+    registry,
+    policyId: toRef.policyId,
+    policyVersion: toRef.policyVersion
+  });
+  if (!toRecord) return sendJson(res, 404, { ok: false, code: "TO_POLICY_NOT_FOUND", message: "to policy version not found" });
+
+  const fromPayload = {
+    policyId: fromRecord.policyId,
+    policyVersion: fromRecord.policyVersion,
+    description: fromRecord.description ?? null,
+    verificationMethod: fromRecord.verificationMethod ?? null,
+    policy: fromRecord.policy ?? null
+  };
+  const toPayload = {
+    policyId: toRecord.policyId,
+    policyVersion: toRecord.policyVersion,
+    description: toRecord.description ?? null,
+    verificationMethod: toRecord.verificationMethod ?? null,
+    policy: toRecord.policy ?? null
+  };
+  const diff = buildTenantSettlementPolicyDiff({
+    fromPolicy: fromPayload,
+    toPolicy: toPayload,
+    includeUnchanged,
+    limit
+  });
+
+  return sendJson(res, 200, {
+    ok: true,
+    tenantId,
+    schemaVersion: "TenantSettlementPolicyDiff.v1",
+    generatedAt: nowIso(),
+    fromPolicyRef: normalizeTenantSettlementPolicyRef(fromRecord),
+    toPolicyRef: normalizeTenantSettlementPolicyRef(toRecord),
+    summary: diff.summary,
+    limited: diff.limited,
+    changes: diff.changes
+  });
 }
 
 async function handleTenantSettlementPolicyTestReplay(req, res, tenantId) {
@@ -5072,6 +6337,97 @@ async function handleTenantIntegrationTestSend(req, res, tenantId, provider) {
   });
 }
 
+async function handlePricingPage(req, res) {
+  const plans = ["free", "growth", "scale"].map((planKey) => TENANT_PLAN_CATALOG[planKey]).filter(Boolean);
+  const rows = plans.map((plan) => {
+    const maxVerifications = Number.isInteger(plan?.limits?.maxVerificationsPerMonth) ? String(plan.limits.maxVerificationsPerMonth) : "unlimited";
+    const maxStoredBundles = Number.isInteger(plan?.limits?.maxStoredBundles) ? String(plan.limits.maxStoredBundles) : "unlimited";
+    const maxIntegrations = Number.isInteger(plan?.limits?.maxIntegrations) ? String(plan.limits.maxIntegrations) : "unlimited";
+    const retentionDays = Number.isInteger(plan?.limits?.retentionDays) ? String(plan.limits.retentionDays) : "custom";
+    const subscription = formatUsdFromCents(Number.isInteger(plan?.billing?.subscriptionCents) ? plan.billing.subscriptionCents : 0);
+    const perVerification = formatUsdFromCents(Number.isInteger(plan?.billing?.pricePerVerificationCents) ? plan.billing.pricePerVerificationCents : 0);
+    return {
+      plan: String(plan.plan ?? ""),
+      displayName: String(plan.displayName ?? plan.plan ?? "").trim() || "Plan",
+      subscription,
+      perVerification,
+      maxVerifications,
+      maxStoredBundles,
+      maxIntegrations,
+      retentionDays
+    };
+  });
+
+  const cards = rows
+    .map(
+      (row) => [
+        "<section class=\"card\">",
+        `<h2>${htmlEscape(row.displayName)}</h2>`,
+        `<div class="price">${htmlEscape(row.subscription)}<span>/month</span></div>`,
+        `<div class="muted">Per verified run: <strong>${htmlEscape(row.perVerification)}</strong></div>`,
+        "<ul>",
+        `<li>Verified runs/month: <code>${htmlEscape(row.maxVerifications)}</code></li>`,
+        `<li>Stored bundles: <code>${htmlEscape(row.maxStoredBundles)}</code></li>`,
+        `<li>Integrations: <code>${htmlEscape(row.maxIntegrations)}</code></li>`,
+        `<li>Retention days: <code>${htmlEscape(row.retentionDays)}</code></li>`,
+        "</ul>",
+        "</section>"
+      ].join("\n")
+    )
+    .join("\n");
+
+  const body = [
+    "<!doctype html>",
+    "<html><head><meta charset=\"utf-8\"/>",
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>",
+    "<title>Pricing</title>",
+    "<style>",
+    ":root{--bg:#f8fafc;--ink:#0f172a;--muted:#475569;--line:#cbd5e1;--card:#ffffff;--accent:#0f766e}",
+    "*{box-sizing:border-box}",
+    "body{margin:0;background:radial-gradient(circle at 0 0,#dff8f3 0,#f8fafc 45%),radial-gradient(circle at 100% 100%,#e0ecff 0,#f8fafc 42%);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:var(--ink)}",
+    ".shell{max-width:1080px;margin:0 auto;padding:28px 18px 44px}",
+    ".hero{border:1px solid var(--line);background:var(--card);border-radius:16px;padding:20px;box-shadow:0 10px 28px rgba(15,23,42,.06)}",
+    ".hero h1{margin:0 0 8px;font-size:30px}",
+    ".hero p{margin:0;color:var(--muted)}",
+    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px}",
+    ".card{border:1px solid var(--line);background:var(--card);border-radius:14px;padding:14px}",
+    ".card h2{margin:0 0 8px;font-size:20px}",
+    ".price{font-size:30px;font-weight:800;line-height:1.1;margin-bottom:6px}",
+    ".price span{font-size:14px;color:var(--muted);font-weight:600;margin-left:4px}",
+    ".muted{color:var(--muted)}",
+    "ul{margin:10px 0 0;padding-left:18px}",
+    "li{margin:4px 0}",
+    ".foot{margin-top:14px;border:1px dashed var(--line);border-radius:12px;background:#fff;padding:12px}",
+    "code{background:#f1f5f9;padding:2px 6px;border-radius:6px}",
+    "a.btn{display:inline-flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;border-radius:10px;padding:8px 12px;text-decoration:none;font-weight:700}",
+    "</style>",
+    "</head><body><div class=\"shell\">",
+    "<div class=\"hero\">",
+    "<h1>Settld Pricing</h1>",
+    "<p>Usage-led plans for verified economic transactions. Billing surfaces are plan-aware and enforced in the runtime.</p>",
+    "<div style=\"margin-top:10px\"><a class=\"btn\" href=\"/v1/tenants/tenant_a/onboarding\">Start onboarding</a></div>",
+    "</div>",
+    "<div class=\"grid\">",
+    cards,
+    "<section class=\"card\">",
+    "<h2>Enterprise</h2>",
+    "<div class=\"price\">Custom<span>annual</span></div>",
+    "<div class=\"muted\">Dedicated contracts, policy governance, and negotiated volume pricing.</div>",
+    "<ul><li>Custom limits and support terms</li><li>Compliance and reporting extensions</li><li>Custom commercial terms</li></ul>",
+    "</section>",
+    "</div>",
+    "<div class=\"foot\">",
+    "<strong>Value-event pricing details</strong>",
+    "<div class=\"muted\" style=\"margin-top:6px\">Invoice drafts and period-close flows meter <code>VERIFIED_RUN</code>, <code>SETTLED_VOLUME</code>, and <code>ARBITRATION_USAGE</code> events. Settled-volume and arbitration fees are policy-configurable and appear as explicit invoice line items.</div>",
+    "</div>",
+    "</div></body></html>"
+  ].join("\n");
+  res.statusCode = 200;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.setHeader("cache-control", "no-store");
+  res.end(body);
+}
+
 async function handleTenantIntegrationsPage(req, res, tenantId) {
   const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
   if (!auth.ok) return;
@@ -5415,6 +6771,9 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     ".status.bad{border-color:#fecaca;background:#fef2f2;color:var(--bad)}",
     "pre{margin:0;white-space:pre-wrap;word-break:break-word;background:#0b1020;color:#f8fafc;border-radius:12px;padding:10px;max-height:340px;overflow:auto}",
     "code{background:#f1f5f9;padding:2px 6px;border-radius:6px}",
+    ".pill{display:inline-flex;align-items:center;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;padding:1px 7px;border-radius:999px;font-size:12px;font-weight:600}",
+    "table{width:100%;border-collapse:collapse}",
+    "th,td{border-bottom:1px solid #e2e8f0;padding:6px 8px;text-align:left;font-size:13px;vertical-align:top}",
     "</style>",
     "</head><body><div class=\"shell\">",
     "<div class=\"hero\">",
@@ -5446,6 +6805,34 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "</div>",
     "<div class=\"muted\" style=\"margin-top:8px\">Selected policy detail</div>",
     "<pre id=\"policyDetail\">{}</pre>",
+    "</section>",
+    "<section class=\"card\">",
+    "<h2>Rollout Stages</h2>",
+    "<div id=\"rolloutStatus\" class=\"status\">Loading…</div>",
+    "<div class=\"row\" style=\"margin-top:8px\">",
+    "<div class=\"field small\"><div class=\"muted\">Stage</div><select id=\"rolloutStage\"><option value=\"draft\">draft</option><option value=\"canary\">canary</option><option value=\"active\">active</option></select></div>",
+    "<div class=\"field\"><div class=\"muted\">Policy version for stage</div><select id=\"rolloutPolicySelect\"></select></div>",
+    "<div class=\"field small\"><div class=\"muted\">Canary rollout %</div><input id=\"rolloutPercent\" type=\"number\" min=\"1\" max=\"100\" value=\"10\"/></div>",
+    "</div>",
+    "<div class=\"row\" style=\"margin-top:8px\">",
+    "<button class=\"btn\" id=\"applyRolloutStage\">Apply stage</button>",
+    "<button class=\"btn ghost\" id=\"promoteDraft\">Promote draft to active</button>",
+    "<button class=\"btn ghost\" id=\"clearCanary\">Clear canary</button>",
+    "<button class=\"btn warn\" id=\"rollbackActive\">Rollback active</button>",
+    "</div>",
+    "<div class=\"muted\" style=\"margin-top:8px\">Recent rollout history</div>",
+    "<pre id=\"rolloutHistory\">[]</pre>",
+    "</section>",
+    "<section class=\"card\">",
+    "<h2>Preset Packs</h2>",
+    "<div class=\"muted\">One-click policy packs for spend caps, holdbacks, and dispute windows.</div>",
+    "<div class=\"row\" style=\"margin-top:8px\">",
+    "<div class=\"field\"><div class=\"muted\">Preset</div><select id=\"presetSelect\"></select></div>",
+    "<label class=\"muted\"><input id=\"presetSetDefault\" type=\"checkbox\" checked/> set as default active policy</label>",
+    "<button class=\"btn\" id=\"applyPreset\">Apply preset</button>",
+    "</div>",
+    "<div id=\"presetStatus\" class=\"status\" style=\"margin-top:8px\">Loading preset catalog…</div>",
+    "<pre id=\"presetDetail\" style=\"margin-top:8px\">{}</pre>",
     "</section>",
     "<section class=\"card\">",
     "<h2>Publish Policy Version</h2>",
@@ -5492,11 +6879,26 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "</div>",
     "<pre id=\"replayResult\">{}</pre>",
     "</section>",
+    "<section class=\"card\">",
+    "<h2>Policy Diff</h2>",
+    "<div class=\"muted\">Compare two policy versions to review field-level changes before rollout.</div>",
+    "<div class=\"row\" style=\"margin-top:8px\">",
+    "<div class=\"field\"><div class=\"muted\">From policy</div><select id=\"diffFrom\"></select></div>",
+    "<div class=\"field\"><div class=\"muted\">To policy</div><select id=\"diffTo\"></select></div>",
+    "<div class=\"field small\"><div class=\"muted\">Row limit</div><input id=\"diffLimit\" type=\"number\" min=\"1\" max=\"2000\" value=\"200\"/></div>",
+    "</div>",
+    "<div class=\"row\" style=\"margin-top:8px\">",
+    "<button class=\"btn warn\" id=\"computeDiff\">Compute diff</button>",
+    "<span id=\"diffStatus\" class=\"muted\"></span>",
+    "</div>",
+    "<div id=\"diffSummary\" class=\"status\" style=\"margin-top:8px\">No diff loaded.</div>",
+    "<div id=\"diffTable\" style=\"margin-top:8px\"></div>",
+    "</section>",
     "</div>",
     "</div>",
     "<script>",
     `const tenantId = ${JSON.stringify(tenantId)};`,
-    "const state = { payload: null, selectedKey: '', upgradeMessage: '', upgradeHintApi: null };",
+    "const state = { payload: null, selectedKey: '', upgradeMessage: '', upgradeHintApi: null, diff: null, diffFromKey: '', diffToKey: '', presets: [], selectedPresetId: '' };",
     "function setText(id, text){ const el=document.getElementById(id); if(el) el.textContent=String(text||''); }",
     "function setClass(id, base, tone){ const el=document.getElementById(id); if(!el) return; el.className = base + (tone ? ' '+tone : ''); }",
     "function setHtml(id, html){ const el=document.getElementById(id); if(el) el.innerHTML=String(html||''); }",
@@ -5519,12 +6921,16 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "  }catch(e){ if(!applyUpgradeHintFromApi(e)){ state.upgradeMessage = `upgrade failed: ${e.message}`; render(); } }",
     "}",
     "function parseKey(key){ const t=String(key||''); const i=t.lastIndexOf('@'); if(i<=0) return null; const policyId=t.slice(0,i); const version=Number(t.slice(i+1)); if(!policyId||!Number.isInteger(version)||version<1) return null; return { policyId, policyVersion: version }; }",
+    "function keyForRef(ref){ if(!ref||typeof ref!=='object') return ''; const id=String(ref.policyId||'').trim(); const version=Number(ref.policyVersion); if(!id||!Number.isInteger(version)||version<1) return ''; return `${id}@${version}`; }",
+    "function selectedPreset(){ const rows = Array.isArray(state.presets) ? state.presets : []; const id = String(state.selectedPresetId||'').trim(); if(!id) return rows[0] || null; return rows.find((row)=>String(row && row.presetId || '')===id) || rows[0] || null; }",
     "function selectedRecord(){",
     "  const rows = state.payload && Array.isArray(state.payload.policies) ? state.payload.policies : [];",
     "  const parsed = parseKey(state.selectedKey);",
     "  if(!parsed) return rows[0] || null;",
     "  return rows.find((row)=>String(row.policyId)===parsed.policyId && Number(row.policyVersion)===parsed.policyVersion) || null;",
     "}",
+    "function rowsFromState(){ return state.payload && Array.isArray(state.payload.policies) ? state.payload.policies : []; }",
+    "function rowKey(row){ return row ? `${row.policyId}@${row.policyVersion}` : ''; }",
     "async function getJson(url){ const res=await fetch(url,{credentials:'same-origin'}); const txt=await res.text(); let j=null; try{ j=txt?JSON.parse(txt):null; }catch{} if(!res.ok) throw new Error((j&&j.message)||txt||('HTTP '+res.status)); return j; }",
     "async function postJson(url, body){ const res=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})}); const txt=await res.text(); let j=null; try{ j=txt?JSON.parse(txt):null; }catch{} if(!res.ok){ const err=new Error((j&&j.message)||txt||('HTTP '+res.status)); if(j) err.payload=j; throw err; } return j; }",
     "function apiPayloadFromError(err){ return err && typeof err==='object' && err.payload && typeof err.payload==='object' ? err.payload : null; }",
@@ -5537,6 +6943,55 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "  if(!state.upgradeMessage) state.upgradeMessage = state.upgradeHintApi.message || '';",
     "  render();",
     "  return true;",
+    "}",
+    "function setSelectOptions(selectId, rows, selectedKey, emptyLabel){",
+    "  const sel = document.getElementById(selectId);",
+    "  if(!sel) return;",
+    "  sel.innerHTML='';",
+    "  for(const row of rows){",
+    "    const opt=document.createElement('option');",
+    "    const key=rowKey(row);",
+    "    opt.value=key;",
+    "    opt.textContent=key;",
+    "    sel.appendChild(opt);",
+    "  }",
+    "  if(!rows.length){ const opt=document.createElement('option'); opt.value=''; opt.textContent=emptyLabel||'(none)'; sel.appendChild(opt); }",
+    "  const chosen = selectedKey && rows.some((row)=>rowKey(row)===selectedKey) ? selectedKey : (rows[0] ? rowKey(rows[0]) : '');",
+    "  sel.value = chosen;",
+    "}",
+    "function valueSummary(v){",
+    "  if(v===null||v===undefined) return 'null';",
+    "  if(typeof v==='string') return v.length>96 ? `${v.slice(0,93)}...` : v;",
+    "  const raw = JSON.stringify(v);",
+    "  if(typeof raw!=='string') return String(v);",
+    "  return raw.length>96 ? `${raw.slice(0,93)}...` : raw;",
+    "}",
+    "function tableFromRows(columns, rows){",
+    "  if(!Array.isArray(rows)||!rows.length) return '<div class=\"muted\">No rows.</div>';",
+    "  const head='<tr>'+columns.map((c)=>`<th>${esc(c.label)}</th>`).join('')+'</tr>';",
+    "  const body=rows.map((row)=>'<tr>'+columns.map((c)=>`<td>${esc(c.render ? c.render(row) : row[c.key])}</td>`).join('')+'</tr>').join('');",
+    "  return `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;",
+    "}",
+    "function renderDiff(){",
+    "  if(!state.diff){",
+    "    setText('diffSummary', 'No diff loaded.');",
+    "    setClass('diffSummary', 'status', '');",
+    "    setHtml('diffTable', '<div class=\"muted\">Compute a diff between two policy versions.</div>');",
+    "    return;",
+    "  }",
+    "  const diff = state.diff;",
+    "  const summary = diff.summary || {};",
+    "  const changedTotal = Number(summary.changed||0) + Number(summary.added||0) + Number(summary.removed||0);",
+    "  const summaryText = `from=${keyForRef(diff.fromPolicyRef)||'unknown'} -> to=${keyForRef(diff.toPolicyRef)||'unknown'} | changed=${summary.changed||0} added=${summary.added||0} removed=${summary.removed||0} unchanged=${summary.unchanged||0}`;",
+    "  setText('diffSummary', summaryText);",
+    "  setClass('diffSummary', 'status', changedTotal > 0 ? 'warn' : 'good');",
+    "  const rows = Array.isArray(diff.changes) ? diff.changes : [];",
+    "  setHtml('diffTable', tableFromRows([",
+    "    { key: 'kind', label: 'Kind' },",
+    "    { key: 'path', label: 'Path' },",
+    "    { key: 'fromValue', label: 'From', render: (row)=>valueSummary(row.fromValue) },",
+    "    { key: 'toValue', label: 'To', render: (row)=>valueSummary(row.toValue) }",
+    "  ], rows));",
     "}",
     "function render(){",
     "  const payload = state.payload || {};",
@@ -5568,9 +7023,15 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "  } else {",
     "    setText('policyUpgradeHint', 'Scale plan has no policy version cap.');",
     "  }",
+    "  const rollout = payload.rollout && typeof payload.rollout==='object' ? payload.rollout : {};",
+    "  const rolloutStages = rollout.stages && typeof rollout.stages==='object' ? rollout.stages : {};",
     "  const defaultRef = payload.defaultPolicyRef || null;",
+    "  const draftRef = rolloutStages.draft || null;",
+    "  const activeRef = rolloutStages.active || defaultRef || null;",
+    "  const canaryRef = rolloutStages.canary && rolloutStages.canary.policyRef ? rolloutStages.canary.policyRef : null;",
+    "  const canaryPercent = rolloutStages.canary && Number.isFinite(Number(rolloutStages.canary.rolloutPercent)) ? Number(rolloutStages.canary.rolloutPercent) : 0;",
     "  const summary = rows.length",
-    "    ? `versions=${rows.length} | policyIds=${(payload.policyIds||[]).length} | default=${defaultRef ? `${defaultRef.policyId}@${defaultRef.policyVersion}` : 'none'}`",
+    "    ? `versions=${rows.length} | policyIds=${(payload.policyIds||[]).length} | default=${defaultRef ? `${defaultRef.policyId}@${defaultRef.policyVersion}` : 'none'} | active=${keyForRef(activeRef)||'none'}`",
     "    : 'No policy versions saved yet.';",
     "  setText('registryStatus', summary);",
     "  const registryEl=document.getElementById('registryStatus');",
@@ -5582,7 +7043,12 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "      const key = `${row.policyId}@${row.policyVersion}`;",
     "      const opt = document.createElement('option');",
     "      opt.value = key;",
-    "      opt.textContent = key + (defaultRef && defaultRef.policyId===row.policyId && Number(defaultRef.policyVersion)===Number(row.policyVersion) ? ' (default)' : '');",
+    "      const tags=[];",
+    "      if(defaultRef && defaultRef.policyId===row.policyId && Number(defaultRef.policyVersion)===Number(row.policyVersion)) tags.push('default');",
+    "      if(activeRef && activeRef.policyId===row.policyId && Number(activeRef.policyVersion)===Number(row.policyVersion)) tags.push('active');",
+    "      if(draftRef && draftRef.policyId===row.policyId && Number(draftRef.policyVersion)===Number(row.policyVersion)) tags.push('draft');",
+    "      if(canaryRef && canaryRef.policyId===row.policyId && Number(canaryRef.policyVersion)===Number(row.policyVersion)) tags.push(`canary:${canaryPercent}%`);",
+    "      opt.textContent = key + (tags.length ? ` [${tags.join(', ')}]` : '');",
     "      sel.appendChild(opt);",
     "    }",
     "    if(!rows.length){",
@@ -5594,12 +7060,136 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "  }",
     "  const selected = selectedRecord();",
     "  setText('policyDetail', JSON.stringify(selected || {}, null, 2));",
+    "  const rolloutStatus = `active=${keyForRef(activeRef)||'none'} | draft=${keyForRef(draftRef)||'none'} | canary=${keyForRef(canaryRef)||'none'}${canaryRef ? ` (${canaryPercent}%)` : ''}`;",
+    "  setText('rolloutStatus', rolloutStatus);",
+    "  setClass('rolloutStatus', 'status', activeRef ? (canaryRef ? 'warn' : 'good') : 'warn');",
+    "  const rolloutHistory = Array.isArray(payload.rolloutHistory) ? payload.rolloutHistory : (Array.isArray(rollout.history) ? rollout.history.slice().reverse() : []);",
+    "  setText('rolloutHistory', JSON.stringify(rolloutHistory.slice(0, 30), null, 2));",
+    "  const presetRows = Array.isArray(state.presets) ? state.presets : [];",
+    "  const presetSelect = document.getElementById('presetSelect');",
+    "  if(presetSelect){",
+    "    presetSelect.innerHTML='';",
+    "    for(const preset of presetRows){",
+    "      const id = String(preset && preset.presetId ? preset.presetId : '').trim();",
+    "      if(!id) continue;",
+    "      const opt = document.createElement('option');",
+    "      opt.value = id;",
+    "      opt.textContent = `${id} - ${String(preset && preset.name ? preset.name : '')}`;",
+    "      presetSelect.appendChild(opt);",
+    "    }",
+    "    if(!presetRows.length){ const opt=document.createElement('option'); opt.value=''; opt.textContent='(none)'; presetSelect.appendChild(opt); }",
+    "    const selectedPresetId = state.selectedPresetId && presetRows.some((row)=>String(row && row.presetId || '')===state.selectedPresetId) ? state.selectedPresetId : (presetRows[0] ? String(presetRows[0].presetId || '') : '');",
+    "    state.selectedPresetId = selectedPresetId;",
+    "    presetSelect.value = selectedPresetId;",
+    "  }",
+    "  const preset = selectedPreset();",
+    "  const presetStatus = preset ? `Preset ${preset.presetId} ready. One click will publish${document.getElementById('presetSetDefault') && document.getElementById('presetSetDefault').checked ? ' and promote to active' : ' to draft'}.` : 'No preset catalog available.';",
+    "  setText('presetStatus', presetStatus);",
+    "  setClass('presetStatus', 'status', preset ? 'good' : 'warn');",
+    "  setText('presetDetail', JSON.stringify(preset || {}, null, 2));",
+    "  const stageSelect = document.getElementById('rolloutStage');",
+    "  const stage = stageSelect ? String(stageSelect.value||'draft') : 'draft';",
+    "  const stageSelectedKey = stage==='active' ? keyForRef(activeRef) : stage==='canary' ? keyForRef(canaryRef) : keyForRef(draftRef);",
+    "  setSelectOptions('rolloutPolicySelect', rows, stageSelectedKey || state.selectedKey, '(select policy)');",
+    "  const percentInput = document.getElementById('rolloutPercent');",
+    "  if(percentInput && (!percentInput.value || Number(percentInput.value)<=0)) percentInput.value = String(canaryPercent > 0 ? canaryPercent : 10);",
+    "  const fallbackFrom = keyForRef(activeRef) || (rows[0] ? rowKey(rows[0]) : '');",
+    "  const fallbackTo = keyForRef(draftRef) || keyForRef(canaryRef) || state.selectedKey || fallbackFrom;",
+    "  state.diffFromKey = state.diffFromKey && rows.some((row)=>rowKey(row)===state.diffFromKey) ? state.diffFromKey : fallbackFrom;",
+    "  state.diffToKey = state.diffToKey && rows.some((row)=>rowKey(row)===state.diffToKey) ? state.diffToKey : fallbackTo;",
+    "  setSelectOptions('diffFrom', rows, state.diffFromKey, '(none)');",
+    "  setSelectOptions('diffTo', rows, state.diffToKey, '(none)');",
+    "  renderDiff();",
     "}",
     "async function refreshState(){",
     "  const j = await getJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/state`);",
     "  state.payload = j;",
     "  state.upgradeHintApi = null;",
     "  render();",
+    "}",
+    "async function refreshPresets(){",
+    "  const j = await getJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/presets`);",
+    "  state.presets = Array.isArray(j && j.presets) ? j.presets : [];",
+    "  render();",
+    "}",
+    "async function applyRolloutStage(){",
+    "  const stage = String(document.getElementById('rolloutStage').value||'draft');",
+    "  const selectedKey = String(document.getElementById('rolloutPolicySelect').value||'');",
+    "  const parsed = parseKey(selectedKey);",
+    "  if(!parsed){ setText('rolloutStatus', `Select a policy for ${stage} stage`); setClass('rolloutStatus','status','bad'); return; }",
+    "  const body = { stage, policyId: parsed.policyId, policyVersion: parsed.policyVersion };",
+    "  if(stage==='canary'){",
+    "    body.rolloutPercent = Number(document.getElementById('rolloutPercent').value||10);",
+    "  }",
+    "  setText('rolloutStatus', `applying ${stage}...`);",
+    "  setClass('rolloutStatus', 'status', '');",
+    "  try{",
+    "    await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/rollout`, body);",
+    "    await refreshState();",
+    "  } catch(e){ applyUpgradeHintFromApi(e); setText('rolloutStatus', 'failed: '+e.message); setClass('rolloutStatus','status','bad'); }",
+    "}",
+    "async function promoteDraft(){",
+    "  const payload = state.payload || {};",
+    "  const rollout = payload.rollout && payload.rollout.stages ? payload.rollout.stages : {};",
+    "  const draftRef = rollout.draft || null;",
+    "  if(!draftRef){ setText('rolloutStatus', 'No draft policy available to promote.'); setClass('rolloutStatus', 'status', 'warn'); return; }",
+    "  setText('rolloutStatus', 'promoting draft to active...');",
+    "  setClass('rolloutStatus', 'status', '');",
+    "  try{",
+    "    await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/rollout`, { stage: 'active', policyId: draftRef.policyId, policyVersion: draftRef.policyVersion, note: 'promote draft' });",
+    "    await refreshState();",
+    "  } catch(e){ applyUpgradeHintFromApi(e); setText('rolloutStatus', 'failed: '+e.message); setClass('rolloutStatus', 'status', 'bad'); }",
+    "}",
+    "async function clearCanary(){",
+    "  setText('rolloutStatus', 'clearing canary stage...');",
+    "  setClass('rolloutStatus', 'status', '');",
+    "  try{",
+    "    await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/rollout`, { stage: 'canary', clear: true, note: 'clear canary stage' });",
+    "    await refreshState();",
+    "  } catch(e){ applyUpgradeHintFromApi(e); setText('rolloutStatus', 'failed: '+e.message); setClass('rolloutStatus', 'status', 'bad'); }",
+    "}",
+    "async function applyPreset(){",
+    "  const presetId = String(document.getElementById('presetSelect').value||'').trim();",
+    "  if(!presetId){ setText('presetStatus','select a preset first'); setClass('presetStatus','status','bad'); return; }",
+    "  const setAsDefault = Boolean(document.getElementById('presetSetDefault').checked);",
+    "  setText('presetStatus', `applying ${presetId}...`);",
+    "  setClass('presetStatus', 'status', '');",
+    "  try{",
+    "    const out = await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/presets/apply`, { presetId, setAsDefault });",
+    "    if(out && out.policy && out.policy.policyId && out.policy.policyVersion){ state.selectedKey = `${out.policy.policyId}@${out.policy.policyVersion}`; }",
+    "    setText('presetStatus', `applied ${presetId}`);",
+    "    setClass('presetStatus', 'status', 'good');",
+    "    await refreshState();",
+    "  } catch(e){ applyUpgradeHintFromApi(e); setText('presetStatus','failed: '+e.message); setClass('presetStatus','status','bad'); }",
+    "}",
+    "async function rollbackActive(){",
+    "  setText('rolloutStatus', 'rolling back active stage...');",
+    "  setClass('rolloutStatus', 'status', '');",
+    "  try{",
+    "    await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/rollback`, { note: 'rollback via control plane' });",
+    "    await refreshState();",
+    "  } catch(e){ applyUpgradeHintFromApi(e); setText('rolloutStatus', 'failed: '+e.message); setClass('rolloutStatus', 'status', 'bad'); }",
+    "}",
+    "async function computeDiff(){",
+    "  const fromParsed = parseKey(String(document.getElementById('diffFrom').value||''));",
+    "  const toParsed = parseKey(String(document.getElementById('diffTo').value||''));",
+    "  if(!fromParsed || !toParsed){ setText('diffStatus','select from/to policies first'); return; }",
+    "  const limit = Number(document.getElementById('diffLimit').value||200);",
+    "  state.diffFromKey = `${fromParsed.policyId}@${fromParsed.policyVersion}`;",
+    "  state.diffToKey = `${toParsed.policyId}@${toParsed.policyVersion}`;",
+    "  setText('diffStatus','computing diff...');",
+    "  try{",
+    "    const qs = new URLSearchParams();",
+    "    qs.set('fromPolicyId', fromParsed.policyId);",
+    "    qs.set('fromPolicyVersion', String(fromParsed.policyVersion));",
+    "    qs.set('toPolicyId', toParsed.policyId);",
+    "    qs.set('toPolicyVersion', String(toParsed.policyVersion));",
+    "    qs.set('limit', String(Number.isInteger(limit)&&limit>0?limit:200));",
+    "    const out = await getJson(`/v1/tenants/${encodeURIComponent(tenantId)}/settlement-policies/diff?${qs.toString()}`);",
+    "    state.diff = out;",
+    "    setText('diffStatus','diff loaded');",
+    "    renderDiff();",
+    "  } catch(e){ setText('diffStatus','failed: '+e.message); }",
     "}",
     "async function savePolicy(){",
     "  const policyId = String(document.getElementById('policyId').value||'').trim();",
@@ -5665,13 +7255,24 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "  } catch(e){ applyUpgradeHintFromApi(e); setText('replayStatus','failed: '+e.message); }",
     "}",
     "document.getElementById('policySelect').addEventListener('change', (e)=>{ state.selectedKey = String(e.target && e.target.value ? e.target.value : ''); render(); });",
+    "document.getElementById('presetSelect').addEventListener('change', (e)=>{ state.selectedPresetId = String(e.target && e.target.value ? e.target.value : ''); render(); });",
+    "document.getElementById('rolloutStage').addEventListener('change', ()=>render());",
+    "document.getElementById('rolloutPolicySelect').addEventListener('change', (e)=>{ state.selectedKey = String(e.target && e.target.value ? e.target.value : state.selectedKey); render(); });",
+    "document.getElementById('diffFrom').addEventListener('change', (e)=>{ state.diffFromKey = String(e.target && e.target.value ? e.target.value : ''); });",
+    "document.getElementById('diffTo').addEventListener('change', (e)=>{ state.diffToKey = String(e.target && e.target.value ? e.target.value : ''); });",
     "document.getElementById('refreshState').addEventListener('click', ()=>refreshState().catch((e)=>setText('registryStatus','failed: '+e.message)));",
     "document.getElementById('setDefault').addEventListener('click', ()=>setDefault().catch((e)=>setText('saveStatus','failed: '+e.message)));",
+    "document.getElementById('applyRolloutStage').addEventListener('click', ()=>applyRolloutStage().catch((e)=>setText('rolloutStatus','failed: '+e.message)));",
+    "document.getElementById('promoteDraft').addEventListener('click', ()=>promoteDraft().catch((e)=>setText('rolloutStatus','failed: '+e.message)));",
+    "document.getElementById('clearCanary').addEventListener('click', ()=>clearCanary().catch((e)=>setText('rolloutStatus','failed: '+e.message)));",
+    "document.getElementById('rollbackActive').addEventListener('click', ()=>rollbackActive().catch((e)=>setText('rolloutStatus','failed: '+e.message)));",
+    "document.getElementById('applyPreset').addEventListener('click', ()=>applyPreset().catch((e)=>setText('presetStatus','failed: '+e.message)));",
     "document.getElementById('savePolicy').addEventListener('click', ()=>savePolicy().catch((e)=>setText('saveStatus','failed: '+e.message)));",
     "document.getElementById('runReplay').addEventListener('click', ()=>runReplay().catch((e)=>setText('replayStatus','failed: '+e.message)));",
+    "document.getElementById('computeDiff').addEventListener('click', ()=>computeDiff().catch((e)=>setText('diffStatus','failed: '+e.message)));",
     "document.getElementById('policyUpgradePlan').addEventListener('click', ()=>startUpgradeCheckout());",
     "document.getElementById('policyOpenBillingState').addEventListener('click', ()=>window.location.assign(`/v1/tenants/${encodeURIComponent(tenantId)}/billing/state`));",
-    "refreshState().catch((e)=>setText('registryStatus','failed: '+e.message));",
+    "Promise.all([refreshState(), refreshPresets()]).catch((e)=>{ setText('registryStatus','failed: '+e.message); setText('presetStatus','failed: '+e.message); });",
     "</script>",
     "</body></html>"
   ].join("\n");
@@ -5944,6 +7545,13 @@ async function handleTenantOnboardingEnableDemoTrust(req, res, tenantId) {
   });
   if (!patched.ok) return sendJson(res, 400, { ok: false, code: "INVALID_SETTINGS", message: patched.error ?? "invalid settings" });
   await saveTenantSettings({ dataDir, tenantId, settings: patched.settings, settingsKey });
+  await recordTenantOnboardingEvent({
+    dataDir,
+    tenantId,
+    eventType: "demo_trust_enabled",
+    source: "onboarding_demo_trust",
+    metadata: { defaultMode: "strict" }
+  });
 
   try {
     await appendAuditRecord({
@@ -6090,6 +7698,16 @@ async function handleTenantSlaTemplateRender(req, res, tenantId) {
     return sendJson(res, 400, { ok: false, code: "INVALID_TEMPLATE_OVERRIDES", message: err?.message ?? "invalid overrides" });
   }
   if (!rendered) return sendJson(res, 404, { ok: false, code: "TEMPLATE_NOT_FOUND", message: "template not found" });
+  await recordTenantOnboardingEvent({
+    dataDir,
+    tenantId,
+    eventType: "template_rendered",
+    source: "onboarding_template_render",
+    metadata: {
+      templateId: rendered?.templateId ?? templateId,
+      hasOverrides: Boolean(json.overrides && typeof json.overrides === "object" && !Array.isArray(json.overrides))
+    }
+  });
   return sendJson(res, 200, {
     ok: true,
     schemaVersion: "MagicLinkSlaTemplateRender.v1",
@@ -6141,6 +7759,12 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     ".status.good{border-color:#bbf7d0;background:#f0fdf4;color:var(--good)}",
     ".status.warn{border-color:#fed7aa;background:#fffbeb;color:var(--warn)}",
     ".status.bad{border-color:#fecaca;background:#fef2f2;color:var(--bad)}",
+    ".checklist{display:grid;gap:8px;margin-top:10px}",
+    ".check-item{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;background:#f8fafc}",
+    ".check-item.good{border-color:#bbf7d0;background:#f0fdf4}",
+    ".check-item.pending{border-color:#bfdbfe;background:#eff6ff}",
+    ".check-item .label{font-weight:600}",
+    ".check-item .meta{font-size:12px;color:var(--muted)}",
     "code{background:#f1f5f9;padding:2px 6px;border-radius:6px}",
     ".mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}",
     "</style>",
@@ -6206,6 +7830,16 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "<div id=\"decisionState\" class=\"muted\" style=\"margin-top:8px\"></div>",
     "</section>",
     "<section class=\"card\">",
+    "<h2>Step 5. First settlement checklist</h2>",
+    "<div class=\"muted\">Follow this guided sequence to reach a verified first settlement and buyer handoff.</div>",
+    "<div id=\"checklistSummary\" class=\"status\" style=\"margin-top:8px\">Loading checklist…</div>",
+    "<div id=\"firstSettlementChecklist\" class=\"checklist\"></div>",
+    "<div class=\"row\" style=\"margin-top:8px\">",
+    "<button class=\"btn ghost\" id=\"refreshChecklistBtn\">Refresh checklist</button>",
+    `<a class="btn ghost" href="/v1/tenants/${encodeURIComponent(tenantId)}/analytics/dashboard?month=${encodeURIComponent(month)}" target="_blank" rel="noreferrer">Open analytics dashboard</a>`,
+    "</div>",
+    "</section>",
+    "<section class=\"card\">",
     "<h2>Ops exports</h2>",
     "<div class=\"muted\">Use these when sharing monthly evidence with counterparties/compliance.</div>",
     "<div style=\"margin-top:8px\">",
@@ -6218,7 +7852,7 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "</div>",
     "<script>",
     `const tenantId = ${JSON.stringify(tenantId)};`,
-    "const state = { templates: [], selectedTemplate: null, renderedTemplate: null, token: null };",
+    "const state = { templates: [], selectedTemplate: null, renderedTemplate: null, token: null, onboardingMetrics: null };",
     "function setText(id, text){ const el=document.getElementById(id); if(el) el.textContent=String(text||''); }",
     "function setHtml(id, html){ const el=document.getElementById(id); if(el) el.innerHTML=String(html||''); }",
     "function b64urlJson(obj){ return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,''); }",
@@ -6227,6 +7861,13 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "function currentMeta(){ return { vendorId:document.getElementById('vendorId').value.trim(), vendorName:document.getElementById('vendorName').value.trim(), contractId:document.getElementById('contractId').value.trim(), mode:document.getElementById('mode').value.trim()||'auto' }; }",
     "async function getJson(url){ const res=await fetch(url,{credentials:'same-origin'}); const txt=await res.text(); let j=null; try{ j=txt?JSON.parse(txt):null; }catch{} if(!res.ok) throw new Error((j&&j.message)||txt||('HTTP '+res.status)); return j; }",
     "async function postJson(url, body){ const res=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})}); const txt=await res.text(); let j=null; try{ j=txt?JSON.parse(txt):null; }catch{} if(!res.ok) throw new Error((j&&j.message)||txt||('HTTP '+res.status)); return j; }",
+    "async function trackOnboardingEvent(eventType, metadata){ try{ await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/events`, { eventType, source: 'onboarding_ui', metadata: metadata||null }); } catch{} }",
+    "const checklistStages=[{ key:'wizard_viewed', label:'Open onboarding wizard' },{ key:'template_selected', label:'Select SLA template' },{ key:'template_validated', label:'Validate template configuration' },{ key:'artifact_generated', label:'Generate first artifact (sample or real)' },{ key:'real_upload_generated', label:'Run real vendor upload' },{ key:'first_verified', label:'Get first verified result' },{ key:'buyer_link_shared', label:'Share buyer link' }];",
+    "const nextActionByStage={ wizard_viewed:'Open onboarding wizard.', template_selected:'Select an SLA template in Step 1.', template_validated:'Validate configuration in Step 2.', artifact_generated:'Upload a sample or bundle in Step 3.', real_upload_generated:'Run a real vendor upload in Step 3.', first_verified:'Produce a passing verification result.', buyer_link_shared:'Copy/share buyer link in Step 4.' };",
+    "function funnelStageMap(metrics){ const stages=metrics&&metrics.funnel&&Array.isArray(metrics.funnel.stages)?metrics.funnel.stages:[]; const map=new Map(); for(const s of stages){ const key=String(s&&s.stageKey?s.stageKey:'').trim(); if(!key) continue; map.set(key,s); } return map; }",
+    "function formatIsoShort(value){ if(!value) return 'pending'; const ms=Date.parse(String(value)); if(!Number.isFinite(ms)) return 'pending'; return new Date(ms).toISOString().replace('T',' ').slice(0,16)+'Z'; }",
+    "function renderChecklist(metrics){ const host=document.getElementById('firstSettlementChecklist'); const summary=document.getElementById('checklistSummary'); if(!host||!summary) return; const map=funnelStageMap(metrics); const funnel=metrics&&metrics.funnel&&typeof metrics.funnel==='object'?metrics.funnel:{}; const rows=checklistStages.map((item, idx)=>{ const stage=map.get(item.key)||null; const reached=Boolean(stage&&stage.reached); const at=stage&&stage.at?formatIsoShort(stage.at):'pending'; return `<div class=\\\"check-item ${reached?'good':'pending'}\\\"><div><div class=\\\"label\\\">${idx+1}. ${item.label}</div><div class=\\\"meta\\\">${reached?('completed '+at):'pending'}</div></div><div class=\\\"meta\\\">${reached?'done':'todo'}</div></div>`; }); setHtml('firstSettlementChecklist', rows.join('')); const reachedStages=Number.isFinite(Number(funnel.reachedStages))?Number(funnel.reachedStages):checklistStages.length-rows.filter((r)=>r.includes('todo')).length; const totalStages=Number.isFinite(Number(funnel.totalStages))?Number(funnel.totalStages):checklistStages.length; const completionPct=Number.isFinite(Number(funnel.completionPct))?Number(funnel.completionPct):0; const nextStageKey=funnel&&typeof funnel.nextStageKey==='string'&&funnel.nextStageKey.trim()?funnel.nextStageKey.trim():null; const nextAction=nextStageKey?(nextActionByStage[nextStageKey]||`Complete ${nextStageKey}.`):'Checklist complete. Continue with operations and monitoring.'; summary.className='status '+(nextStageKey?'warn':'good'); summary.textContent=`Checklist ${reachedStages}/${totalStages} complete (${completionPct}%). ${nextAction}`; }",
+    "async function refreshChecklist(){ try{ const j=await getJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding-metrics`); state.onboardingMetrics=j; renderChecklist(j); } catch(e){ const summary=document.getElementById('checklistSummary'); if(summary){ summary.className='status bad'; summary.textContent='Checklist unavailable: '+e.message; } } }",
     "function statusFromVerify(v){ const ok=!!(v&&v.ok); const verificationOk=!!(v&&v.verificationOk); const warnings=Array.isArray(v&&v.warnings)?v.warnings:[]; if(!ok||!verificationOk) return 'red'; if(warnings.length) return 'amber'; return 'green'; }",
     "function summarizeTemplate(t){ if(!t) return 'None selected'; return `${t.templateId} (${t.vertical})`; }",
     "function renderTemplateCards(){",
@@ -6239,7 +7880,7 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "    const div=document.createElement('button');",
     "    div.type='button'; div.className='template-card'+active;",
     "    div.innerHTML=`<div style=\"display:flex;justify-content:space-between;gap:8px\"><strong>${tpl.name}</strong><span class=\"tag\">${tpl.vertical}</span></div><div class=\"muted\" style=\"margin-top:4px\">${tpl.templateId}</div><div style=\"margin-top:6px\">${tpl.description||''}</div>`;",
-    "    div.addEventListener('click',()=>{ state.selectedTemplate=tpl; state.renderedTemplate=null; setText('selectedTemplateSummary', summarizeTemplate(tpl)); renderTemplateCards(); renderConfigForm(); setText('configStatus',''); document.getElementById('configPreview').style.display='none'; });",
+    "    div.addEventListener('click',()=>{ state.selectedTemplate=tpl; state.renderedTemplate=null; setText('selectedTemplateSummary', summarizeTemplate(tpl)); renderTemplateCards(); renderConfigForm(); setText('configStatus',''); document.getElementById('configPreview').style.display='none'; trackOnboardingEvent('template_selected', { templateId: tpl.templateId||null, vertical: tpl.vertical||null }); refreshChecklist(); });",
     "    grid.appendChild(div);",
     "  }",
     "}",
@@ -6320,6 +7961,7 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "    const j=await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/sla-templates/render`, { templateId: tplId, overrides: c.overrides });",
     "    state.renderedTemplate=j.template||null;",
     "    setText('configStatus','valid');",
+    "    trackOnboardingEvent('template_rendered', { templateId: tplId||null }); refreshChecklist();",
     "    const pre=document.getElementById('configPreview'); pre.style.display='block'; pre.textContent=JSON.stringify(j.template||{}, null, 2);",
     "  } catch(e){ setText('configStatus','invalid: '+e.message); }",
     "}",
@@ -6351,6 +7993,7 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "  const open=document.getElementById('buyerOpenLink'); open.href=buyer; open.textContent='Open buyer view';",
     "  const verify=document.getElementById('verifyJsonLink'); verify.href=`/r/${encodeURIComponent(token)}/verify.json`;",
     "  await updateDecisionState(token);",
+    "  await refreshChecklist();",
     "}",
     "async function uploadBundleFromFile(){",
     "  const file=(document.getElementById('bundleZip').files||[])[0];",
@@ -6377,7 +8020,7 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "}",
     "document.getElementById('enableDemoTrust').addEventListener('click', async()=>{",
     "  setText('demoTrustStatus','working…');",
-    "  try{ await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/demo-trust`,{}); setText('demoTrustStatus','enabled'); }",
+    "  try{ await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/demo-trust`,{}); setText('demoTrustStatus','enabled'); refreshChecklist(); }",
     "  catch(e){ setText('demoTrustStatus','failed: '+e.message); }",
     "});",
     "document.getElementById('verticalFilter').addEventListener('change', loadTemplates);",
@@ -6385,12 +8028,15 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "document.getElementById('uploadBundleBtn').addEventListener('click', uploadBundleFromFile);",
     "document.getElementById('uploadSampleGood').addEventListener('click', ()=>uploadSample('known-good'));",
     "document.getElementById('uploadSampleBad').addEventListener('click', ()=>uploadSample('known-bad'));",
+    "document.getElementById('buyerOpenLink').addEventListener('click', ()=>{ if(state.token){ trackOnboardingEvent('buyer_link_opened', { token: state.token }); } });",
     "document.getElementById('buyerCopyLink').addEventListener('click', async()=>{",
     "  if(!state.token){ setText('decisionState','Generate an artifact first.'); return; }",
     "  const link=window.location.origin + `/r/${encodeURIComponent(state.token)}`;",
-    "  try{ await navigator.clipboard.writeText(link); setText('decisionState','Buyer link copied.'); }",
+    "  try{ await navigator.clipboard.writeText(link); setText('decisionState','Buyer link copied.'); trackOnboardingEvent('buyer_link_shared', { token: state.token }); refreshChecklist(); }",
     "  catch{ setText('decisionState','Copy failed. Link: '+link); }",
     "});",
+    "document.getElementById('refreshChecklistBtn').addEventListener('click', ()=>refreshChecklist());",
+    "trackOnboardingEvent('wizard_viewed', { path: window.location.pathname }).finally(()=>refreshChecklist());",
     "loadTemplates();",
     "</script>",
     "</body></html>"
@@ -6521,15 +8167,23 @@ async function handleTenantUsageGet(req, res, tenantId, url) {
   const records = include === "records" ? await loadUsageRecords({ dataDir, tenantId, monthKey: month }) : null;
   const monthLimit = Number.isInteger(entitlements?.limits?.maxVerificationsPerMonth) ? entitlements.limits.maxVerificationsPerMonth : null;
   const verificationRuns = Number.parseInt(String(summary?.verificationRuns ?? 0), 10);
+  const verificationRunsUsed = Number.isInteger(verificationRuns) && verificationRuns >= 0 ? verificationRuns : 0;
   const quota = monthLimit === null
     ? { maxVerificationsPerMonth: null }
     : {
         maxVerificationsPerMonth: {
           limit: monthLimit,
-          used: Number.isInteger(verificationRuns) && verificationRuns >= 0 ? verificationRuns : 0,
-          remaining: Math.max(0, monthLimit - (Number.isInteger(verificationRuns) && verificationRuns >= 0 ? verificationRuns : 0))
+          used: verificationRunsUsed,
+          remaining: Math.max(0, monthLimit - verificationRunsUsed)
         }
       };
+  const thresholdState = await loadBillingUsageThresholdStateBestEffort({ tenantId, monthKey: month });
+  const thresholdAlerts = buildUsageThresholdStatus({
+    monthKey: month,
+    limit: monthLimit,
+    used: verificationRunsUsed,
+    state: thresholdState
+  });
 
   const out = {
     schemaVersion: "MagicLinkUsageReport.v1",
@@ -6538,7 +8192,8 @@ async function handleTenantUsageGet(req, res, tenantId, url) {
     generatedAt: nowIso(),
     entitlements,
     quota,
-    summary
+    summary,
+    thresholdAlerts
   };
   if (records) out.records = records;
   return sendJson(res, 200, out);
@@ -6650,6 +8305,168 @@ function previousMonthKey(monthKey) {
   return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`;
 }
 
+function billingUsageThresholdStatePath({ tenantId, monthKey }) {
+  return path.join(dataDir, "billing", "usage-threshold-alerts", tenantId, `${monthKey}.json`);
+}
+
+async function loadBillingUsageThresholdStateBestEffort({ tenantId, monthKey }) {
+  const fp = billingUsageThresholdStatePath({ tenantId, monthKey });
+  try {
+    const raw = JSON.parse(await fs.readFile(fp, "utf8"));
+    if (!isPlainObject(raw)) return null;
+    const alertsRaw = isPlainObject(raw.alerts) ? raw.alerts : {};
+    const alerts = {};
+    for (const pct of BILLING_USAGE_ALERT_THRESHOLD_PCTS) {
+      const row = isPlainObject(alertsRaw[pct]) ? alertsRaw[pct] : null;
+      if (!row) continue;
+      const used = Number.parseInt(String(row.used ?? 0), 10);
+      alerts[pct] = {
+        thresholdPct: pct,
+        emittedAt: typeof row.emittedAt === "string" ? row.emittedAt : null,
+        used: Number.isInteger(used) && used >= 0 ? used : 0
+      };
+    }
+    return {
+      schemaVersion: "MagicLinkBillingUsageThresholdState.v1",
+      tenantId,
+      month: monthKey,
+      alerts,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveBillingUsageThresholdState({ tenantId, monthKey, state }) {
+  const fp = billingUsageThresholdStatePath({ tenantId, monthKey });
+  await ensureDir(fp);
+  const alertsIn = isPlainObject(state?.alerts) ? state.alerts : {};
+  const alerts = {};
+  for (const pct of BILLING_USAGE_ALERT_THRESHOLD_PCTS) {
+    const row = isPlainObject(alertsIn[pct]) ? alertsIn[pct] : null;
+    if (!row || !row.emittedAt) continue;
+    const used = Number.parseInt(String(row.used ?? 0), 10);
+    alerts[pct] = {
+      thresholdPct: pct,
+      emittedAt: String(row.emittedAt),
+      used: Number.isInteger(used) && used >= 0 ? used : 0
+    };
+  }
+  const payload = {
+    schemaVersion: "MagicLinkBillingUsageThresholdState.v1",
+    tenantId,
+    month: monthKey,
+    updatedAt: nowIso(),
+    alerts
+  };
+  await fs.writeFile(fp, JSON.stringify(payload, null, 2) + "\n", "utf8");
+  return payload;
+}
+
+function usageThresholdTriggerRuns({ limit, thresholdPct }) {
+  const limitInt = Number.parseInt(String(limit ?? 0), 10);
+  if (!Number.isInteger(limitInt) || limitInt <= 0) return null;
+  const pct = Number.parseInt(String(thresholdPct ?? 0), 10);
+  if (!Number.isInteger(pct) || pct <= 0) return null;
+  return Math.max(1, Math.ceil((limitInt * pct) / 100));
+}
+
+async function emitBillingUsageThresholdAlertsBestEffort({ tenantId, monthKey, usageSummary, entitlements }) {
+  const limit = Number.isInteger(entitlements?.limits?.maxVerificationsPerMonth) ? entitlements.limits.maxVerificationsPerMonth : null;
+  if (!Number.isInteger(limit) || limit <= 0) return { emitted: [], state: null };
+
+  const usedRaw = Number.parseInt(String(usageSummary?.verificationRuns ?? 0), 10);
+  const used = Number.isInteger(usedRaw) && usedRaw >= 0 ? usedRaw : 0;
+  const prior = (await loadBillingUsageThresholdStateBestEffort({ tenantId, monthKey })) ?? {
+    schemaVersion: "MagicLinkBillingUsageThresholdState.v1",
+    tenantId,
+    month: monthKey,
+    alerts: {},
+    updatedAt: null
+  };
+  const nextAlerts = isPlainObject(prior.alerts) ? { ...prior.alerts } : {};
+  const emitted = [];
+
+  for (const thresholdPct of BILLING_USAGE_ALERT_THRESHOLD_PCTS) {
+    const triggerRuns = usageThresholdTriggerRuns({ limit, thresholdPct });
+    if (!Number.isInteger(triggerRuns) || triggerRuns < 1) continue;
+    if (used < triggerRuns) continue;
+    if (isPlainObject(nextAlerts[thresholdPct]) && typeof nextAlerts[thresholdPct].emittedAt === "string" && nextAlerts[thresholdPct].emittedAt.trim() !== "") continue;
+
+    const alert = {
+      schemaVersion: "MagicLinkBillingUsageThresholdAlert.v1",
+      tenantId,
+      month: monthKey,
+      thresholdPct,
+      triggerRuns,
+      limit,
+      used,
+      remaining: Math.max(0, limit - used),
+      overageRuns: Math.max(0, used - limit),
+      emittedAt: nowIso()
+    };
+    nextAlerts[thresholdPct] = { thresholdPct, emittedAt: alert.emittedAt, used };
+    emitted.push(alert);
+    metrics.incCounter("billing_usage_threshold_alerts_total", { tenantId, threshold: String(thresholdPct) }, 1);
+    try {
+      await appendAuditRecord({
+        dataDir,
+        tenantId,
+        record: {
+          at: alert.emittedAt,
+          action: "BILLING_USAGE_THRESHOLD_ALERT_EMITTED",
+          actor: { method: "system", email: null, role: "admin" },
+          targetType: "billing_usage_threshold",
+          targetId: `${tenantId}:${monthKey}:${thresholdPct}`,
+          details: {
+            month: monthKey,
+            thresholdPct,
+            triggerRuns,
+            limit,
+            used,
+            remaining: alert.remaining,
+            overageRuns: alert.overageRuns
+          }
+        }
+      });
+    } catch {
+      // ignore audit write failures for best-effort alert emission.
+    }
+  }
+
+  const state = await saveBillingUsageThresholdState({
+    tenantId,
+    monthKey,
+    state: { ...prior, alerts: nextAlerts }
+  });
+  return { emitted, state };
+}
+
+function buildUsageThresholdStatus({ monthKey, limit, used, state }) {
+  if (!Number.isInteger(limit) || limit <= 0) return null;
+  const usedInt = Number.isInteger(used) && used >= 0 ? used : 0;
+  const alerts = isPlainObject(state?.alerts) ? state.alerts : {};
+  return {
+    schemaVersion: "MagicLinkUsageThresholdStatus.v1",
+    month: monthKey,
+    metric: "verificationRuns",
+    limit,
+    used: usedInt,
+    remaining: Math.max(0, limit - usedInt),
+    thresholds: BILLING_USAGE_ALERT_THRESHOLD_PCTS.map((thresholdPct) => {
+      const triggerRuns = usageThresholdTriggerRuns({ limit, thresholdPct });
+      const emitted = isPlainObject(alerts[thresholdPct]) ? alerts[thresholdPct] : null;
+      return {
+        thresholdPct,
+        triggerRuns,
+        reached: Number.isInteger(triggerRuns) && usedInt >= triggerRuns,
+        emittedAt: emitted && typeof emitted.emittedAt === "string" ? emitted.emittedAt : null
+      };
+    })
+  };
+}
+
 async function listTenantIdsFromDiskBestEffort() {
   const dir = path.join(dataDir, "tenants");
   try {
@@ -6717,6 +8534,251 @@ async function loadPublicSummaryForToken({ token, meta }) {
   } catch {
     return null;
   }
+}
+
+function normalizeReceiptStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "green" || status === "amber" || status === "red" || status === "processing") return status;
+  return "processing";
+}
+
+function publicReceiptBadgePalette(status) {
+  if (status === "green") return { background: "#ecfdf5", border: "#86efac", text: "#065f46" };
+  if (status === "amber") return { background: "#fffbeb", border: "#fcd34d", text: "#92400e" };
+  if (status === "red") return { background: "#fef2f2", border: "#fca5a5", text: "#991b1b" };
+  return { background: "#f8fafc", border: "#cbd5e1", text: "#334155" };
+}
+
+async function hashFileHexBestEffort(fp) {
+  if (typeof fp !== "string" || !fp.trim()) return null;
+  try {
+    const buf = await fs.readFile(fp);
+    return sha256Hex(buf);
+  } catch {
+    return null;
+  }
+}
+
+function computePublicReceiptSignature(summaryHash) {
+  const hh = typeof summaryHash === "string" && /^[0-9a-f]{64}$/.test(summaryHash) ? summaryHash : null;
+  if (!hh || !Buffer.isBuffer(settingsKey) || settingsKey.length < 16) return null;
+  const keyId = `settings_hmac_${sha256Hex(settingsKey).slice(0, 16)}`;
+  const signatureHex = crypto.createHmac("sha256", settingsKey).update(hh).digest("hex");
+  return {
+    schemaVersion: "PublicReceiptSignature.v1",
+    algorithm: "hmac-sha256",
+    keyId,
+    signatureHex
+  };
+}
+
+function compactFindingCodes(values, { max = 20 } = {}) {
+  const rows = Array.isArray(values) ? values : [];
+  const out = [];
+  for (const row of rows) {
+    const code = typeof row === "string" ? row.trim() : typeof row?.code === "string" ? row.code.trim() : "";
+    if (!code) continue;
+    out.push(code);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+async function loadPublicReceiptContext({ req, token }) {
+  if (typeof token !== "string" || !/^ml_[0-9a-f]{48}$/.test(token)) {
+    return { ok: false, statusCode: 400, body: { ok: false, code: "INVALID_TOKEN", message: "token must match ml_[0-9a-f]{48}" } };
+  }
+
+  let meta = null;
+  try {
+    meta = await loadMeta(token);
+  } catch {
+    return { ok: false, statusCode: 404, body: { ok: false, code: "TOKEN_NOT_FOUND", message: "token not found" } };
+  }
+
+  if (meta.revokedAt) {
+    return { ok: false, statusCode: 410, body: { ok: false, code: "TOKEN_REVOKED", message: "token has been revoked" } };
+  }
+  if (isExpired(meta.createdAt)) {
+    return { ok: false, statusCode: 410, body: { ok: false, code: "TOKEN_EXPIRED", message: "token has expired" } };
+  }
+
+  const tenantId = typeof meta.tenantId === "string" ? meta.tenantId : "default";
+  const tenantSettings = await loadTenantSettings({ dataDir, tenantId });
+  const limits = tenantRateLimits(tenantSettings);
+  const rl = applyRateLimit({ req, tenantId, tenantSettings, category: "verification_view", limitPerHour: limits.verificationViewsPerHour });
+  if (!rl.ok) {
+    return {
+      ok: false,
+      statusCode: 429,
+      retryAfterSeconds: rl.retryAfterSeconds ?? 60,
+      body: {
+        ok: false,
+        code: "RATE_LIMITED",
+        message: "rate limit exceeded",
+        retryAfterSeconds: rl.retryAfterSeconds ?? null,
+        scope: rl.scope ?? null
+      }
+    };
+  }
+
+  const retentionDays = effectiveRetentionDaysForRun({
+    tenantSettings,
+    vendorId: typeof meta.vendorId === "string" ? meta.vendorId : null,
+    contractId: typeof meta.contractId === "string" ? meta.contractId : null
+  });
+  if (isPastRetention(meta.createdAt, retentionDays)) {
+    return { ok: false, statusCode: 410, body: { ok: false, code: "TOKEN_RETAINED", message: "retention window elapsed" } };
+  }
+
+  const publicSummary = await loadPublicSummaryForToken({ token, meta });
+  if (!isPlainObject(publicSummary)) {
+    return { ok: false, statusCode: 404, body: { ok: false, code: "PUBLIC_SUMMARY_NOT_FOUND", message: "public summary not found for token" } };
+  }
+  const decisionReport = await loadLatestSettlementDecisionReport({ dataDir, token });
+  const verifyJsonSha256 = await hashFileHexBestEffort(meta.verifyJsonPath);
+  const receiptSha256 = await hashFileHexBestEffort(meta.receiptJsonPath);
+  const status = normalizeReceiptStatus(runStatusFrom({ meta, publicSummary }));
+
+  return {
+    ok: true,
+    token,
+    meta,
+    tenantId,
+    publicSummary,
+    decisionReport,
+    verifyJsonSha256,
+    receiptSha256,
+    status
+  };
+}
+
+async function handlePublicReceiptSummary(req, res, token) {
+  const loaded = await loadPublicReceiptContext({ req, token });
+  if (!loaded.ok) {
+    if (Number.isInteger(loaded.retryAfterSeconds)) {
+      res.setHeader("retry-after", String(loaded.retryAfterSeconds));
+    }
+    return sendJson(res, loaded.statusCode, loaded.body);
+  }
+
+  const {
+    meta,
+    publicSummary,
+    decisionReport,
+    verifyJsonSha256,
+    receiptSha256,
+    status
+  } = loaded;
+
+  const warnings = compactFindingCodes(publicSummary?.verification?.warningCodes ?? publicSummary?.verification?.warnings ?? []);
+  const errors = compactFindingCodes(publicSummary?.verification?.errorCodes ?? publicSummary?.verification?.errors ?? []);
+  const settlementOutcome = typeof decisionReport?.decision === "string" ? decisionReport.decision : null;
+  const settlementSignedAt = typeof decisionReport?.signedAt === "string" ? decisionReport.signedAt : null;
+  const settlementSignerKeyId = typeof decisionReport?.signerKeyId === "string" ? decisionReport.signerKeyId : null;
+  const settlementReportHash = typeof decisionReport?.reportHash === "string" ? decisionReport.reportHash : null;
+  const settlementSignature = typeof decisionReport?.signature === "string" ? decisionReport.signature : null;
+  const receiptHashParam = receiptSha256 ? `?receiptHash=${encodeURIComponent(receiptSha256)}` : "";
+  const badgeSvgUrl = `/v1/public/receipts/${encodeURIComponent(token)}/badge.svg${receiptHashParam}`;
+
+  const summaryCore = {
+    schemaVersion: "MagicLinkPublicReceiptSummary.v1",
+    token,
+    generatedAt: nowIso(),
+    verification: {
+      status,
+      ok: Boolean(publicSummary?.verification?.ok),
+      warningCodes: warnings,
+      errorCodes: errors
+    },
+    settlement: {
+      outcome: settlementOutcome,
+      decidedAt: typeof decisionReport?.decidedAt === "string" ? decisionReport.decidedAt : null,
+      reportHash: settlementReportHash,
+      signerKeyId: settlementSignerKeyId,
+      signedAt: settlementSignedAt,
+      signature: settlementSignature
+    },
+    artifacts: {
+      verifyJsonSha256,
+      receiptSha256,
+      bundleSha256: typeof meta?.zipSha256 === "string" ? meta.zipSha256 : null
+    },
+    links: {
+      reportUrl: `/r/${encodeURIComponent(token)}`,
+      verifyJsonUrl: `/r/${encodeURIComponent(token)}/verify.json`,
+      receiptJsonUrl: receiptSha256 ? `/r/${encodeURIComponent(token)}/receipt.json` : null,
+      decisionReportUrl: settlementReportHash ? `/r/${encodeURIComponent(token)}/settlement_decision_report.json` : null
+    }
+  };
+
+  const summaryHash = sha256Hex(Buffer.from(JSON.stringify(summaryCore), "utf8"));
+  const signature = computePublicReceiptSignature(summaryHash);
+
+  return sendJson(res, 200, {
+    ok: true,
+    ...summaryCore,
+    summaryHash,
+    signature,
+    badge: {
+      badgeSvgUrl,
+      embedHtml: `<img src="${badgeSvgUrl}" alt="Settld verification ${status}" loading="lazy" decoding="async" />`
+    }
+  });
+}
+
+async function handlePublicReceiptBadge(req, res, token, url) {
+  const loaded = await loadPublicReceiptContext({ req, token });
+  if (!loaded.ok) {
+    if (Number.isInteger(loaded.retryAfterSeconds)) {
+      res.setHeader("retry-after", String(loaded.retryAfterSeconds));
+    }
+    return sendJson(res, loaded.statusCode, loaded.body);
+  }
+
+  const expectedReceiptHashRaw = String(url.searchParams.get("receiptHash") ?? "").trim().toLowerCase();
+  if (expectedReceiptHashRaw) {
+    if (!/^[0-9a-f]{64}$/.test(expectedReceiptHashRaw)) {
+      return sendJson(res, 400, { ok: false, code: "INVALID_RECEIPT_HASH", message: "receiptHash must be a 64-char lowercase hex sha256" });
+    }
+    if (!loaded.receiptSha256) {
+      return sendJson(res, 409, { ok: false, code: "RECEIPT_HASH_UNAVAILABLE", message: "receipt hash unavailable for token" });
+    }
+    if (expectedReceiptHashRaw !== loaded.receiptSha256) {
+      return sendJson(res, 409, {
+        ok: false,
+        code: "RECEIPT_HASH_MISMATCH",
+        message: "receipt hash mismatch",
+        detail: {
+          expected: expectedReceiptHashRaw,
+          actual: loaded.receiptSha256
+        }
+      });
+    }
+  }
+
+  const status = normalizeReceiptStatus(loaded.status);
+  const palette = publicReceiptBadgePalette(status);
+  const statusLabel = status.toUpperCase();
+  const settlementLabel = typeof loaded.decisionReport?.decision === "string" ? loaded.decisionReport.decision.toUpperCase() : "PENDING";
+  const receiptShort = loaded.receiptSha256 ? loaded.receiptSha256.slice(0, 12) : "none";
+  const tokenShort = String(token).slice(0, 11);
+
+  const svg = [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"520\" height=\"92\" role=\"img\" aria-label=\"Settld public receipt badge\">",
+    `  <rect x="1" y="1" width="518" height="90" rx="14" fill="${palette.background}" stroke="${palette.border}" stroke-width="2"/>`,
+    `  <text x="22" y="33" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="15" font-weight="700" fill="${palette.text}">SETTLD VERIFIED</text>`,
+    `  <text x="22" y="55" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="22" font-weight="800" fill="${palette.text}">${htmlEscape(statusLabel)}</text>`,
+    `  <text x="22" y="75" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="12" fill="${palette.text}">settlement ${htmlEscape(settlementLabel)} · receipt ${htmlEscape(receiptShort)}</text>`,
+    `  <text x="365" y="55" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" fill="${palette.text}">${htmlEscape(tokenShort)}</text>`,
+    "</svg>"
+  ].join("\n");
+
+  res.statusCode = 200;
+  res.setHeader("content-type", "image/svg+xml; charset=utf-8");
+  res.setHeader("cache-control", "no-store");
+  res.end(svg);
 }
 
 async function listTenantIndexEntries({ tenantId, max = 50_000 } = {}) {
@@ -10821,6 +12883,7 @@ export async function magicLinkHandler(req, res) {
       const sig = await readinessSignals();
       return sendJson(res, sig.dataDirWritable ? 200 : 503, { ok: Boolean(sig.dataDirWritable), ...sig });
     }
+    if (method === "GET" && pathname === "/pricing") return await handlePricingPage(req, res);
     if (method === "GET" && pathname === "/metrics") {
       res.statusCode = 200;
       res.setHeader("content-type", "text/plain; version=0.0.4; charset=utf-8");
@@ -10893,10 +12956,17 @@ export async function magicLinkHandler(req, res) {
       return sendText(res, 405, "method not allowed\n");
     }
 
+    const tenantOnboardingEventsMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/onboarding\/events$/.exec(pathname);
+    if (tenantOnboardingEventsMatch) {
+      const tenantId = tenantOnboardingEventsMatch[1];
+      if (method === "POST") return await handleTenantOnboardingEvent(req, res, tenantId);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
     const tenantOnboardingMetricsMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/onboarding-metrics$/.exec(pathname);
     if (tenantOnboardingMetricsMatch) {
       const tenantId = tenantOnboardingMetricsMatch[1];
-      if (method === "GET") return await handleTenantOnboardingMetrics(req, res, tenantId);
+      if (method === "GET") return await handleTenantOnboardingMetrics(req, res, tenantId, url);
       return sendText(res, 405, "method not allowed\n");
     }
 
@@ -10935,10 +13005,45 @@ export async function magicLinkHandler(req, res) {
       return sendText(res, 405, "method not allowed\n");
     }
 
+    const tenantSettlementPoliciesPresetsMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/settlement-policies\/presets$/.exec(pathname);
+    if (tenantSettlementPoliciesPresetsMatch) {
+      const tenantId = tenantSettlementPoliciesPresetsMatch[1];
+      if (method === "GET") return await handleTenantSettlementPolicyPresets(req, res, tenantId);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const tenantSettlementPoliciesPresetApplyMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/settlement-policies\/presets\/apply$/.exec(pathname);
+    if (tenantSettlementPoliciesPresetApplyMatch) {
+      const tenantId = tenantSettlementPoliciesPresetApplyMatch[1];
+      if (method === "POST") return await handleTenantSettlementPolicyPresetApply(req, res, tenantId);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
     const tenantSettlementPoliciesUpsertMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/settlement-policies\/upsert$/.exec(pathname);
     if (tenantSettlementPoliciesUpsertMatch) {
       const tenantId = tenantSettlementPoliciesUpsertMatch[1];
       if (method === "POST") return await handleTenantSettlementPolicyUpsert(req, res, tenantId);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const tenantSettlementPoliciesRolloutMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/settlement-policies\/rollout$/.exec(pathname);
+    if (tenantSettlementPoliciesRolloutMatch) {
+      const tenantId = tenantSettlementPoliciesRolloutMatch[1];
+      if (method === "POST") return await handleTenantSettlementPolicyRollout(req, res, tenantId);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const tenantSettlementPoliciesRollbackMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/settlement-policies\/rollback$/.exec(pathname);
+    if (tenantSettlementPoliciesRollbackMatch) {
+      const tenantId = tenantSettlementPoliciesRollbackMatch[1];
+      if (method === "POST") return await handleTenantSettlementPolicyRollback(req, res, tenantId);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const tenantSettlementPoliciesDiffMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/settlement-policies\/diff$/.exec(pathname);
+    if (tenantSettlementPoliciesDiffMatch) {
+      const tenantId = tenantSettlementPoliciesDiffMatch[1];
+      if (method === "GET") return await handleTenantSettlementPolicyDiff(req, res, tenantId, url);
       return sendText(res, 405, "method not allowed\n");
     }
 
@@ -11212,6 +13317,18 @@ export async function magicLinkHandler(req, res) {
       const tenantId = tenantPaymentTriggerDeadLetterReplayMatch[1];
       const token = tenantPaymentTriggerDeadLetterReplayMatch[2];
       if (method === "POST") return await handleTenantPaymentTriggerDeadLetterReplay(req, res, tenantId, token);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const publicReceiptSummaryMatch = /^\/v1\/public\/receipts\/(ml_[0-9a-f]{48})$/.exec(pathname);
+    if (publicReceiptSummaryMatch) {
+      if (method === "GET") return await handlePublicReceiptSummary(req, res, publicReceiptSummaryMatch[1]);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const publicReceiptBadgeMatch = /^\/v1\/public\/receipts\/(ml_[0-9a-f]{48})\/badge\.svg$/.exec(pathname);
+    if (publicReceiptBadgeMatch) {
+      if (method === "GET") return await handlePublicReceiptBadge(req, res, publicReceiptBadgeMatch[1], url);
       return sendText(res, 405, "method not allowed\n");
     }
 

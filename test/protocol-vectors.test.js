@@ -15,6 +15,14 @@ import { computeArtifactHash } from "../src/core/artifacts.js";
 import { canonicalJsonStringify } from "../src/core/canonical-json.js";
 import { computeAgentReputation, computeAgentReputationV2 } from "../src/core/agent-reputation.js";
 import { buildInteractionDirectionMatrixV1 } from "../src/core/interaction-directions.js";
+import { buildToolManifestV1 } from "../src/core/tool-manifest.js";
+import { buildAuthorityGrantV1 } from "../src/core/authority-grants.js";
+import {
+  buildToolCallAgreementV1,
+  buildToolCallEvidenceV1,
+  buildSettlementDecisionRecordV1,
+  buildSettlementReceiptV1
+} from "../src/core/settlement-kernel.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -430,6 +438,118 @@ async function buildVectorsV1() {
   const interactionDirectionMatrix = buildInteractionDirectionMatrixV1();
   const interactionDirectionMatrixCanonical = canonicalJsonStringify(interactionDirectionMatrix);
 
+  const toolManifest = buildToolManifestV1({
+    tenantId,
+    toolId: "tool_vectors_translate_v1",
+    name: "Translate (Vectors)",
+    description: "vectorized tool manifest for hashing/signing interoperability",
+    tool: {
+      name: "translate",
+      description: "Translate input text to a target language.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text", "to"],
+        properties: {
+          text: { type: "string" },
+          to: { type: "string" }
+        }
+      }
+    },
+    transport: { kind: "mcp", url: "https://tools.settld.local/mcp" },
+    capabilities: ["translation"],
+    signer,
+    at: generatedAt
+  });
+  const toolManifestCanonical = canonicalJsonStringify(toolManifest);
+
+  const authorityGrant = buildAuthorityGrantV1({
+    tenantId,
+    grantId: "auth_vectors_0001",
+    grantedBy: { actorType: "human", actorId: "user_vectors_0001" },
+    grantedTo: { actorType: "agent", actorId: agentIdentity.agentId },
+    limits: {
+      currency: "USD",
+      maxPerTransactionCents: 5000,
+      toolIds: [toolManifest.toolId],
+      pinnedManifests: { [toolManifest.toolId]: toolManifest.manifestHash },
+      expiresAt: "2026-03-01T00:00:00.000Z"
+    },
+    signer,
+    at: generatedAt
+  });
+  const authorityGrantCanonical = canonicalJsonStringify(authorityGrant);
+
+  const toolCallAgreement = buildToolCallAgreementV1({
+    tenantId,
+    artifactId: "tca_det_0001",
+    toolId: toolManifest.toolId,
+    toolManifestHash: toolManifest.manifestHash,
+    authorityGrantId: authorityGrant.grantId,
+    authorityGrantHash: authorityGrant.grantHash,
+    payerAgentId: agentIdentity.agentId,
+    payeeAgentId: "agt_vectors_payee",
+    amountCents: 123,
+    currency: "USD",
+    callId: "call_det_0001",
+    input: { text: "hello", to: "es" },
+    createdAt: generatedAt,
+    signer
+  });
+  const toolCallAgreementCanonical = canonicalJsonStringify(toolCallAgreement);
+
+  const toolCallEvidence = buildToolCallEvidenceV1({
+    tenantId,
+    artifactId: "tce_det_0001",
+    toolId: toolManifest.toolId,
+    toolManifestHash: toolManifest.manifestHash,
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    callId: toolCallAgreement.callId,
+    input: { text: "hello", to: "es" },
+    inputHash: toolCallAgreement.inputHash,
+    output: { text: "hola", lang: "es" },
+    startedAt: "2026-02-01T00:00:10.000Z",
+    completedAt: "2026-02-01T00:00:11.000Z",
+    signer
+  });
+  const toolCallEvidenceCanonical = canonicalJsonStringify(toolCallEvidence);
+
+  const settlementDecisionRecord = buildSettlementDecisionRecordV1({
+    tenantId,
+    artifactId: "sdr_det_0001",
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    evidenceId: toolCallEvidence.artifactId,
+    evidenceHash: toolCallEvidence.evidenceHash,
+    decision: "approved",
+    modality: "cryptographic",
+    verifierRef: { verifierId: "settld-vectors", version: "0.0.0-vectors" },
+    policyRef: null,
+    reasonCodes: ["cryptographic_binding_ok"],
+    evaluationSummary: { signatures: true, bindings: true, authority: true, inputCommitment: true },
+    decidedAt: generatedAt,
+    signer
+  });
+  const settlementDecisionRecordCanonical = canonicalJsonStringify(settlementDecisionRecord);
+
+  const settlementReceipt = buildSettlementReceiptV1({
+    tenantId,
+    artifactId: "sr_det_0001",
+    agreementId: toolCallAgreement.artifactId,
+    agreementHash: toolCallAgreement.agreementHash,
+    decisionId: settlementDecisionRecord.artifactId,
+    decisionHash: settlementDecisionRecord.recordHash,
+    payerAgentId: toolCallAgreement.payerAgentId,
+    payeeAgentId: toolCallAgreement.payeeAgentId,
+    amountCents: toolCallAgreement.amountCents,
+    currency: toolCallAgreement.currency,
+    settledAt: generatedAt,
+    ledger: { kind: "agent_wallet", op: "escrow_release" },
+    signer
+  });
+  const settlementReceiptCanonical = canonicalJsonStringify(settlementReceipt);
+
   return {
     schemaVersion: "ProtocolVectors.v1",
     generatedAt,
@@ -515,6 +635,54 @@ async function buildVectorsV1() {
       entityTypes: interactionDirectionMatrix.entityTypes,
       canonicalJson: interactionDirectionMatrixCanonical,
       sha256: sha256Hex(interactionDirectionMatrixCanonical)
+    },
+    toolManifest: {
+      schemaVersion: toolManifest.schemaVersion,
+      toolId: toolManifest.toolId,
+      manifestHash: toolManifest.manifestHash,
+      signerKeyId: toolManifest.signature.signerKeyId,
+      canonicalJson: toolManifestCanonical,
+      sha256: sha256Hex(toolManifestCanonical)
+    },
+    authorityGrant: {
+      schemaVersion: authorityGrant.schemaVersion,
+      grantId: authorityGrant.grantId,
+      grantHash: authorityGrant.grantHash,
+      signerKeyId: authorityGrant.signature.signerKeyId,
+      canonicalJson: authorityGrantCanonical,
+      sha256: sha256Hex(authorityGrantCanonical)
+    },
+    toolCallAgreement: {
+      schemaVersion: toolCallAgreement.schemaVersion,
+      artifactId: toolCallAgreement.artifactId,
+      agreementHash: toolCallAgreement.agreementHash,
+      signerKeyId: toolCallAgreement.signature.signerKeyId,
+      canonicalJson: toolCallAgreementCanonical,
+      sha256: sha256Hex(toolCallAgreementCanonical)
+    },
+    toolCallEvidence: {
+      schemaVersion: toolCallEvidence.schemaVersion,
+      artifactId: toolCallEvidence.artifactId,
+      evidenceHash: toolCallEvidence.evidenceHash,
+      signerKeyId: toolCallEvidence.signature.signerKeyId,
+      canonicalJson: toolCallEvidenceCanonical,
+      sha256: sha256Hex(toolCallEvidenceCanonical)
+    },
+    settlementDecisionRecord: {
+      schemaVersion: settlementDecisionRecord.schemaVersion,
+      artifactId: settlementDecisionRecord.artifactId,
+      recordHash: settlementDecisionRecord.recordHash,
+      signerKeyId: settlementDecisionRecord.signature.signerKeyId,
+      canonicalJson: settlementDecisionRecordCanonical,
+      sha256: sha256Hex(settlementDecisionRecordCanonical)
+    },
+    settlementReceipt: {
+      schemaVersion: settlementReceipt.schemaVersion,
+      artifactId: settlementReceipt.artifactId,
+      receiptHash: settlementReceipt.receiptHash,
+      signerKeyId: settlementReceipt.signature.signerKeyId,
+      canonicalJson: settlementReceiptCanonical,
+      sha256: sha256Hex(settlementReceiptCanonical)
     }
   };
 }

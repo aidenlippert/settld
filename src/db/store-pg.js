@@ -1569,6 +1569,7 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "MARKETPLACE_TASK_BIDS_SET",
       "TENANT_SETTLEMENT_POLICY_UPSERT",
       "IDEMPOTENCY_PUT",
+      "ARTIFACT_PUT",
       "OUTBOX_ENQUEUE",
       "INGEST_RECORDS_PUT"
     ]);
@@ -2016,6 +2017,15 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
 	      // Under concurrency, two workers may attempt to persist the same artifact at the same time. Treat this as
 	      // idempotent when the existing row's hash matches, and retryable otherwise.
 	      if (err?.code === "23505") {
+	        // Settlement receipts must be uniqueness-enforced for correctness: if a receipt already exists for an
+	        // agreement-hash-bound id, fail the transaction so wallet postings can't double-apply under races.
+	        if (artifactType === "SettlementReceipt.v1" && String(artifactId).startsWith("rcp_agmt_")) {
+	          const conflict = new Error("settlement receipt already exists");
+	          conflict.code = "SETTLEMENT_RECEIPT_ALREADY_EXISTS";
+	          conflict.artifactId = String(artifactId);
+	          conflict.artifactHash = String(artifactHash);
+	          throw conflict;
+	        }
 	        if (sourceEventId) {
 	          const bySource = await client.query(
 	            "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",
@@ -2374,6 +2384,10 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
         }
         if (op.kind === "IDEMPOTENCY_PUT") {
           await persistIdempotency(client, { key: op.key, value: op.value });
+        }
+        if (op.kind === "ARTIFACT_PUT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.artifact?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistArtifactRow(client, { tenantId, artifact: op.artifact });
         }
         if (op.kind === "OUTBOX_ENQUEUE") {
           await enqueueOutbox(client, { messages: op.messages });

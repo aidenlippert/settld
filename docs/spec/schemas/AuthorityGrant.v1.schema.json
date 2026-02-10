@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/AuthorityGrant.v1.schema.json",
+  "title": "AuthorityGrant.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "grantId",
+    "tenantId",
+    "grantedBy",
+    "grantedTo",
+    "limits",
+    "issuedAt",
+    "grantHash",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "AuthorityGrant.v1" },
+    "grantId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "grantedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorType", "actorId"],
+      "properties": {
+        "actorType": { "type": "string", "enum": ["human", "agent", "service", "system"] },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "grantedTo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorType", "actorId"],
+      "properties": {
+        "actorType": { "type": "string", "enum": ["human", "agent", "service"] },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "maxPerTransactionCents", "toolIds", "expiresAt"],
+      "properties": {
+        "currency": { "type": "string", "minLength": 3, "maxLength": 12 },
+        "maxPerTransactionCents": { "type": "integer", "minimum": 0 },
+        "toolIds": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[A-Za-z0-9:_-]+$" }
+        },
+        "pinnedManifests": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "grantHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signerKeyId", "signedAt", "signature"],
+      "properties": {
+        "signerKeyId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "signedAt": { "type": "string", "format": "date-time" },
+        "signature": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    }
+  }
+}
+

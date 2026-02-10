@@ -7,6 +7,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 ## [Unreleased]
 
 ### Added
+- Self-serve onboarding email sequence automation for Magic Link tenants (`welcome`, `sample_verified_nudge`, `first_settlement_completed`) with idempotent state + outbox/smtp delivery modes (`services/magic-link/src/onboarding-email-sequence.js`).
+- Self-serve referral instrumentation and benchmark reporting: onboarding events now accept `referral_link_shared` / `referral_signup`, onboarding metrics expose referral conversion fields, and CI can build `artifacts/launch/self-serve-benchmark-report.json` via `scripts/ci/build-self-serve-benchmark-report.mjs`.
 - Producer bootstrap tooling: `settld-trust` (trust/key init) and `settld-produce` (jobproof/monthproof/financepack bundle generation) in `packages/artifact-produce/`.
 - `ProduceCliOutput.v1` spec + schema for `settld-produce --format json`.
 - Delegated signing (no private keys on disk): `settld-produce --signer remote` and RemoteSigner tooling contract (`docs/spec/REMOTE_SIGNER.md`).

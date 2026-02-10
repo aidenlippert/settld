@@ -1,0 +1,31 @@
+name: Pipeline / CI improvement
+description: Speed, reliability, determinism, or guardrails for CI/CD
+title: "[ci] <short summary>"
+labels: ["type:chore", "stream:ops"]
+body:
+  - type: dropdown
+    id: goal
+    attributes:
+      label: Primary goal
+      options:
+        - "Reliability (reduce flakes)"
+        - "Speed (reduce runtime)"
+        - "Coverage (add missing gate)"
+        - "Safety (block bad merges/releases)"
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed change
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      render: markdown
+    validations:
+      required: true
+

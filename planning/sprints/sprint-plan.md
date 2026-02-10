@@ -1,5 +1,8 @@
 # Settld Multi-Sprint Operating Plan (S1-S12)
 
+Note: this document is a **historical multi-sprint plan**, not a live "what's open" tracker.
+For current status, use `planning/STATUS.md` and the evidence trackers it links.
+
 ## Skills and flow used
 
 - `brainstorming`: captured assumptions and success criteria from existing repo state and your vision.

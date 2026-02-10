@@ -3,18 +3,27 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+function npmCmd() {
+  // On Windows, npm is a .cmd shim; we run it via cmd.exe in sh() for reliability.
+  return "npm";
+}
+
 function sh(cmd, args, { cwd, env } = {}) {
-  const res = spawnSync(cmd, args, { cwd, env, encoding: "utf8" });
+  const isWin = process.platform === "win32";
+  const res = isWin
+    ? spawnSync("cmd.exe", ["/d", "/s", "/c", cmd, ...args], { cwd, env, encoding: "utf8" })
+    : spawnSync(cmd, args, { cwd, env, encoding: "utf8" });
   if (res.status !== 0) {
-    const err = (res.stderr || res.stdout || "").trim();
-    throw new Error(`${cmd} ${args.join(" ")} failed (exit ${res.status})${err ? `: ${err}` : ""}`);
+    const errText = (res.stderr || res.stdout || "").trim();
+    const spawnErr = res.error ? `: ${res.error.message}` : "";
+    throw new Error(`${cmd} ${args.join(" ")} failed (exit ${res.status})${errText ? `: ${errText}` : spawnErr}`);
   }
   return res.stdout;
 }
 
 function npmExec({ cwd, env, args }) {
   // Use npm exec so this works on Windows without needing to execute a .cmd shim directly.
-  return sh("npm", ["exec", "--silent", "--", ...args], { cwd, env });
+  return sh(npmCmd(), ["exec", "--silent", "--", ...args], { cwd, env });
 }
 
 async function main() {
@@ -35,8 +44,8 @@ async function main() {
       npm_config_update_notifier: "false"
     };
 
-    sh("npm", ["pack", "--pack-destination", outDir], { cwd: verifyPkgDir, env: npmEnv });
-    sh("npm", ["pack", "--pack-destination", outDir], { cwd: producePkgDir, env: npmEnv });
+    sh(npmCmd(), ["pack", "--pack-destination", outDir], { cwd: verifyPkgDir, env: npmEnv });
+    sh(npmCmd(), ["pack", "--pack-destination", outDir], { cwd: producePkgDir, env: npmEnv });
     const packed = (await fs.readdir(outDir)).filter((n) => n.endsWith(".tgz"));
     if (!packed.length) throw new Error("npm pack did not produce a .tgz in pack destination");
     const verifyCandidates = packed.filter((n) => n.startsWith("settld-artifact-verify-"));
@@ -46,8 +55,8 @@ async function main() {
     const verifyTarball = path.join(outDir, verifyCandidates[0]);
     const produceTarball = path.join(outDir, produceCandidates[0]);
 
-    sh("npm", ["init", "-y"], { cwd: installDir, env: npmEnv });
-    sh("npm", ["install", "--silent", verifyTarball, produceTarball], { cwd: installDir, env: npmEnv });
+    sh(npmCmd(), ["init", "-y"], { cwd: installDir, env: npmEnv });
+    sh(npmCmd(), ["install", "--silent", verifyTarball, produceTarball], { cwd: installDir, env: npmEnv });
 
     const ver = npmExec({ cwd: installDir, env: npmEnv, args: ["settld-verify", "--version"] }).trim();
     if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-.]+)?$/.test(ver)) {

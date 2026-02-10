@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "SelfServeLaunchTracker.v1",
+  "updatedAt": "2026-02-09T00:00:00.000Z",
+  "window": {
+    "startDate": "2026-01-10",
+    "endDate": "2026-02-09"
+  },
+  "requiredMetrics": [
+    "mvsvUsd",
+    "signups",
+    "teamsFirstLiveSettlement",
+    "payingCustomers",
+    "medianTimeToFirstSettlementMinutes",
+    "arbitrationMedianResolutionHours"
+  ],
+  "metrics": {
+    "mvsvUsd": {
+      "label": "Monthly Verified Settled Value",
+      "value": 142500,
+      "targetMin": 100000,
+      "unit": "USD"
+    },
+    "signups": {
+      "label": "Self-serve signups",
+      "value": 24,
+      "targetMin": 20,
+      "unit": "count"
+    },
+    "teamsFirstLiveSettlement": {
+      "label": "Teams to first live settlement",
+      "value": 9,
+      "targetMin": 8,
+      "unit": "count"
+    },
+    "payingCustomers": {
+      "label": "Paying customers",
+      "value": 4,
+      "targetMin": 3,
+      "unit": "count"
+    },
+    "medianTimeToFirstSettlementMinutes": {
+      "label": "Median time-to-first-settlement",
+      "value": 16.2,
+      "targetMaxExclusive": 20,
+      "unit": "minutes"
+    },
+    "arbitrationMedianResolutionHours": {
+      "label": "Arbitration median resolution",
+      "value": 11.4,
+      "targetMaxExclusive": 24,
+      "unit": "hours"
+    },
+    "referralLinkShares": {
+      "label": "Referral links shared",
+      "value": 31,
+      "targetMin": 20,
+      "unit": "count"
+    },
+    "referralSignups": {
+      "label": "Referral signups",
+      "value": 8,
+      "targetMin": 5,
+      "unit": "count"
+    },
+    "referralConversionRatePct": {
+      "label": "Referral conversion rate",
+      "value": 25.8,
+      "targetMin": 15,
+      "unit": "percent"
+    }
+  }
+}

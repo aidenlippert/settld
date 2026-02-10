@@ -4,6 +4,33 @@ Date baseline: February 7, 2026
 Owner: PM + Backend + DevEx + GTM
 Epic: `STLD-E12`
 
+## Progress snapshot (2026-02-09)
+
+Legend:
+- `done`: acceptance appears satisfied in code/tests.
+- `partial`: meaningful implementation exists, but acceptance is not fully met.
+- `open`: little/no implementation evidence yet.
+
+| Ticket | Status | Evidence | Remaining |
+|---|---|---|---|
+| `STLD-T183` Persist money rail operations/events | done | durable money-rail state and provider-event paths in `src/api/store.js`/`src/api/persistence.js`; e2e money-rail coverage in `test/api-e2e-ops-money-rails.test.js` | None |
+| `STLD-T184` Wire durable adapter into API | done | money-rail API flows in `src/api/app.js` use durable store paths; critical-path checks include money rails | None |
+| `STLD-T185` Billable usage event ledger | done | immutable usage event append/list in `src/api/store.js`; emit points in `src/api/app.js` (`VERIFIED_RUN`,`SETTLED_VOLUME`,`ARBITRATION_USAGE`) | None |
+| `STLD-T186` Billing ingestion worker/period close | done | deterministic period-close + invoice draft generation in `src/api/app.js` (`/billing/period-close`) with billable usage digests | None |
+| `STLD-T187` Public `/pricing` page | done | public pricing surface at `/pricing` in `services/magic-link/src/server.js`; coverage in `test/magic-link-service.test.js` | None |
+| `STLD-T188` Stripe self-serve checkout by plan | done | tenant checkout + webhook lifecycle in `services/magic-link/src/server.js`; covered in `test/magic-link-service.test.js` | None |
+| `STLD-T189` Plan quota enforcement | done | entitlement/quota enforcement paths and quota tests in `test/magic-link-service.test.js` (verification/storage/integrations/policy version caps) | None |
+| `STLD-T190` Overage billing + threshold alerts | done | monthly one-shot 80%/100% verification-usage threshold alert emission/state in `services/magic-link/src/server.js` with audit trail + usage-report exposure (`thresholdAlerts`), validated in `test/magic-link-service.test.js` | None |
+| `STLD-T191` Arbitration queue ops UI | done | shipped in S16 (`/ops/arbitration/workspace`) with tests | None |
+| `STLD-T192` Arbitration evidence/ruling workspace | done | case detail + verdict workflow in `/ops/arbitration/workspace`; e2e coverage | None |
+| `STLD-T193` Policy preset packs | done | preset catalog/apply APIs plus one-click preset UX and rollback coverage in `services/magic-link/src/server.js`; validated in `test/magic-link-service.test.js` | None |
+| `STLD-T194` Public verified receipt endpoint + badge | done | new public receipt summary + badge endpoints in `services/magic-link/src/server.js` and coverage in `test/magic-link-service.test.js` | None |
+| `STLD-T195` 10-minute first-settlement quickstart | done | dedicated quickstart documented in `docs/QUICKSTART_SDK_PYTHON.md` with runnable first-settlement path (`scripts/examples/sdk-first-verified-run.py` / `scripts/examples/sdk-first-paid-rfq.py`) and smoke coverage in `test/api-python-sdk-first-verified-run-smoke.test.js` + `test/api-python-sdk-first-paid-task-smoke.test.js` | None |
+| `STLD-T196` Three reference integrations | done | three CI-backed reference integrations now validated: first verified run (Python), paid RFQ flow (Python), and tenant analytics (JS + Python) in `test/api-python-sdk-first-verified-run-smoke.test.js`, `test/api-python-sdk-first-paid-task-smoke.test.js`, and `test/sdk-tenant-analytics-examples-smoke.test.js` | None |
+| `STLD-T197` Launch docs/changelog/email sequence | done | onboarding email sequence automation (welcome/sample/live milestones) shipped in `services/magic-link/src/onboarding-email-sequence.js` and wired in `services/magic-link/src/server.js`, with launch runbook docs + changelog update | None |
+| `STLD-T198` Benchmark report + referral loop | done | referral event instrumentation (`referral_link_shared` / `referral_signup`) shipped in `services/magic-link/src/tenant-onboarding.js`; benchmark artifact builder shipped in `scripts/ci/build-self-serve-benchmark-report.mjs` with tests | None |
+| `STLD-T199` MVSV dashboard + launch gate | done | explicit self-serve launch tracker (`planning/launch/self-serve-launch-tracker.json`) + gate evaluator (`scripts/ci/lib/self-serve-launch-gate.mjs`) + runnable gate report (`scripts/ci/run-self-serve-launch-gate.mjs`) with test coverage (`test/self-serve-launch-gate.test.js`) and npm entrypoint (`test:ops:self-serve-gate`) | None |
+
 ## ICP v1 definition
 
 - Segment: AI tool providers (1-30 engineers, API-first, rapid ship cadence)

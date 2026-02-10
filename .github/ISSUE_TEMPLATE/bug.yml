@@ -1,0 +1,67 @@
+name: Bug
+description: A defect with reproduction and expected vs actual behavior
+title: "[bug] <short summary>"
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "prio:p0 (production / release-blocking)"
+        - "prio:p1"
+        - "prio:p2"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - "stream:kernel"
+        - "stream:protocol"
+        - "stream:commerce"
+        - "stream:devex"
+        - "stream:ops"
+        - "stream:ui"
+        - "stream:security"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro steps
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots / artifacts
+      description: Paste relevant outputs (redact secrets).
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: fix
+    attributes:
+      label: Fix approach (optional)
+      description: If you already know the likely cause or approach, write it down.
+      render: markdown
+    validations:
+      required: false
+

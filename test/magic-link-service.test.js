@@ -173,6 +173,8 @@ process.env.MAGIC_LINK_BILLING_CHECKOUT_SUCCESS_URL = "https://example.test/bill
 process.env.MAGIC_LINK_BILLING_CHECKOUT_CANCEL_URL = "https://example.test/billing/cancel";
 process.env.MAGIC_LINK_BILLING_PORTAL_RETURN_URL = "https://example.test/billing";
 process.env.MAGIC_LINK_BUYER_OTP_DELIVERY_MODE = "record";
+process.env.MAGIC_LINK_ONBOARDING_EMAIL_SEQUENCE_ENABLED = "1";
+process.env.MAGIC_LINK_ONBOARDING_EMAIL_DELIVERY_MODE = "record";
 process.env.MAGIC_LINK_MIGRATE_ON_STARTUP = "1";
 process.env.MAGIC_LINK_PAYMENT_TRIGGER_RETRY_INTERVAL_MS = "600000";
 process.env.MAGIC_LINK_PAYMENT_TRIGGER_MAX_ATTEMPTS = "2";
@@ -680,6 +682,23 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.match(text, /magic_link_data_dir_writable_gauge/);
   }
 
+  await t.test("public pricing page: renders current plan catalog and value-event pricing notes", async () => {
+    const page = await runReq({ method: "GET", url: "/pricing", headers: {}, bodyChunks: [] });
+    assert.equal(page.statusCode, 200, page._body().toString("utf8"));
+    assert.match(String(page.getHeader("content-type") ?? ""), /text\/html/);
+    const html = page._body().toString("utf8");
+    assert.match(html, /Settld Pricing/);
+    assert.match(html, /Free/);
+    assert.match(html, /Growth/);
+    assert.match(html, /Scale/);
+    assert.match(html, /Enterprise/);
+    assert.match(html, /VERIFIED_RUN/);
+    assert.match(html, /SETTLED_VOLUME/);
+    assert.match(html, /ARBITRATION_USAGE/);
+    assert.match(html, /\$49\.00/);
+    assert.match(html, /\$199\.00/);
+  });
+
   await t.test("tenant create: default event relay auto-attaches and integrations URL is returned", async () => {
     const tenantId = "tenant_default_relay_create";
     const created = await createTenant({
@@ -945,6 +964,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.match(page._body().toString("utf8"), /Settlement Policy Control Plane/);
     assert.match(page._body().toString("utf8"), /Plan & Limits/);
     assert.match(page._body().toString("utf8"), /policyUpgradeHint/);
+    assert.match(page._body().toString("utf8"), /Rollout Stages/);
+    assert.match(page._body().toString("utf8"), /Preset Packs/);
+    assert.match(page._body().toString("utf8"), /Policy Diff/);
 
     const stateEmpty = await runReq({
       method: "GET",
@@ -959,6 +981,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(stateEmptyJson.policies.length, 0);
     assert.equal(stateEmptyJson.quota?.maxPolicyVersions?.limit, 10);
     assert.equal(stateEmptyJson.quota?.maxPolicyVersions?.used, 0);
+    assert.equal(stateEmptyJson.rollout?.stages?.active, null);
+    assert.equal(stateEmptyJson.rollout?.stages?.draft, null);
+    assert.equal(stateEmptyJson.rollout?.stages?.canary?.policyRef, null);
 
     const upsertPayload = {
       policyId: "market.default.auto-v1",
@@ -1065,6 +1090,189 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     const conflictJson = JSON.parse(conflict._body().toString("utf8"));
     assert.equal(conflictJson.ok, false);
     assert.equal(conflictJson.code, "POLICY_VERSION_CONFLICT");
+
+    const v2Body = Buffer.from(
+      JSON.stringify({
+        ...upsertPayload,
+        policyVersion: 2,
+        setAsDefault: false,
+        policy: {
+          ...upsertPayload.policy,
+          rules: {
+            ...upsertPayload.policy.rules,
+            autoReleaseOnAmber: true,
+            amberReleaseRatePct: 25
+          }
+        }
+      }),
+      "utf8"
+    );
+    const v2 = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/upsert`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(v2Body.length) },
+      bodyChunks: [v2Body]
+    });
+    assert.equal(v2.statusCode, 201, v2._body().toString("utf8"));
+    const v2Json = JSON.parse(v2._body().toString("utf8"));
+    assert.equal(v2Json.ok, true);
+    assert.equal(v2Json.policy?.policyVersion, 2);
+    assert.equal(v2Json.defaultPolicyRef?.policyVersion, 1);
+
+    const canaryBody = Buffer.from(
+      JSON.stringify({
+        stage: "canary",
+        policyId: "market.default.auto-v1",
+        policyVersion: 2,
+        rolloutPercent: 20
+      }),
+      "utf8"
+    );
+    const canary = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/rollout`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(canaryBody.length) },
+      bodyChunks: [canaryBody]
+    });
+    assert.equal(canary.statusCode, 200, canary._body().toString("utf8"));
+    const canaryJson = JSON.parse(canary._body().toString("utf8"));
+    assert.equal(canaryJson.ok, true);
+    assert.equal(canaryJson.rollout?.stages?.canary?.policyRef?.policyVersion, 2);
+    assert.equal(canaryJson.rollout?.stages?.canary?.rolloutPercent, 20);
+
+    const promoteBody = Buffer.from(
+      JSON.stringify({
+        stage: "active",
+        policyId: "market.default.auto-v1",
+        policyVersion: 2,
+        note: "promote v2"
+      }),
+      "utf8"
+    );
+    const promote = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/rollout`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(promoteBody.length) },
+      bodyChunks: [promoteBody]
+    });
+    assert.equal(promote.statusCode, 200, promote._body().toString("utf8"));
+    const promoteJson = JSON.parse(promote._body().toString("utf8"));
+    assert.equal(promoteJson.ok, true);
+    assert.equal(promoteJson.defaultPolicyRef?.policyVersion, 2);
+    assert.equal(promoteJson.rollout?.stages?.active?.policyVersion, 2);
+
+    const rollbackBody = Buffer.from(JSON.stringify({ note: "rollback to previous" }), "utf8");
+    const rollback = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/rollback`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(rollbackBody.length) },
+      bodyChunks: [rollbackBody]
+    });
+    assert.equal(rollback.statusCode, 200, rollback._body().toString("utf8"));
+    const rollbackJson = JSON.parse(rollback._body().toString("utf8"));
+    assert.equal(rollbackJson.ok, true);
+    assert.equal(rollbackJson.rollbackTargetRef?.policyVersion, 1);
+    assert.equal(rollbackJson.defaultPolicyRef?.policyVersion, 1);
+    assert.equal(rollbackJson.rollout?.stages?.active?.policyVersion, 1);
+
+    const diff = await runReq({
+      method: "GET",
+      url: `/v1/tenants/${tenantId}/settlement-policies/diff?fromPolicyId=market.default.auto-v1&fromPolicyVersion=1&toPolicyId=market.default.auto-v1&toPolicyVersion=2`,
+      headers: { "x-api-key": "test_key" },
+      bodyChunks: []
+    });
+    assert.equal(diff.statusCode, 200, diff._body().toString("utf8"));
+    const diffJson = JSON.parse(diff._body().toString("utf8"));
+    assert.equal(diffJson.ok, true);
+    assert.equal(diffJson.fromPolicyRef?.policyVersion, 1);
+    assert.equal(diffJson.toPolicyRef?.policyVersion, 2);
+    assert.equal(Array.isArray(diffJson.changes), true);
+    assert.ok(diffJson.changes.some((row) => row.path === "policy.rules.autoReleaseOnAmber"));
+  });
+
+  await t.test("settlement policy preset packs: list + apply + rollback", async () => {
+    const tenantId = "tenant_policy_presets";
+    await createTenant({
+      tenantId,
+      name: "Policy Preset Tenant",
+      contactEmail: "ops+policy-presets@example.com",
+      billingEmail: "billing+policy-presets@example.com"
+    });
+
+    const presetsRes = await runReq({
+      method: "GET",
+      url: `/v1/tenants/${tenantId}/settlement-policies/presets`,
+      headers: { "x-api-key": "test_key" },
+      bodyChunks: []
+    });
+    assert.equal(presetsRes.statusCode, 200, presetsRes._body().toString("utf8"));
+    const presetsJson = JSON.parse(presetsRes._body().toString("utf8"));
+    assert.equal(presetsJson.ok, true);
+    assert.equal(presetsJson.schemaVersion, "TenantSettlementPolicyPresetCatalog.v1");
+    assert.ok(Array.isArray(presetsJson.presets));
+    assert.ok(presetsJson.presets.length >= 3);
+    assert.ok(presetsJson.presets.some((row) => row?.presetId === "balanced_guardrails_v1"));
+
+    const applyBalancedBody = Buffer.from(
+      JSON.stringify({
+        presetId: "balanced_guardrails_v1",
+        setAsDefault: true
+      }),
+      "utf8"
+    );
+    const applyBalanced = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/presets/apply`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(applyBalancedBody.length) },
+      bodyChunks: [applyBalancedBody]
+    });
+    assert.equal(applyBalanced.statusCode, 201, applyBalanced._body().toString("utf8"));
+    const applyBalancedJson = JSON.parse(applyBalanced._body().toString("utf8"));
+    assert.equal(applyBalancedJson.ok, true);
+    assert.equal(applyBalancedJson.preset?.presetId, "balanced_guardrails_v1");
+    assert.equal(applyBalancedJson.policy?.metadata?.presetId, "balanced_guardrails_v1");
+    assert.equal(applyBalancedJson.policy?.policy?.rules?.maxAutoReleaseAmountCents, 150000);
+    assert.equal(applyBalancedJson.policy?.policy?.rules?.disputeWindowHours, 72);
+    assert.equal(applyBalancedJson.defaultPolicyRef?.policyId, "market.preset.balanced-v1");
+    assert.equal(applyBalancedJson.defaultPolicyRef?.policyVersion, 1);
+
+    const applyManualBody = Buffer.from(
+      JSON.stringify({
+        presetId: "manual_review_high_risk_v1",
+        setAsDefault: true
+      }),
+      "utf8"
+    );
+    const applyManual = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/presets/apply`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(applyManualBody.length) },
+      bodyChunks: [applyManualBody]
+    });
+    assert.equal(applyManual.statusCode, 201, applyManual._body().toString("utf8"));
+    const applyManualJson = JSON.parse(applyManual._body().toString("utf8"));
+    assert.equal(applyManualJson.ok, true);
+    assert.equal(applyManualJson.preset?.presetId, "manual_review_high_risk_v1");
+    assert.equal(applyManualJson.policy?.metadata?.presetId, "manual_review_high_risk_v1");
+    assert.equal(applyManualJson.policy?.policy?.mode, "manual-review");
+    assert.equal(applyManualJson.policy?.policy?.rules?.disputeWindowHours, 168);
+    assert.equal(applyManualJson.defaultPolicyRef?.policyId, "market.preset.manual-review-v1");
+    assert.equal(applyManualJson.defaultPolicyRef?.policyVersion, 1);
+
+    const rollbackBody = Buffer.from(JSON.stringify({ note: "rollback after preset apply" }), "utf8");
+    const rollback = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/settlement-policies/rollback`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json", "content-length": String(rollbackBody.length) },
+      bodyChunks: [rollbackBody]
+    });
+    assert.equal(rollback.statusCode, 200, rollback._body().toString("utf8"));
+    const rollbackJson = JSON.parse(rollback._body().toString("utf8"));
+    assert.equal(rollbackJson.ok, true);
+    assert.equal(rollbackJson.rollbackTargetRef?.policyId, "market.preset.balanced-v1");
+    assert.equal(rollbackJson.rollbackTargetRef?.policyVersion, 1);
+    assert.equal(rollbackJson.defaultPolicyRef?.policyId, "market.preset.balanced-v1");
+    assert.equal(rollbackJson.defaultPolicyRef?.policyVersion, 1);
   });
 
   await t.test("settlement policy control plane: maxPolicyVersions entitlement gate returns upgrade hint", async () => {
@@ -1221,7 +1429,12 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
   await t.test("onboarding: demo trust + sample upload", async () => {
     const page = await runReq({ method: "GET", url: "/v1/tenants/tenant_a/onboarding", headers: { "x-api-key": "test_key" }, bodyChunks: [] });
     assert.equal(page.statusCode, 200);
-    assert.match(page._body().toString("utf8"), /Verify Cloud Onboarding/);
+    const pageBody = page._body().toString("utf8");
+    assert.match(pageBody, /Verify Cloud Onboarding/);
+    assert.match(pageBody, /Step 5\. First settlement checklist/);
+    assert.match(pageBody, /id="checklistSummary"/);
+    assert.match(pageBody, /id="firstSettlementChecklist"/);
+    assert.match(pageBody, /id="refreshChecklistBtn"/);
 
     const templates = await runReq({ method: "GET", url: "/v1/tenants/tenant_a/sla-templates", headers: { "x-api-key": "test_key" }, bodyChunks: [] });
     assert.equal(templates.statusCode, 200, templates._body().toString("utf8"));
@@ -1317,6 +1530,65 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(claim?.billingAddress, undefined);
   });
 
+  await t.test("public receipt summary + badge expose non-sensitive verification proof", async () => {
+    const tenantId = "tenant_public_receipt";
+    await createTenant({
+      tenantId,
+      name: "Public Receipt Tenant",
+      contactEmail: "ops+public-receipt@example.com",
+      billingEmail: "billing+public-receipt@example.com"
+    });
+
+    const upload = await runReq({
+      method: "POST",
+      url: `/v1/tenants/${tenantId}/samples/closepack/known-good/upload`,
+      headers: { "x-api-key": "test_key", "content-type": "application/json" },
+      bodyChunks: [Buffer.from(JSON.stringify({ mode: "auto" }), "utf8")]
+    });
+    assert.equal(upload.statusCode, 200, upload._body().toString("utf8"));
+    const uploadJson = JSON.parse(upload._body().toString("utf8"));
+    assert.equal(uploadJson.ok, true);
+    const token = String(uploadJson.token);
+    assert.match(token, /^ml_[0-9a-f]{48}$/);
+
+    const summaryRes = await runReq({ method: "GET", url: `/v1/public/receipts/${token}`, headers: {}, bodyChunks: [] });
+    assert.equal(summaryRes.statusCode, 200, summaryRes._body().toString("utf8"));
+    const summaryJson = JSON.parse(summaryRes._body().toString("utf8"));
+    assert.equal(summaryJson.ok, true);
+    assert.equal(summaryJson.schemaVersion, "MagicLinkPublicReceiptSummary.v1");
+    assert.equal(summaryJson.token, token);
+    assert.ok(["green", "amber", "red", "processing"].includes(String(summaryJson.verification?.status)));
+    assert.match(String(summaryJson.summaryHash ?? ""), /^[0-9a-f]{64}$/);
+    assert.equal(summaryJson.vendorId, undefined);
+    assert.equal(summaryJson.vendorName, undefined);
+    assert.equal(summaryJson.contractId, undefined);
+    assert.match(String(summaryJson.artifacts?.verifyJsonSha256 ?? ""), /^[0-9a-f]{64}$/);
+    assert.match(String(summaryJson.artifacts?.receiptSha256 ?? ""), /^[0-9a-f]{64}$/);
+    assert.equal(summaryJson.signature?.schemaVersion, "PublicReceiptSignature.v1");
+    assert.equal(summaryJson.signature?.algorithm, "hmac-sha256");
+    assert.match(String(summaryJson.signature?.signatureHex ?? ""), /^[0-9a-f]{64}$/);
+    assert.match(String(summaryJson.badge?.badgeSvgUrl ?? ""), new RegExp(`^/v1/public/receipts/${token}/badge\\.svg\\?receiptHash=`));
+    assert.match(String(summaryJson.badge?.embedHtml ?? ""), /<img\s/i);
+
+    const badgeRes = await runReq({ method: "GET", url: String(summaryJson.badge.badgeSvgUrl), headers: {}, bodyChunks: [] });
+    assert.equal(badgeRes.statusCode, 200, badgeRes._body().toString("utf8"));
+    assert.match(String(badgeRes.getHeader("content-type") ?? ""), /image\/svg\+xml/);
+    const badgeSvg = badgeRes._body().toString("utf8");
+    assert.match(badgeSvg, /SETTLD VERIFIED/);
+    assert.match(badgeSvg, /settlement/i);
+
+    const mismatch = await runReq({
+      method: "GET",
+      url: `/v1/public/receipts/${token}/badge.svg?receiptHash=${"0".repeat(64)}`,
+      headers: {},
+      bodyChunks: []
+    });
+    assert.equal(mismatch.statusCode, 409, mismatch._body().toString("utf8"));
+    const mismatchJson = JSON.parse(mismatch._body().toString("utf8"));
+    assert.equal(mismatchJson.ok, false);
+    assert.equal(mismatchJson.code, "RECEIPT_HASH_MISMATCH");
+  });
+
   const trust = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "test/fixtures/bundles/v1/trust.json"), "utf8"));
   const buyerSigner = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "test/fixtures/keys/ed25519_test_keypair.json"), "utf8"));
   const buyerDecisionKeyId = keyIdFromPublicKeyPem(buyerSigner.publicKeyPem);
@@ -1352,10 +1624,51 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(createdJson.tenantId, "tenant_self_service");
     assert.equal(createdJson.profile?.status, "pending");
     assert.match(String(createdJson.onboardingUrl), /\/v1\/tenants\/tenant_self_service\/onboarding$/);
+    assert.equal(createdJson.onboardingEmailSequence?.enabled, true);
+    assert.equal(createdJson.onboardingEmailSequence?.deliveryMode, "record");
+    assert.ok(typeof createdJson.onboardingEmailSequence?.steps?.find((s) => s.stepKey === "welcome")?.sentAt === "string");
 
     const onboardingPage = await runReq({ method: "GET", url: createdJson.onboardingUrl, headers: { "x-api-key": "test_key" }, bodyChunks: [] });
     assert.equal(onboardingPage.statusCode, 200);
-    assert.match(onboardingPage._body().toString("utf8"), /Verify Cloud Onboarding/);
+    const onboardingHtml = onboardingPage._body().toString("utf8");
+    assert.match(onboardingHtml, /Verify Cloud Onboarding/);
+    assert.match(onboardingHtml, /Step 5\. First settlement checklist/);
+    assert.match(onboardingHtml, /id="checklistSummary"/);
+    assert.match(onboardingHtml, /id="firstSettlementChecklist"/);
+    assert.match(onboardingHtml, /id="refreshChecklistBtn"/);
+
+    async function postOnboardingEvent(eventType, metadata = null) {
+      const body = Buffer.from(JSON.stringify({ eventType, metadata }), "utf8");
+      const res = await runReq({
+        method: "POST",
+        url: "/v1/tenants/tenant_self_service/onboarding/events",
+        headers: {
+          "x-api-key": "test_key",
+          "content-type": "application/json",
+          "content-length": String(body.length)
+        },
+        bodyChunks: [body]
+      });
+      assert.equal(res.statusCode, 200, res._body().toString("utf8"));
+      return JSON.parse(res._body().toString("utf8"));
+    }
+
+    const wizardEvent = await postOnboardingEvent("wizard_viewed", { path: createdJson.onboardingUrl });
+    assert.equal(wizardEvent.metrics?.funnel?.stages?.find((s) => s.stageKey === "wizard_viewed")?.reached, true);
+    await postOnboardingEvent("template_selected", { templateId: "delivery_priority_v1" });
+    await postOnboardingEvent("template_rendered", { templateId: "delivery_priority_v1" });
+    const invalidEventBody = Buffer.from(JSON.stringify({ eventType: "totally_invalid_event" }), "utf8");
+    const invalidEvent = await runReq({
+      method: "POST",
+      url: "/v1/tenants/tenant_self_service/onboarding/events",
+      headers: {
+        "x-api-key": "test_key",
+        "content-type": "application/json",
+        "content-length": String(invalidEventBody.length)
+      },
+      bodyChunks: [invalidEventBody]
+    });
+    assert.equal(invalidEvent.statusCode, 400, invalidEvent._body().toString("utf8"));
 
     const metricsBefore = await runReq({
       method: "GET",
@@ -1368,6 +1681,14 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(metricsBeforeJson.status, "pending");
     assert.equal(metricsBeforeJson.firstUploadAt, null);
     assert.equal(metricsBeforeJson.firstVerifiedAt, null);
+    assert.equal(metricsBeforeJson.funnel?.stages?.find((s) => s.stageKey === "wizard_viewed")?.reached, true);
+    assert.equal(metricsBeforeJson.funnel?.stages?.find((s) => s.stageKey === "template_selected")?.reached, true);
+    assert.equal(metricsBeforeJson.funnel?.stages?.find((s) => s.stageKey === "template_validated")?.reached, true);
+    assert.ok(Array.isArray(metricsBeforeJson.cohort?.rows));
+    assert.ok(metricsBeforeJson.cohort?.rows?.length >= 1);
+    assert.equal(metricsBeforeJson.onboardingEmailSequence?.enabled, true);
+    assert.equal(metricsBeforeJson.onboardingEmailSequence?.sentSteps, 1);
+    assert.equal(metricsBeforeJson.onboardingEmailSequence?.nextStepKey, null);
 
     const sample = await runReq({
       method: "POST",
@@ -1387,6 +1708,11 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(metricsAfterSampleJson.status, "pending");
     assert.equal(metricsAfterSampleJson.firstUploadAt, null);
     assert.equal(metricsAfterSampleJson.firstVerifiedAt, null);
+    assert.ok(typeof metricsAfterSampleJson.firstSampleUploadAt === "string" && metricsAfterSampleJson.firstSampleUploadAt.length > 10);
+    assert.equal(metricsAfterSampleJson.funnel?.stages?.find((s) => s.stageKey === "artifact_generated")?.reached, true);
+    assert.equal(metricsAfterSampleJson.funnel?.stages?.find((s) => s.stageKey === "real_upload_generated")?.reached, false);
+    assert.equal(metricsAfterSampleJson.onboardingEmailSequence?.sentSteps, 2);
+    assert.equal(metricsAfterSampleJson.onboardingEmailSequence?.nextStepKey, null);
 
     const real = await runReq({
       method: "POST",
@@ -1409,6 +1735,37 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.ok(typeof metricsAfterRealJson.firstVerifiedAt === "string" && metricsAfterRealJson.firstVerifiedAt.length > 10);
     assert.ok(Number.isInteger(metricsAfterRealJson.timeToFirstVerifiedMs));
     assert.ok(metricsAfterRealJson.timeToFirstVerifiedMs >= 0);
+    assert.ok(Array.isArray(metricsAfterRealJson.cohort?.rows));
+    assert.equal(metricsAfterRealJson.cohort?.current?.cohortMonth, metricsAfterRealJson.cohort?.cohortMonth);
+    assert.equal(metricsAfterRealJson.onboardingEmailSequence?.sentSteps, 3);
+    assert.equal(metricsAfterRealJson.onboardingEmailSequence?.completionPct, 100);
+    const sequenceStatePath = path.join(dataDir, "tenants", "tenant_self_service", "onboarding_email_sequence.json");
+    const sequenceState = JSON.parse(await fs.readFile(sequenceStatePath, "utf8"));
+    assert.ok(typeof sequenceState?.steps?.welcome?.sentAt === "string");
+    assert.ok(typeof sequenceState?.steps?.sample_verified_nudge?.sentAt === "string");
+    assert.ok(typeof sequenceState?.steps?.first_settlement_completed?.sentAt === "string");
+
+    const realJson = JSON.parse(real._body().toString("utf8"));
+    await postOnboardingEvent("buyer_link_shared", { token: realJson.token });
+    await postOnboardingEvent("referral_link_shared", { channel: "email", campaign: "launch_v1" });
+    await postOnboardingEvent("referral_signup", { sourceTenantId: "tenant_self_service", referredTenantId: "tenant_friend_1" });
+    const metricsAfterBuyerLink = await runReq({
+      method: "GET",
+      url: "/v1/tenants/tenant_self_service/onboarding-metrics?cohortLimit=24",
+      headers: { "x-api-key": "test_key" },
+      bodyChunks: []
+    });
+    assert.equal(metricsAfterBuyerLink.statusCode, 200, metricsAfterBuyerLink._body().toString("utf8"));
+    const metricsAfterBuyerLinkJson = JSON.parse(metricsAfterBuyerLink._body().toString("utf8"));
+    assert.ok(typeof metricsAfterBuyerLinkJson.firstBuyerLinkSharedAt === "string" && metricsAfterBuyerLinkJson.firstBuyerLinkSharedAt.length > 10);
+    assert.equal(metricsAfterBuyerLinkJson.funnel?.stages?.find((s) => s.stageKey === "buyer_link_shared")?.reached, true);
+    assert.ok(typeof metricsAfterBuyerLinkJson.firstReferralLinkSharedAt === "string");
+    assert.ok(typeof metricsAfterBuyerLinkJson.firstReferralSignupAt === "string");
+    assert.equal(metricsAfterBuyerLinkJson.referral?.linkSharedCount, 1);
+    assert.equal(metricsAfterBuyerLinkJson.referral?.signupCount, 1);
+    assert.equal(metricsAfterBuyerLinkJson.referral?.conversionRatePct, 100);
+    assert.equal(metricsAfterBuyerLinkJson.funnel?.stages?.find((s) => s.stageKey === "referral_signup")?.reached, true);
+    assert.ok((metricsAfterBuyerLinkJson.cohort?.current?.referralSignup ?? 0) >= 1);
   });
 
   await t.test("strict pass + downloads", async () => {
@@ -1626,6 +1983,72 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.ok(report.summary.uploadedBytes >= zip.length);
     assert.equal(report.quota.maxVerificationsPerMonth.limit, 100);
     assert.ok(report.quota.maxVerificationsPerMonth.remaining >= 0);
+    assert.equal(report.thresholdAlerts?.schemaVersion, "MagicLinkUsageThresholdStatus.v1");
+    assert.equal(report.thresholdAlerts?.limit, 100);
+    assert.ok(Array.isArray(report.thresholdAlerts?.thresholds));
+    const threshold80 = report.thresholdAlerts.thresholds.find((row) => row?.thresholdPct === 80);
+    assert.equal(threshold80?.triggerRuns, 80);
+    assert.equal(threshold80?.emittedAt, null);
+  });
+
+  await t.test("billing usage threshold alerts emit once at 80% and 100% per month", async () => {
+    const tenantId = "tenant_usage_threshold_alerts";
+    process.env.SETTLD_TRUSTED_GOVERNANCE_ROOT_KEYS_JSON = JSON.stringify(trust.governanceRoots ?? {});
+    process.env.SETTLD_TRUSTED_PRICING_SIGNER_KEYS_JSON = JSON.stringify(trust.pricingSigners ?? {});
+    await putTenantSettings({ tenantId, patch: { maxVerificationsPerMonth: 5 } });
+
+    const fxInvoiceFailA = path.resolve(process.cwd(), "test/fixtures/bundles/v1/invoicebundle/strict-fail-evidence-sha-mismatch");
+    const fxInvoiceFailB = path.resolve(process.cwd(), "test/fixtures/bundles/v1/invoicebundle/strict-fail-invalid-pricing-matrix-signature");
+    const fxInvoiceFailC = path.resolve(process.cwd(), "test/fixtures/bundles/v1/invoicebundle/strict-fail-pricing-altered");
+    const zipInvoiceFailA = await zipDir(fxInvoiceFailA);
+    const zipInvoiceFailB = await zipDir(fxInvoiceFailB);
+    const zipInvoiceFailC = await zipDir(fxInvoiceFailC);
+
+    const uploads = [zip, zipClose, zipInvoiceFailA, zipInvoiceFailB, zipInvoiceFailC];
+    for (const zipBuf of uploads) {
+      // eslint-disable-next-line no-await-in-loop
+      await uploadZip({ zipBuf, mode: "strict", tenantId });
+    }
+
+    const report = await getTenantUsage({ tenantId });
+    assert.equal(report.quota?.maxVerificationsPerMonth?.limit, 5);
+    assert.equal(report.quota?.maxVerificationsPerMonth?.used, 5);
+    assert.equal(report.thresholdAlerts?.schemaVersion, "MagicLinkUsageThresholdStatus.v1");
+    const threshold80 = Array.isArray(report.thresholdAlerts?.thresholds) ? report.thresholdAlerts.thresholds.find((row) => row?.thresholdPct === 80) : null;
+    const threshold100 = Array.isArray(report.thresholdAlerts?.thresholds) ? report.thresholdAlerts.thresholds.find((row) => row?.thresholdPct === 100) : null;
+    assert.equal(threshold80?.triggerRuns, 4);
+    assert.equal(threshold100?.triggerRuns, 5);
+    assert.ok(typeof threshold80?.emittedAt === "string" && threshold80.emittedAt.length > 0);
+    assert.ok(typeof threshold100?.emittedAt === "string" && threshold100.emittedAt.length > 0);
+
+    const month = monthKeyUtcNow();
+    const auditPath = path.join(dataDir, "audit", tenantId, `${month}.jsonl`);
+    const auditRaw = await fs.readFile(auditPath, "utf8");
+    const thresholdRows = auditRaw
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+      .filter((row) => row?.action === "BILLING_USAGE_THRESHOLD_ALERT_EMITTED");
+    assert.equal(thresholdRows.length, 2);
+    assert.deepEqual(
+      thresholdRows.map((row) => Number(row?.details?.thresholdPct)).sort((a, b) => a - b),
+      [80, 100]
+    );
+
+    const reportAgain = await getTenantUsage({ tenantId });
+    const thresholdAgain = Array.isArray(reportAgain.thresholdAlerts?.thresholds)
+      ? reportAgain.thresholdAlerts.thresholds.filter((row) => row?.thresholdPct === 80 || row?.thresholdPct === 100)
+      : [];
+    assert.equal(thresholdAgain.length, 2);
+    assert.ok(thresholdAgain.every((row) => typeof row?.emittedAt === "string" && row.emittedAt.length > 0));
+
+    const auditRawAgain = await fs.readFile(auditPath, "utf8");
+    const thresholdRowsAgain = auditRawAgain
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+      .filter((row) => row?.action === "BILLING_USAGE_THRESHOLD_ALERT_EMITTED");
+    assert.equal(thresholdRowsAgain.length, 2);
   });
 
   await t.test("entitlements endpoint and billing usage alias expose plan-derived limits", async () => {

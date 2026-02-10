@@ -608,6 +608,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           amberReleaseRatePct: { type: "integer", minimum: 0, maximum: 100 },
           redReleaseRatePct: { type: "integer", minimum: 0, maximum: 100 },
           maxAutoReleaseAmountCents: { type: "integer", nullable: true, minimum: 1 },
+          disputeWindowHours: { type: "integer", nullable: true, minimum: 1 },
           manualReason: { type: "string", nullable: true }
         }
       }
@@ -2502,6 +2503,44 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
             },
             400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
             404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/marketplace/tools/{toolId}/settle": {
+        post: {
+          summary: "Settle a paid tool call (kernel: contract -> proof -> decision -> settlement)",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "toolId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["toolManifest", "authorityGrant", "toolCallAgreement", "toolCallEvidence"],
+                  properties: {
+                    toolManifest: { type: "object", additionalProperties: true },
+                    authorityGrant: { type: "object", additionalProperties: true },
+                    toolCallAgreement: { type: "object", additionalProperties: true },
+                    toolCallEvidence: { type: "object", additionalProperties: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            201: { description: "Created", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
           }
         }
       },

@@ -1,0 +1,61 @@
+name: Feature / Epic slice
+description: Product or platform work with acceptance criteria and a test plan
+title: "[feat] <short summary>"
+labels: ["type:feature"]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "prio:p0 (critical path)"
+        - "prio:p1"
+        - "prio:p2"
+    validations:
+      required: true
+  - type: dropdown
+    id: stream
+    attributes:
+      label: Stream
+      options:
+        - "stream:kernel"
+        - "stream:protocol"
+        - "stream:commerce"
+        - "stream:devex"
+        - "stream:ops"
+        - "stream:ui"
+        - "stream:security"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome (1-2 sentences)
+      description: What changes for the user/system when this ships?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Bullet list; include API shapes, UI behavior, and invariants where relevant.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: test_plan
+    attributes:
+      label: Test plan
+      description: What automated tests will prove this works (and prevent regressions)?
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout / ops notes (if applicable)
+      description: Gate changes, migrations, runbook updates, alerts, rollback.
+      render: markdown
+    validations:
+      required: false
+
