@@ -44,8 +44,8 @@ runs:
 
     - name: Install settld-verify (from action source)
       shell: bash
-	      run: |
-	        set -euo pipefail
+        run: |
+          set -euo pipefail
         OUT="${RUNNER_TEMP}/settld-verify-pack"
         rm -rf "$OUT"
         mkdir -p "$OUT"
@@ -72,41 +72,41 @@ runs:
         STRICT="${{ inputs.strict }}"
         FAIL_ON_WARNINGS="${{ inputs.fail_on_warnings }}"
         HASH_CONCURRENCY="${{ inputs.hash_concurrency }}"
-	        TRUST_FILE="${{ inputs.trust_file }}"
+          TRUST_FILE="${{ inputs.trust_file }}"
 
-	        if [[ -n "$TRUST_FILE" ]]; then
-	          if [[ ! -f "$TRUST_FILE" ]]; then
-	            echo "trust_file not found: $TRUST_FILE" >&2
-	            exit 2
-	          fi
-	          GOV_JSON="$(node --input-type=module -e '
-	            import fs from "node:fs";
-	            const p = process.argv[1];
-	            const t = JSON.parse(fs.readFileSync(p, "utf8"));
-	            process.stdout.write(JSON.stringify(t?.governanceRoots ?? {}));
-	          ' "$TRUST_FILE")"
-	          TIME_JSON="$(node --input-type=module -e '
-	            import fs from "node:fs";
-	            const p = process.argv[1];
-	            const t = JSON.parse(fs.readFileSync(p, "utf8"));
-	            process.stdout.write(JSON.stringify(t?.timeAuthorities ?? {}));
-	          ' "$TRUST_FILE")"
+          if [[ -n "$TRUST_FILE" ]]; then
+            if [[ ! -f "$TRUST_FILE" ]]; then
+              echo "trust_file not found: $TRUST_FILE" >&2
+              exit 2
+            fi
+            GOV_JSON="$(node --input-type=module -e '
+              import fs from "node:fs";
+              const p = process.argv[1];
+              const t = JSON.parse(fs.readFileSync(p, "utf8"));
+              process.stdout.write(JSON.stringify(t?.governanceRoots ?? {}));
+            ' "$TRUST_FILE")"
+            TIME_JSON="$(node --input-type=module -e '
+              import fs from "node:fs";
+              const p = process.argv[1];
+              const t = JSON.parse(fs.readFileSync(p, "utf8"));
+              process.stdout.write(JSON.stringify(t?.timeAuthorities ?? {}));
+            ' "$TRUST_FILE")"
 
-	          # NOTE: writing to $GITHUB_ENV only applies to later *steps*; we need these exports now.
-	          export SETTLD_TRUSTED_GOVERNANCE_ROOT_KEYS_JSON="$GOV_JSON"
-	          if [[ "$TIME_JSON" != "{}" ]]; then
-	            export SETTLD_TRUSTED_TIME_AUTHORITY_KEYS_JSON="$TIME_JSON"
-	          fi
-	        fi
+            # NOTE: writing to $GITHUB_ENV only applies to later *steps*; we need these exports now.
+            export SETTLD_TRUSTED_GOVERNANCE_ROOT_KEYS_JSON="$GOV_JSON"
+            if [[ "$TIME_JSON" != "{}" ]]; then
+              export SETTLD_TRUSTED_TIME_AUTHORITY_KEYS_JSON="$TIME_JSON"
+            fi
+          fi
 
-	        KIND_FLAG="$(node --input-type=module -e '
-	          import fs from "node:fs";
-	          import path from "node:path";
-	          const dir = process.argv[1];
-	          if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
-	            console.error(`bundle_path is not a directory: ${dir}`);
-	            process.exit(2);
-	          }
+          KIND_FLAG="$(node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            const dir = process.argv[1];
+            if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+              console.error(`bundle_path is not a directory: ${dir}`);
+              process.exit(2);
+            }
           const settldPath = path.join(dir, "settld.json");
           if (fs.existsSync(settldPath)) {
             const header = JSON.parse(fs.readFileSync(settldPath, "utf8"));
@@ -128,7 +128,7 @@ runs:
             console.error(`unsupported/unknown bundle kind: ${kind || "(missing)"}`);
             process.exit(2);
           }
-	        ' "$BUNDLE_PATH")"
+          ' "$BUNDLE_PATH")"
 
         ARGS=(--format json --hash-concurrency "$HASH_CONCURRENCY")
         if [[ "$STRICT" == "true" ]]; then ARGS+=(--strict); fi
