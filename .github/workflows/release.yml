@@ -519,9 +519,9 @@ jobs:
             sleep 10
           done
           python3 - <<'PY'
-from settld_api_sdk.client import SettldClient
-print(SettldClient.__name__)
-PY
+          from settld_api_sdk.client import SettldClient
+          print(SettldClient.__name__)
+          PY
 
   conformance_pack:
     needs: [release_gate]
