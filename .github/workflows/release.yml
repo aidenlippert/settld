@@ -721,11 +721,13 @@ jobs:
           test -f /tmp/release-assets/python-SHA256SUMS
 
       - name: Generate ReleaseIndex.v1 (signed release manifest)
+        if: ${{ github.event_name != 'workflow_dispatch' || secrets.SETTLD_RELEASE_SIGNING_PRIVATE_KEY_PEM != '' }}
         run: |
           set -euo pipefail
           node scripts/release/generate-release-index.mjs --dir /tmp/release-assets --tag "${{ steps.v.outputs.tag }}" --version "${{ steps.v.outputs.version }}" --commit "${{ github.sha }}"
 
       - name: Sign ReleaseIndex.v1
+        if: ${{ github.event_name != 'workflow_dispatch' || secrets.SETTLD_RELEASE_SIGNING_PRIVATE_KEY_PEM != '' }}
         env:
           SETTLD_RELEASE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.SETTLD_RELEASE_SIGNING_PRIVATE_KEY_PEM }}
         run: |
@@ -733,6 +735,7 @@ jobs:
           node scripts/release/sign-release-index.mjs --index /tmp/release-assets/release_index_v1.json --out /tmp/release-assets/release_index_v1.sig --private-key-env SETTLD_RELEASE_SIGNING_PRIVATE_KEY_PEM
 
       - name: Validate release assets (checksums + contents + ReleaseIndex signature)
+        if: ${{ github.event_name != 'workflow_dispatch' || secrets.SETTLD_RELEASE_SIGNING_PRIVATE_KEY_PEM != '' }}
         run: node scripts/release/validate-release-assets.mjs --dir /tmp/release-assets --release-trust trust/release-trust.json
 
       - name: Create GitHub Release and upload assets
