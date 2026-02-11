@@ -52,7 +52,7 @@ Legend:
 | Tarball “no clone” path is documented                                                 |    **TRUE** | `docs/QUICKSTART_KERNEL_V0.md:15`                                       | —                                                                                         | —                                                                                                               |
 | CI smoke explicitly tests **local tarball npx --package ./settld-<version>.tgz** path | **PARTIAL** | `scripts/ci/cli-pack-smoke.mjs:37`, `.github/workflows/release.yml:326` | Smoke focuses on unpacked tarball + registry npx, not the exact local tarball-npx command | Add a smoke step that runs the exact documented tarball npx invocation (guarded for CI environment constraints) |
 | Registry publish is wired                                                             |    **TRUE** | `.github/workflows/release.yml` (publish lane exists)                   | Wired ≠ executed                                                                          | —                                                                                                               |
-| “First live npm publish proven”                                                       |    **TRUE** | GitHub Actions run `21903899340` (`npm_publish` + `github_release` both green) | `settld --version` currently reports `0.0.0` from packaged `SETTLD_VERSION`; publish path itself is proven | Align packaged `SETTLD_VERSION` with release version during publish/tag pipeline                                 |
+| “First live npm publish proven”                                                       |    **TRUE** | GitHub Actions run `21917972978` (`npm_publish` + `python_publish` + `github_release` green), release `v0.1.2`, `npm view settld@0.1.2 version -> 0.1.2`, `npm exec --yes --package settld@0.1.2 -- settld --version -> 0.1.2`, PyPI `settld-api-sdk-python==0.1.2` | — | — |
 
 ## 6) Hosted baseline
 
@@ -136,16 +136,18 @@ Must be TRUE:
 
 Add one entry per first successful registry publish proof:
 
-First proven publish:
+First proven publish (current release line):
 
-- Version/tag: `v0.1.0` (workflow_dispatch version `0.1.0`)
-- Release workflow run URL: `https://github.com/aidenlippert/settld/actions/runs/21903899340`
-- npm postpublish smoke artifact name: `npm-postpublish-smoke-0.1.0`
+- Version/tag: `v0.1.2` (workflow_dispatch version `0.1.2`)
+- Release workflow run URL: `https://github.com/aidenlippert/settld/actions/runs/21917972978`
+- npm postpublish smoke artifact name: `npm-postpublish-smoke-0.1.2`
 - Command evidence:
-  - `npx -y settld@0.1.0 --version` (executed from clean `/tmp` dir)
-  - `npx -y settld@0.1.0 conformance kernel:list`
-  - `npx -y settld@0.1.0 --help` (contains `settld closepack verify`)
-  - `npx -y settld@0.1.0 init capability smoke-cap --out /tmp/settld-registry-proof/smoke-cap`
+  - `npm view settld@0.1.2 version` -> `0.1.2`
+  - `npm exec --yes --package settld@0.1.2 -- settld --version` -> `0.1.2`
+  - `npm exec --yes --package settld@0.1.2 -- settld conformance kernel:list`
+  - `npm exec --yes --package settld@0.1.2 -- settld --help` (contains `settld closepack verify`)
+  - `npm exec --yes --package settld@0.1.2 -- settld init capability smoke-cap --out /tmp/settld-registry-starter`
+  - `https://pypi.org/pypi/settld-api-sdk-python/0.1.2/json` -> `0.1.2`
 
 When this section has a verified entry for the current release line, flip **“First live npm publish proven”** to `TRUE`.
 
