@@ -81,6 +81,9 @@ function renderPackageJson({ name }) {
     name: `@settld/capability-${name}`,
     private: true,
     type: "module",
+    dependencies: {
+      "settld-api-sdk": "latest"
+    },
     scripts: {
       dev: "node server.js",
       "kernel:prove": "node scripts/kernel-prove.mjs",
@@ -164,7 +167,7 @@ server.listen(port, () => {
 function renderKernelProveScript() {
   return `import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -178,28 +181,27 @@ function idem(prefix) {
   return \`\${prefix}_\${Date.now().toString(36)}_\${Math.random().toString(16).slice(2, 8)}\`;
 }
 
-async function requestJson(method, pathname, { body, expectedPrevChainHash, idempotencyKey } = {}) {
-  const url = new URL(pathname, baseUrl);
-  const headers = {
-    "content-type": "application/json",
-    "x-proxy-tenant-id": tenantId,
-    "x-proxy-ops-token": opsToken,
-    "x-settld-protocol": protocol
-  };
-  if (idempotencyKey) headers["x-idempotency-key"] = String(idempotencyKey);
-  if (expectedPrevChainHash) headers["x-proxy-expected-prev-chain-hash"] = String(expectedPrevChainHash);
-  const res = await fetch(url.toString(), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  const text = await res.text();
-  let parsed = null;
+function findRepoRoot(startDir) {
+  let dir = startDir;
+  for (let i = 0; i < 20; i += 1) {
+    if (fs.existsSync(path.join(dir, "bin", "settld.js")) && fs.existsSync(path.join(dir, "SETTLD_VERSION"))) return dir;
+    const next = path.dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
+  return null;
+}
+
+async function loadSettldClient({ repoRoot }) {
   try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    parsed = { raw: text };
-  }
-  if (!res.ok) {
-    throw new Error(parsed?.message || parsed?.error || text || \`HTTP \${res.status}\`);
-  }
-  return parsed;
+    const pkg = await import("settld-api-sdk");
+    if (typeof pkg?.SettldClient === "function") return pkg.SettldClient;
+  } catch {}
+  if (!repoRoot) throw new Error("could not resolve Settld SDK; install dependencies (npm install) or set SETTLD_REPO_ROOT");
+  const sdkPath = path.join(repoRoot, "packages", "api-sdk", "src", "index.js");
+  const pkg = await import(pathToFileURL(sdkPath).href);
+  if (typeof pkg?.SettldClient !== "function") throw new Error("invalid Settld SDK module (SettldClient missing)");
+  return pkg.SettldClient;
 }
 
 async function callCapability(text) {
@@ -215,115 +217,146 @@ async function callCapability(text) {
 }
 
 async function main() {
+  const repoRoot = process.env.SETTLD_REPO_ROOT || findRepoRoot(path.resolve(__dirname, "..", "..", ".."));
+  const SettldClient = await loadSettldClient({ repoRoot });
+
+  const client = new SettldClient({ baseUrl, tenantId, protocol, opsToken });
   const manifest = await (await fetch(new URL("/manifest.json", capabilityBaseUrl).toString())).json();
+  const manifestHash = String(manifest?.signature?.manifestHash || "");
+  if (!/^[0-9a-f]{64}$/.test(manifestHash)) throw new Error("manifest missing signature.manifestHash");
   const toolId = String(manifest?.toolId || "capability");
-  const devPublicKeyPem = fs.readFileSync(path.join(__dirname, "..", "keys", "dev-public-key.pem"), "utf8");
+  const devKeypair = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "keys", "dev-keypair.json"), "utf8"));
+  const devPublicKeyPem = String(devKeypair.publicKeyPem || "");
+  const devPrivateKeyPem = String(devKeypair.privateKeyPem || "");
+  const devSignerKeyId = String(devKeypair.keyId || "");
+  if (!devPublicKeyPem || !devPrivateKeyPem || !devSignerKeyId) throw new Error("dev keypair is incomplete");
 
   const suffix = \`\${Date.now().toString(36)}_\${Math.random().toString(16).slice(2, 8)}\`;
   const payerAgentId = \`agt_demo_payer_\${suffix}\`;
   const payeeAgentId = \`agt_demo_payee_\${suffix}\`;
+  const arbiterAgentId = \`agt_demo_arbiter_\${suffix}\`;
+  const callId = \`call_\${toolId}_\${suffix}\`;
 
-  // For the demo path, the server will mint keys for both agents.
-  // This is not a production identity flow.
-  await requestJson("POST", "/agents/register", {
-    idempotencyKey: idem("payer_register"),
-    body: {
+  // For starter/demo flow only; production should use real identity material.
+  await client.registerAgent(
+    {
       agentId: payerAgentId,
       displayName: "Starter Payer",
       owner: { ownerType: "service", ownerId: "starter" },
       publicKeyPem: devPublicKeyPem
-    }
-  });
-
-  // Payee uses the same public key as the manifest signer for simplicity.
-  await requestJson("POST", "/agents/register", {
-    idempotencyKey: idem("payee_register"),
-    body: {
+    },
+    { idempotencyKey: idem("payer_register") }
+  );
+  await client.registerAgent(
+    {
       agentId: payeeAgentId,
       displayName: "Starter Payee",
       owner: { ownerType: "service", ownerId: "starter" },
       capabilities: [toolId],
       publicKeyPem: devPublicKeyPem
-    }
-  });
-
-  await requestJson("POST", \`/agents/\${encodeURIComponent(payerAgentId)}/wallet/credit\`, {
-    idempotencyKey: idem("wallet_credit"),
-    body: { amountCents: 25000, currency: "USD" }
-  });
-
-  const rfqId = \`rfq_\${toolId}_\${suffix}\`;
-  const bidId = \`bid_\${toolId}_\${suffix}\`;
-
-  await requestJson("POST", "/marketplace/rfqs", {
-    idempotencyKey: idem("rfq_create"),
-    body: {
-      rfqId,
-      title: \`Starter capability: \${toolId}\`,
-      description: "Generated by settld init capability",
-      capability: toolId,
-      posterAgentId: payerAgentId,
-      budgetCents: 10000,
-      currency: "USD"
-    }
-  });
-
-  await requestJson("POST", \`/marketplace/rfqs/\${encodeURIComponent(rfqId)}/bids\`, {
-    idempotencyKey: idem("bid_submit"),
-    body: {
-      bidId,
-      bidderAgentId: payeeAgentId,
-      amountCents: 10000,
-      currency: "USD",
-      etaSeconds: 60,
-      note: "starter bid"
-    }
-  });
-
-  const accepted = await requestJson("POST", \`/marketplace/rfqs/\${encodeURIComponent(rfqId)}/accept\`, {
-    idempotencyKey: idem("accept"),
-    body: {
-      bidId,
-      payerAgentId,
-      acceptedByAgentId: payerAgentId,
-      settlement: { payerAgentId }
-    }
-  });
-
-  const runId = String(accepted?.run?.id || accepted?.run?.runId || accepted?.runId || "");
-  if (!runId) throw new Error("accept response missing runId");
-  let prev = String(accepted?.run?.lastChainHash || "");
-  if (!prev) throw new Error("accept response missing run.lastChainHash");
+    },
+    { idempotencyKey: idem("payee_register") }
+  );
+  await client.registerAgent(
+    {
+      agentId: arbiterAgentId,
+      displayName: "Starter Arbiter",
+      owner: { ownerType: "service", ownerId: "starter" },
+      capabilities: ["arbitrate"],
+      publicKeyPem: devPublicKeyPem
+    },
+    { idempotencyKey: idem("arbiter_register") }
+  );
+  await client.creditAgentWallet(
+    payerAgentId,
+    { amountCents: 25000, currency: "USD" },
+    { idempotencyKey: idem("wallet_credit") }
+  );
 
   const capOut = await callCapability("hello kernel");
-  const evidenceRef = \`evidence://capability/\${toolId}/run/\${runId}/output/\${capOut.outputHash}.json\`;
-
-  const ev = await requestJson("POST", \`/agents/\${encodeURIComponent(payeeAgentId)}/runs/\${encodeURIComponent(runId)}/events\`, {
-    idempotencyKey: idem("evidence"),
-    expectedPrevChainHash: prev,
-    body: { type: "EVIDENCE_ADDED", payload: { evidenceRef } }
-  });
-  prev = String(ev?.run?.lastChainHash || "");
-  if (!prev) throw new Error("evidence append missing lastChainHash");
-
-  await requestJson("POST", \`/agents/\${encodeURIComponent(payeeAgentId)}/runs/\${encodeURIComponent(runId)}/events\`, {
-    idempotencyKey: idem("completed"),
-    expectedPrevChainHash: prev,
-    body: {
-      type: "RUN_COMPLETED",
-      payload: { outputRef: evidenceRef, metrics: { latencyMs: 250 } }
-    }
+  const agreementBundle = client.createAgreement({
+    toolId,
+    manifestHash,
+    callId,
+    input: { text: "hello kernel" },
+    settlementTerms: { amountCents: 10000, currency: "USD", holdbackBps: 2000, challengeWindowMs: 60000 },
+    payerAgentId,
+    payeeAgentId
   });
 
-  const settlement = await requestJson("GET", \`/runs/\${encodeURIComponent(runId)}/settlement\`);
-  const replay = await requestJson("GET", \`/runs/\${encodeURIComponent(runId)}/settlement/replay-evaluate\`);
+  const evidenceRef = \`evidence://capability/\${toolId}/call/\${callId}/output/\${capOut.outputHash}.json\`;
+  const evidenceBundle = client.signEvidence({
+    agreement: agreementBundle.agreement,
+    output: capOut.output,
+    outputRef: evidenceRef,
+    metrics: { latencyMs: 250 }
+  });
+
+  const settled = await client.settle(
+    {
+      agreement: agreementBundle.agreement,
+      evidence: evidenceBundle.evidence,
+      payerAgentId,
+      payeeAgentId,
+      amountCents: 10000,
+      currency: "USD",
+      holdbackBps: 2000,
+      challengeWindowMs: 60000
+    },
+    { idempotencyKey: idem("tool_call_settle") }
+  );
+  const holdHash = String(settled?.hold?.holdHash || "");
+  if (!holdHash) throw new Error("holdHash missing from settle response");
+
+  const opened = await client.openDispute(
+    {
+      agreementHash: settled.agreementHash,
+      receiptHash: settled.receiptHash,
+      holdHash,
+      openedByAgentId: payeeAgentId,
+      arbiterAgentId,
+      summary: "starter dispute to validate holdback freeze path",
+      evidenceRefs: [evidenceRef],
+      signerKeyId: devSignerKeyId,
+      signerPrivateKeyPem: devPrivateKeyPem
+    },
+    { idempotencyKey: idem("tool_call_dispute_open") }
+  );
+  const cases = await client.toolCallListArbitrationCases({ agreementHash: settled.agreementHash });
+  const holds = await client.opsListToolCallHolds({ agreementHash: settled.agreementHash });
+  const replay = await client.opsGetToolCallReplayEvaluate(settled.agreementHash);
+
+  const artifactIds = [
+    opened?.body?.arbitrationCaseArtifact?.artifactId,
+    opened?.body?.arbitrationVerdictArtifact?.artifactId
+  ].filter((v) => typeof v === "string" && v.trim() !== "");
+  const artifacts = artifactIds.length > 0 ? await client.getArtifacts({ artifactIds }) : { artifacts: [], responses: [] };
 
   // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ runId, settlement, replay }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        toolId,
+        callId,
+        agreementHash: settled.agreementHash,
+        receiptHash: settled.receiptHash,
+        hold: settled.hold,
+        arbitrationCase: opened?.body?.arbitrationCase ?? null,
+        holds: holds?.body?.holds ?? [],
+        cases: cases?.body?.cases ?? [],
+        replayEvaluate: replay?.body ?? null,
+        artifacts: artifacts.artifacts
+      },
+      null,
+      2
+    )
+  );
   // eslint-disable-next-line no-console
   console.log("");
   // eslint-disable-next-line no-console
-  console.log(\`Explorer: \${baseUrl}/ops/kernel/workspace?opsToken=\${encodeURIComponent(opsToken)}&runId=\${encodeURIComponent(runId)}\`);
+  console.log(
+    \`Explorer: \${baseUrl}/ops/kernel/workspace?opsToken=\${encodeURIComponent(opsToken)}&agreementHash=\${encodeURIComponent(settled.agreementHash)}\`
+  );
 }
 
 main().catch((err) => {
@@ -510,6 +543,8 @@ async function main() {
   console.log("next:");
   // eslint-disable-next-line no-console
   console.log(`  cd ${outDir}`);
+  // eslint-disable-next-line no-console
+  console.log("  npm install");
   // eslint-disable-next-line no-console
   console.log("  npm run dev");
   // eslint-disable-next-line no-console
