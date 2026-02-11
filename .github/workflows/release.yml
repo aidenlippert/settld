@@ -202,6 +202,13 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
+      - name: Docker login (GHCR for cosign)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Sign chart (keyless)
         id: sign_chart
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
@@ -450,6 +457,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Stamp Python package version for release artifacts
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.v.outputs.version }}"
+          sed -E -i "s/^version = \".+\"$/version = \"${VERSION}\"/" packages/api-sdk-python/pyproject.toml
+          grep -n '^version = ' packages/api-sdk-python/pyproject.toml
 
       - name: Build Python distribution artifacts (no publish)
         run: |
