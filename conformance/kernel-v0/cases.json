@@ -10,7 +10,10 @@
       "id": "tool_call_holdback_refund",
       "kind": "tool_call_holdback_dispute",
       "verdict": "payer"
+    },
+    {
+      "id": "marketplace_run_replay_evaluate",
+      "kind": "marketplace_run_replay_evaluate"
     }
   ]
 }
-

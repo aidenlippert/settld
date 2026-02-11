@@ -21,6 +21,7 @@ function parseArgs(argv) {
     apiKey: null,
     opsToken: null,
     caseId: null,
+    jsonOut: null,
     list: false,
     help: false
   };
@@ -56,6 +57,11 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (a === "--json-out") {
+      out.jsonOut = String(argv[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
     if (a === "--list") {
       out.list = true;
       continue;
@@ -72,7 +78,9 @@ function parseArgs(argv) {
 function usage() {
   // eslint-disable-next-line no-console
   console.error("usage:");
-  console.error("  node conformance/kernel-v0/run.mjs --ops-token <tok_opsw> [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0] [--case <id>] [--list]");
+  console.error(
+    "  node conformance/kernel-v0/run.mjs --ops-token <tok_opsw> [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0] [--case <id>] [--json-out <path>] [--list]"
+  );
   console.error("");
   console.error("notes:");
   console.error("  This conformance pack exercises the hosted control-plane API (holdback + disputes + deterministic adjustments).");
@@ -98,7 +106,7 @@ async function readCases() {
   return Array.isArray(doc.cases) ? doc.cases : [];
 }
 
-async function requestJson({ baseUrl, tenantId, protocol, apiKey, opsToken, method, pathname, body, idempotencyKey }) {
+async function requestJson({ baseUrl, tenantId, protocol, apiKey, opsToken, method, pathname, body, idempotencyKey, headers: extraHeaders }) {
   const url = new URL(pathname, baseUrl);
   const headers = {
     "content-type": "application/json",
@@ -109,6 +117,12 @@ async function requestJson({ baseUrl, tenantId, protocol, apiKey, opsToken, meth
   if (idempotencyKey) headers["x-idempotency-key"] = String(idempotencyKey);
   if (apiKey) headers.authorization = `Bearer ${String(apiKey)}`;
   if (opsToken) headers["x-proxy-ops-token"] = String(opsToken);
+  if (extraHeaders && typeof extraHeaders === "object") {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      if (value === null || value === undefined || value === "") continue;
+      headers[String(key).toLowerCase()] = String(value);
+    }
+  }
 
   const res = await fetch(url.toString(), {
     method,
@@ -556,6 +570,165 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
   };
 }
 
+async function runMarketplaceRunReplayEvaluateCase({ opts }) {
+  const suffix = uniqueSuffix();
+  const payerAgentId = `agt_conf_mkt_payer_${suffix}`;
+  const payeeAgentId = `agt_conf_mkt_payee_${suffix}`;
+  const payerKeys = createEd25519Keypair();
+  const payeeKeys = createEd25519Keypair();
+
+  await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: "/agents/register",
+    idempotencyKey: `conf_${suffix}_register_mkt_payer`,
+    body: {
+      agentId: payerAgentId,
+      displayName: "Marketplace Conformance Payer",
+      owner: { ownerType: "service", ownerId: "svc_conformance" },
+      capabilities: ["buyer"],
+      publicKeyPem: payerKeys.publicKeyPem
+    }
+  });
+  await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: "/agents/register",
+    idempotencyKey: `conf_${suffix}_register_mkt_payee`,
+    body: {
+      agentId: payeeAgentId,
+      displayName: "Marketplace Conformance Payee",
+      owner: { ownerType: "service", ownerId: "svc_conformance" },
+      capabilities: ["seller"],
+      publicKeyPem: payeeKeys.publicKeyPem
+    }
+  });
+  await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: `/agents/${encodeURIComponent(payerAgentId)}/wallet/credit`,
+    idempotencyKey: `conf_${suffix}_fund_mkt_payer`,
+    body: { amountCents: 25_000, currency: "USD" }
+  });
+
+  const rfqId = `rfq_conf_replay_${suffix}`;
+  const bidId = `bid_conf_replay_${suffix}`;
+
+  await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: "/marketplace/rfqs",
+    idempotencyKey: `conf_${suffix}_rfq_create`,
+    body: {
+      rfqId,
+      title: "Kernel v0 marketplace replay conformance",
+      description: "Exercise run settlement replay-evaluate",
+      capability: "conformance.replay_evaluate",
+      posterAgentId: payerAgentId,
+      budgetCents: 10_000,
+      currency: "USD"
+    }
+  });
+
+  await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: `/marketplace/rfqs/${encodeURIComponent(rfqId)}/bids`,
+    idempotencyKey: `conf_${suffix}_bid_submit`,
+    body: {
+      bidId,
+      bidderAgentId: payeeAgentId,
+      amountCents: 10_000,
+      currency: "USD",
+      etaSeconds: 60,
+      note: "conformance bid"
+    }
+  });
+
+  const accepted = await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: `/marketplace/rfqs/${encodeURIComponent(rfqId)}/accept`,
+    idempotencyKey: `conf_${suffix}_accept`,
+    body: {
+      bidId,
+      payerAgentId,
+      acceptedByAgentId: payerAgentId,
+      settlement: { payerAgentId }
+    }
+  });
+
+  const run = accepted?.run ?? null;
+  const runIdRaw = run?.id ?? run?.runId ?? accepted?.runId ?? null;
+  const runId = runIdRaw ? String(runIdRaw) : "";
+  assert(runId, "accept response missing runId");
+
+  let prevChainHash = run?.lastChainHash ? String(run.lastChainHash) : "";
+  if (!prevChainHash) {
+    // Fetch the run if it wasn't returned.
+    const fetched = await requestJson({
+      ...opts,
+      method: "GET",
+      pathname: `/agents/${encodeURIComponent(payeeAgentId)}/runs/${encodeURIComponent(runId)}`
+    });
+    prevChainHash = fetched?.run?.lastChainHash ? String(fetched.run.lastChainHash) : "";
+  }
+  assert(prevChainHash, "run lastChainHash missing (cannot append events)");
+
+  const evidence = await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: `/agents/${encodeURIComponent(payeeAgentId)}/runs/${encodeURIComponent(runId)}/events`,
+    idempotencyKey: `conf_${suffix}_evidence`,
+    headers: { "x-proxy-expected-prev-chain-hash": prevChainHash },
+    body: {
+      type: "EVIDENCE_ADDED",
+      payload: { evidenceRef: `evidence://conf/${runId}/output.json` }
+    }
+  });
+  prevChainHash = evidence?.run?.lastChainHash ? String(evidence.run.lastChainHash) : "";
+  assert(prevChainHash, "evidence append did not return next lastChainHash");
+
+  await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: `/agents/${encodeURIComponent(payeeAgentId)}/runs/${encodeURIComponent(runId)}/events`,
+    idempotencyKey: `conf_${suffix}_complete`,
+    headers: { "x-proxy-expected-prev-chain-hash": prevChainHash },
+    body: {
+      type: "RUN_COMPLETED",
+      payload: { outputRef: `evidence://conf/${runId}/output.json`, metrics: { latencyMs: 250 } }
+    }
+  });
+
+  const settlement = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/runs/${encodeURIComponent(runId)}/settlement`
+  });
+  assert(settlement && typeof settlement === "object", "run settlement missing");
+
+  const replayEvaluate = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/runs/${encodeURIComponent(runId)}/settlement/replay-evaluate`
+  });
+  assert(replayEvaluate && typeof replayEvaluate === "object", "replay-evaluate response missing");
+  assert(replayEvaluate?.comparisons?.kernelBindingsValid === true, "replay-evaluate kernelBindingsValid must be true");
+  assert(replayEvaluate?.comparisons?.policyDecisionMatchesStored === true, "replay-evaluate policyDecisionMatchesStored must be true");
+  assert(
+    replayEvaluate?.comparisons?.decisionRecordReplayCriticalMatchesStored === true,
+    "replay-evaluate decisionRecordReplayCriticalMatchesStored must be true"
+  );
+
+  return {
+    rfqId,
+    bidId,
+    runId,
+    settlementStatus: settlement?.settlement?.status ?? settlement?.status ?? null
+  };
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
@@ -590,20 +763,38 @@ async function main() {
 
   let pass = 0;
   let fail = 0;
+  const results = [];
   for (const c of selected) {
     const id = String(c?.id ?? "");
     try {
+      let details = null;
       if (String(c?.kind ?? "") === "tool_call_holdback_dispute") {
         const verdict = String(c?.verdict ?? "") === "payer" ? "payer" : "payee";
-        await runToolCallHoldbackDisputeCase({ opts: requestOpts, verdict });
+        details = await runToolCallHoldbackDisputeCase({ opts: requestOpts, verdict });
+      } else if (String(c?.kind ?? "") === "marketplace_run_replay_evaluate") {
+        details = await runMarketplaceRunReplayEvaluateCase({ opts: requestOpts });
       } else {
         throw new Error(`unsupported kind: ${String(c?.kind ?? "")}`);
       }
       pass += 1;
+      results.push({ id, ok: true, details });
       // eslint-disable-next-line no-console
       console.log(`PASS ${id}`);
+      if (details && typeof details === "object" && details.agreementHash) {
+        const agreementHash = String(details.agreementHash);
+        // eslint-disable-next-line no-console
+        console.log(`INFO ${id} agreementHash=${agreementHash} holdHash=${details.holdHash} caseId=${details.caseId} adjustmentId=${details.adjustmentId}`);
+        // eslint-disable-next-line no-console
+        console.log(`INFO ${id} kernelExplorer=${opts.baseUrl.replace(/\/$/, "")}/ops/kernel/workspace?opsToken=${encodeURIComponent(opts.opsToken)}&agreementHash=${encodeURIComponent(agreementHash)}`);
+      }
+      if (details && typeof details === "object" && details.runId) {
+        const runId = String(details.runId);
+        // eslint-disable-next-line no-console
+        console.log(`INFO ${id} runId=${runId} replayEvaluate=${opts.baseUrl.replace(/\/$/, "")}/runs/${encodeURIComponent(runId)}/settlement/replay-evaluate`);
+      }
     } catch (err) {
       fail += 1;
+      results.push({ id, ok: false, error: { message: err?.message ?? String(err ?? "") }, details: err?.body ?? null });
       // eslint-disable-next-line no-console
       console.error(`FAIL ${id}: ${err?.message ?? String(err ?? "")}`);
       if (err && typeof err === "object" && err.body) {
@@ -615,6 +806,24 @@ async function main() {
 
   // eslint-disable-next-line no-console
   console.log(`summary: pass=${pass} fail=${fail}`);
+
+  if (opts.jsonOut && String(opts.jsonOut).trim() !== "") {
+    const fp = path.resolve(process.cwd(), String(opts.jsonOut));
+    const report = normalizeForCanonicalJson(
+      {
+        schemaVersion: "KernelConformanceReport.v0",
+        generatedAt: new Date().toISOString(),
+        baseUrl: opts.baseUrl,
+        tenantId: opts.tenantId,
+        protocol: opts.protocol,
+        results
+      },
+      { path: "$" }
+    );
+    await fs.writeFile(fp, JSON.stringify(report, null, 2) + "\n", "utf8");
+    // eslint-disable-next-line no-console
+    console.log(`wrote ${fp}`);
+  }
   process.exit(fail ? 1 : 0);
 }
 
