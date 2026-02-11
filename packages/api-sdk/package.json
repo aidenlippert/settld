@@ -1,8 +1,15 @@
 {
   "name": "settld-api-sdk",
   "version": "0.0.0",
-  "private": true,
+  "private": false,
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aidenlippert/settld"
+  },
   "engines": {
     "node": ">=20"
   },

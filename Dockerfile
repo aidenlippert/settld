@@ -1,8 +1,9 @@
 FROM node:20-bookworm-slim AS deps
 
 WORKDIR /app
-COPY package.json package-lock.json SETTLD_VERSION ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY package*.json ./
+COPY SETTLD_VERSION ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev --ignore-scripts; else npm install --omit=dev --no-audit --no-fund --ignore-scripts; fi && npm cache clean --force
 
 FROM node:20-bookworm-slim AS prep
 RUN mkdir -p /data && chown -R 65532:65532 /data
@@ -27,7 +28,6 @@ LABEL org.opencontainers.image.revision=$GIT_SHA
 # Copy dependencies first for better layer caching.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
-COPY --from=deps /app/package-lock.json ./package-lock.json
 COPY --from=deps /app/SETTLD_VERSION ./SETTLD_VERSION
 
 # Runtime-writable locations should be mounted as volumes in k8s; create /data with correct ownership for safety.
