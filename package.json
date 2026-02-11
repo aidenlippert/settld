@@ -1,11 +1,33 @@
 {
   "name": "settld",
-  "private": true,
+  "version": "0.0.0",
+  "description": "Settld kernel CLI and local control-plane tooling",
+  "private": false,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "SETTLD_VERSION",
+    "README.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    "bin",
+    "conformance",
+    "scripts/closepack",
+    "scripts/init",
+    "src",
+    "services/finance-sink",
+    "services/receiver"
+  ],
   "bin": {
     "settld": "bin/settld.js"
   },
   "scripts": {
+    "postinstall": "node scripts/init/postinstall-sanity.mjs",
     "dev:api": "node src/api/server.js",
     "dev:maintenance": "node src/api/maintenance.js",
     "dev:receiver": "node services/receiver/src/server.js",
@@ -51,10 +73,13 @@
     "test:ops:throughput:10x": "node scripts/ci/run-10x-throughput-drill.mjs",
     "test:ops:throughput:incident": "node scripts/ci/run-10x-throughput-incident-rehearsal.mjs",
     "test:ops:go-live-gate": "node scripts/ci/run-go-live-gate.mjs",
+    "test:ops:kernel-v0-launch-gate": "node scripts/ci/check-kernel-v0-launch-gate.mjs",
     "test:ops:self-serve-gate": "node scripts/ci/run-self-serve-launch-gate.mjs",
     "test:ops:self-serve-benchmark": "node scripts/ci/build-self-serve-benchmark-report.mjs",
     "test:ops:launch-cutover-packet": "node scripts/ci/build-launch-cutover-packet.mjs",
+    "test:cli:pack-smoke": "node scripts/ci/cli-pack-smoke.mjs",
     "ops:lighthouse:update": "node scripts/ci/update-lighthouse-tracker.mjs",
+    "ops:tenant:bootstrap:conformance": "node scripts/ops/bootstrap-tenant-conformance.mjs",
     "magic-link:migrate-runs-db": "node scripts/magic-link/migrate-run-records-to-db.mjs",
     "release:artifacts": "node scripts/release/build-artifacts.mjs",
     "audit:packet": "node scripts/audit/build-audit-packet.mjs"
