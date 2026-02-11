@@ -189,15 +189,19 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Package chart
+        id: package_chart
         run: |
           set -euo pipefail
           helm package deploy/helm/settld --version "${{ steps.v.outputs.version }}" --app-version "${{ steps.v.outputs.version }}" --destination /tmp
-          ls -la /tmp/*.tgz
+          CHART_TGZ="/tmp/settld-helm-chart-${{ steps.v.outputs.version }}.tgz"
+          mv "/tmp/settld-${{ steps.v.outputs.version }}.tgz" "$CHART_TGZ"
+          echo "chart_tgz=$CHART_TGZ" >> "$GITHUB_OUTPUT"
+          ls -la "$CHART_TGZ"
 
       - name: Push chart (OCI)
         run: |
           set -euo pipefail
-          helm push /tmp/settld-*.tgz "oci://${{ env.CHART_REGISTRY }}"
+          helm push "${{ steps.package_chart.outputs.chart_tgz }}" "oci://${{ env.CHART_REGISTRY }}"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -224,7 +228,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: helm-chart-${{ steps.v.outputs.version }}
-          path: /tmp/settld-*.tgz
+          path: ${{ steps.package_chart.outputs.chart_tgz }}
 
   npm_packages:
     needs: [release_gate]
