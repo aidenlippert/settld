@@ -277,7 +277,6 @@ jobs:
 
   npm_publish:
     needs: [npm_packages]
-    if: ${{ secrets.NPM_TOKEN != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -286,7 +285,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gate npm publish on NPM_TOKEN
+        id: npm_publish_guard
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "NPM_TOKEN is not configured; skipping npm publish and registry smoke."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute version
+        if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
         id: v
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -301,13 +313,16 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
+        if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
-      - run: npm ci
+      - if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
+        run: npm ci
 
       - name: Stamp npm package versions for publish
+        if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.v.outputs.version }}"
@@ -315,6 +330,7 @@ jobs:
           npm pkg set version="$VERSION" --prefix packages/api-sdk --silent
 
       - name: Publish npm packages (CLI + JS SDK)
+        if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -335,6 +351,7 @@ jobs:
           publish_if_missing "packages/api-sdk"
 
       - name: Smoke npm registry install (npx, no-clone)
+        if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.v.outputs.version }}"
