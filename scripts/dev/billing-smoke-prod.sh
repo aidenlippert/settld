@@ -80,6 +80,21 @@ api_post_json() {
   printf "%s" "$body"
 }
 
+api_post_json_with_status() {
+  local path="$1"
+  local payload="$2"
+  local response body status
+  response="$(curl -sS -X POST "$SETTLD_BASE_URL$path" \
+    -H "x-proxy-ops-token: $PROXY_OPS_TOKEN" \
+    -H "x-proxy-tenant-id: $SETTLD_TENANT_ID" \
+    -H "content-type: application/json" \
+    -d "$payload" \
+    -w $'\n%{http_code}')"
+  body="$(printf "%s" "$response" | sed '$d')"
+  status="$(printf "%s" "$response" | tail -n1)"
+  printf "%s\n%s" "$status" "$body"
+}
+
 echo "[1/5] Health check..."
 HEALTH_RAW="$(curl -sS "$SETTLD_BASE_URL/healthz" || true)"
 if ! echo "$HEALTH_RAW" | jq -e . >/dev/null 2>&1; then
@@ -139,14 +154,16 @@ if [[ -z "$CUSTOMER_ID" || "$CUSTOMER_ID" == "null" ]]; then
   CUSTOMER_ID="cus_smoke_$(date +%s)"
 fi
 
-PORTAL_JSON="$(api_post_json "/ops/finance/billing/providers/stripe/portal" "{\"customerId\":\"$CUSTOMER_ID\"}")"
-if [[ "$(echo "$PORTAL_JSON" | jq -r '.portalSession.sessionUrl // ""')" != "" ]]; then
+PORTAL_RESPONSE="$(api_post_json_with_status "/ops/finance/billing/providers/stripe/portal" "{\"customerId\":\"$CUSTOMER_ID\"}")"
+PORTAL_STATUS="$(printf "%s" "$PORTAL_RESPONSE" | head -n1)"
+PORTAL_JSON="$(printf "%s" "$PORTAL_RESPONSE" | sed '1d')"
+if [[ "$PORTAL_STATUS" =~ ^2 ]] && [[ "$(echo "$PORTAL_JSON" | jq -r '.portalSession.sessionUrl // ""')" != "" ]]; then
   echo "$PORTAL_JSON" | jq '{tenantId, mode: .portalSession.mode, customerId: .portalSession.customerId, sessionId: .portalSession.sessionId, sessionUrl: .portalSession.sessionUrl}'
 else
   # In live mode with a synthetic customer id, Stripe returns upstream "No such customer".
-  echo "$PORTAL_JSON" | jq '{tenantId,error,code,details}'
-  if [[ "$(echo "$PORTAL_JSON" | jq -r '.code // ""')" != "BILLING_PROVIDER_UPSTREAM_ERROR" ]]; then
-    echo "Unexpected portal response."
+  echo "$PORTAL_JSON" | jq '{tenantId,error,code,details}' 2>/dev/null || echo "$PORTAL_JSON"
+  if [[ "$PORTAL_STATUS" != "502" || "$(echo "$PORTAL_JSON" | jq -r '.code // ""' 2>/dev/null)" != "BILLING_PROVIDER_UPSTREAM_ERROR" ]]; then
+    echo "Unexpected portal response (HTTP $PORTAL_STATUS)."
     exit 1
   fi
 fi
