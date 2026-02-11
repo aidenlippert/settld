@@ -12,6 +12,8 @@ function usage() {
   console.error("  settld conformance list");
   console.error("  settld conformance kernel --ops-token <tok_opsw> [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0] [--case <id>]");
   console.error("  settld conformance kernel:list");
+  console.error("  settld closepack export --agreement-hash <sha256> --out <path.zip> [--ops-token tok_ops] [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0]");
+  console.error("  settld closepack verify <path.zip> [--json-out <path.json>]");
   console.error("  settld dev up [--no-build] [--foreground]");
   console.error("  settld dev down [--wipe]");
   console.error("  settld dev ps");
@@ -178,6 +180,26 @@ function main() {
     usage();
     // eslint-disable-next-line no-console
     console.error(`unknown init subcommand: ${sub}`);
+    process.exit(1);
+  }
+
+  if (cmd === "closepack") {
+    const sub = argv[1] ? String(argv[1]) : "";
+    if (!sub) {
+      usage();
+      // eslint-disable-next-line no-console
+      console.error("missing closepack subcommand");
+      process.exit(1);
+    }
+    if (sub === "export") {
+      return runNodeScript("scripts/closepack/export.mjs", argv.slice(2));
+    }
+    if (sub === "verify") {
+      return runNodeScript("scripts/closepack/verify.mjs", argv.slice(2));
+    }
+    usage();
+    // eslint-disable-next-line no-console
+    console.error(`unknown closepack subcommand: ${sub}`);
     process.exit(1);
   }
 
