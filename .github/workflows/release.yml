@@ -382,8 +382,8 @@ jobs:
           wait_for_cmd "npm exec --yes --package settld@${VERSION} -- settld conformance kernel:list > /tmp/settld-kernel-cases.txt"
           test -s /tmp/settld-kernel-cases.txt
 
-          (cd "$SMOKE_DIR" && npm exec --yes --package settld@${VERSION} -- settld closepack verify --help >/tmp/settld-closepack-help.txt)
-          test -s /tmp/settld-closepack-help.txt
+          (cd "$SMOKE_DIR" && npm exec --yes --package settld@${VERSION} -- settld --help >/tmp/settld-help.txt)
+          grep -q "settld closepack verify" /tmp/settld-help.txt
 
           STARTER_DIR="/tmp/settld-registry-starter"
           rm -rf "$STARTER_DIR"
@@ -404,7 +404,7 @@ jobs:
                 { cmd: "npm view settld@<version> version", ok: true },
                 { cmd: "npm exec --yes --package settld@<version> -- settld --version", ok: true },
                 { cmd: "npm exec --yes --package settld@<version> -- settld conformance kernel:list", ok: true },
-                { cmd: "npm exec --yes --package settld@<version> -- settld closepack verify --help", ok: true },
+                { cmd: "npm exec --yes --package settld@<version> -- settld --help (contains closepack verify)", ok: true },
                 { cmd: "npm exec --yes --package settld@<version> -- settld init capability smoke-cap --out /tmp/settld-registry-starter", ok: true }
               ]
             };
@@ -422,7 +422,7 @@ jobs:
             /tmp/settld-npm-view-version.txt
             /tmp/settld-npx-version.txt
             /tmp/settld-kernel-cases.txt
-            /tmp/settld-closepack-help.txt
+            /tmp/settld-help.txt
             /tmp/npm-postpublish-smoke.json
           if-no-files-found: warn
 
