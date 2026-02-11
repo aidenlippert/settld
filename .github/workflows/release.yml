@@ -382,7 +382,7 @@ jobs:
           wait_for_cmd "npm exec --yes --package settld@${VERSION} -- settld conformance kernel:list > /tmp/settld-kernel-cases.txt"
           test -s /tmp/settld-kernel-cases.txt
 
-          (cd "$SMOKE_DIR" && npm exec --yes --package settld@${VERSION} -- settld --help >/tmp/settld-help.txt)
+          (cd "$SMOKE_DIR" && npm exec --yes --package settld@${VERSION} -- settld --help >/tmp/settld-help.txt 2>&1)
           grep -q "settld closepack verify" /tmp/settld-help.txt
 
           STARTER_DIR="/tmp/settld-registry-starter"
