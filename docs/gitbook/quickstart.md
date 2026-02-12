@@ -1,76 +1,104 @@
 # Quickstart
 
-This guide gets you from zero to a verified Kernel v0 flow quickly.
+Get from zero to a verified Kernel v0 flow in minutes.
 
 ## Prerequisites
 
 - Node.js 20+
 - Docker Desktop / Docker Engine running
-- Network access to pull images and install packages
+- `jq` installed (recommended for local checks)
 
-## Path A: Installed CLI (recommended)
+## 1) Start local stack
+
+Installed CLI:
 
 ```bash
 npx settld dev up
-npx settld init capability my-capability
-npx settld conformance kernel --ops-token tok_ops --json-out /tmp/kernel-report.json
 ```
 
-## Path B: From repo checkout
+Repo checkout:
 
 ```bash
 ./bin/settld.js dev up
+```
+
+Expected:
+
+- API healthy on local URL
+- local ops token available (`tok_ops` in default dev path)
+
+## 2) Create a capability template
+
+Installed CLI:
+
+```bash
+npx settld init capability my-capability
+```
+
+Repo checkout:
+
+```bash
 ./bin/settld.js init capability my-capability
+```
+
+Then run the generated capability server (follow generated README in the capability folder).
+
+## 3) Run kernel conformance
+
+Installed CLI:
+
+```bash
+npx settld conformance kernel --ops-token tok_ops --json-out /tmp/kernel-report.json
+```
+
+Repo checkout:
+
+```bash
 ./bin/settld.js conformance kernel --ops-token tok_ops --json-out /tmp/kernel-report.json
 ```
 
-## Verify result
+Expected:
 
-You should see conformance success output and a JSON report at:
+- conformance PASS
+- report at `/tmp/kernel-report.json`
 
-- `/tmp/kernel-report.json`
+## 4) Export and verify a closepack
 
-## Export + verify offline
-
-Use a known agreement hash from your run:
+Use an agreement hash from conformance/test output:
 
 ```bash
 npx settld closepack export --agreement-hash <agreementHash> --out closepack.zip
 npx settld closepack verify closepack.zip --json-out /tmp/closepack-verify.json
 ```
 
-or from repo:
+Expected:
 
-```bash
-./bin/settld.js closepack export --agreement-hash <agreementHash> --out closepack.zip
-./bin/settld.js closepack verify closepack.zip --json-out /tmp/closepack-verify.json
-```
+- closepack verify passes
+- JSON verification report produced
 
-## Replay-evaluate check
-
-For local API default:
+## 5) Replay-evaluate
 
 ```bash
 curl -s "http://127.0.0.1:3000/ops/tool-calls/replay-evaluate?agreementHash=<agreementHash>" \
   -H "x-proxy-ops-token: tok_ops" | jq .
 ```
 
-Expected: replay comparison fields indicate match/consistency.
+Expected: replay comparison fields indicate consistency/match.
 
-## Common errors
+## Troubleshooting
 
 ### Docker not found
 
-If CLI says docker is missing, install/start Docker and retry `dev up`.
+Install/start Docker. Then rerun `dev up`.
 
-### Node version too low
+### Node engine warning
 
-If CLI warns about engines, upgrade to Node 20+.
+Use Node 20+.
 
-### Ops token permission errors
+### Ops token permission error
 
-Use a token with `ops_read` (and `ops_write` where needed), or set local default token env used by your stack.
+Use token with at least `ops_read` scope.
 
 ### Port conflicts
 
-Stop local processes on the API port (default `3000`) or adjust runtime env.
+Stop process on API port (`3000`) or configure alternate local runtime settings.

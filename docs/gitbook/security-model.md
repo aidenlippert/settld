@@ -1,58 +1,58 @@
 # Security Model
 
-Settld is designed to minimize trust assumptions in settlement outcomes.
+Settld minimizes trust assumptions in settlement outcomes by making critical claims signed, bound, and independently verifiable.
 
-## What Settld is built to protect
+## Threats this design addresses
 
-- tampering with recorded settlement artifacts
-- ambiguous financial outcomes without explicit decision lineage
-- unauthorized economic actions outside declared authority bounds
-- silent drift between claimed and replayed decision outcomes
+- artifact tampering after execution
+- ambiguous money movement without decision lineage
+- unauthorized economic actions outside authority scope
+- silent drift between stored decisions and replayed outcomes
 
-## Core security mechanisms
+## Core controls
 
-## 1) Signed artifacts + canonical hashing
+## Signed artifacts + canonical hashing
 
-Critical objects are signed and hash-bound to enforce integrity and replayability.
+Critical objects are signed and hash-bound.
 
-## 2) Authority-scoped execution
+## Authority-scoped execution
 
-Authority grants constrain who can authorize spend and under which bounds.
+Authority grants constrain spend, scope, and time.
 
-## 3) Agreement/evidence binding
+## Agreement/evidence binding
 
-Agreement commitments (`callId`, `inputHash`, terms) must align with evidence and decision paths.
+Evidence must align with agreement commitments (`callId`, `inputHash`, terms).
 
-## 4) Deterministic/idempotent settlement effects
+## Deterministic idempotent effects
 
-Deterministic IDs and uniqueness constraints prevent duplicate application of critical financial adjustments.
+Deterministic IDs and uniqueness constraints prevent duplicate financial side effects.
 
-## 5) Dispute legitimacy
+## Dispute legitimacy
 
-Dispute-open flows rely on explicit signer-bound envelopes for non-admin opens, reducing “server says so” risk.
+Non-admin dispute open requires signer-bound envelope proof.
 
-## 6) Replay + offline verification
+## Replay and closepack verification
 
-Replay-evaluate and closepack verification provide independent checks beyond dashboard/API trust.
+Stored outcomes can be recomputed and verified offline.
 
-## What Settld does not guarantee by itself
+## Boundaries (what Settld does not solve alone)
 
-- business correctness beyond configured policy/verifier semantics
-- safety after private key compromise
-- immunity from bad policy design by operators
-- legal/regulatory compliance by default in every jurisdiction
+- correctness beyond configured policy/verifier semantics
+- private key compromise
+- unsafe tenant policy configuration
+- jurisdiction-specific legal/compliance obligations by default
 
-## Operational recommendations
+## Operational minimums
 
-- rotate keys and maintain signer inventory controls
-- monitor replay mismatches and dispute queue lag as first-class alerts
-- include closepack verification in release and incident workflows
-- keep strict separation between test/demo tokens and production secrets
+- signer key rotation + inventory controls
+- monitor replay mismatches and dispute lag
+- keep strict separation between demo/test/prod tokens
+- include closepack verify in release and incident workflows
 
-## Related references
+## References
 
 - `SECURITY.md`
-- `docs/THREAT_MODEL.md`
 - `docs/spec/THREAT_MODEL.md`
+- `docs/THREAT_MODEL.md`
 - `docs/ALERTS.md`
 - `docs/ONCALL_PLAYBOOK.md`

@@ -1,61 +1,54 @@
 # Closepacks (Offline Verification)
 
-A closepack is a portable bundle that allows third parties to verify settlement outcomes without trusting your live server.
+A closepack is a portable verification bundle proving settlement lineage without relying on live server trust.
 
-## What a closepack gives you
+## What you can prove with a closepack
 
-- signed artifact lineage in one bundle
-- reproducible verification report
-- replay/audit portability for counterparties, customers, and auditors
+- artifact integrity and signatures
+- agreement/evidence/decision bindings
+- dispute lineage correctness
+- deterministic adjustment routing expectations
+- replay comparison consistency
 
-## Export a closepack
+## Export
 
 ```bash
 npx settld closepack export --agreement-hash <agreementHash> --out closepack.zip
 ```
 
-or:
+Repo checkout:
 
 ```bash
 ./bin/settld.js closepack export --agreement-hash <agreementHash> --out closepack.zip
 ```
 
-## Verify a closepack offline
+## Verify
 
 ```bash
 npx settld closepack verify closepack.zip --json-out /tmp/closepack-verify.json
 ```
 
-or:
+Repo checkout:
 
 ```bash
 ./bin/settld.js closepack verify closepack.zip --json-out /tmp/closepack-verify.json
 ```
 
-## What verify should check
+## Operational policy recommendation
 
-- artifact integrity/hash consistency
-- signature validity
-- binding invariants (agreement/evidence/decision/receipt relationships)
-- dispute lineage consistency when applicable
-- deterministic adjustment expectations
-- replay consistency comparisons where available
+For every production release candidate:
 
-## Operational recommendation
+1. Generate at least one representative closepack.
+2. Verify it offline.
+3. Store verify JSON with release artifacts.
 
-For production launches and release gates:
+## Why this matters
 
-- generate at least one representative closepack
-- verify it in CI or release workflow
-- archive verification JSON with release artifacts
+Closepacks shift trust from “believe the API response” to “independently verify the economic claim.”
 
-## Why this is strategically important
+That is a core credibility boundary for settlement infrastructure.
 
-Closepacks move you from “trust our API responses” to “verify our economic claims independently.”
-
-That is a major credibility boundary for infra products handling settlement logic.
-
-## Related spec docs
+## Related references
 
 - `docs/spec/ClosePack.v1.md`
 - `docs/spec/ClosePackManifest.v1.md`

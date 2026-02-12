@@ -1,59 +1,81 @@
 # Core Primitives
 
-Settld works because every financial outcome is tied to signed, hash-bound artifacts.
+Settld security and settlement correctness come from signed, hash-bound artifacts with deterministic relationships.
 
 ## Canonical transaction chain
 
-For Kernel v0 paid capability calls, the critical chain is:
+Kernel v0 paid capability flow:
 
-1. `ToolManifest` — provider capability identity + verifier hints
-2. `AuthorityGrant` — spend/scope/time authorization
-3. `ToolCallAgreement` — terms + `callId` + `inputHash` commitment
-4. `FundingHold` — reserved funds prior to execution
-5. `ToolCallEvidence` — signed execution evidence
-6. `SettlementDecisionRecord` — evaluation result and reasoning
-7. `SettlementReceipt` — finalized settlement artifact
-8. Optional disputes:
+1. `ToolManifest`
+2. `AuthorityGrant`
+3. `ToolCallAgreement`
+4. `FundingHold`
+5. `ToolCallEvidence`
+6. `SettlementDecisionRecord`
+7. `SettlementReceipt`
+8. Dispute branch (when needed):
    - `DisputeOpenEnvelope`
    - `ArbitrationCase`
    - `ArbitrationVerdict`
    - `SettlementAdjustment`
 
-## Why each primitive exists
+## Primitive purpose
 
-- **Manifest** prevents silent capability identity swaps.
-- **Grant** prevents unauthorized spend.
-- **Agreement** turns “payment authorization” into “work authorization.”
-- **Hold** guarantees escrow semantics before work is done.
-- **Evidence** binds outputs to specific agreed inputs.
-- **Decision** makes acceptance/rejection explicit and replayable.
-- **Receipt** records final settlement state.
-- **Dispute + adjustment** gives deterministic remediation on held funds.
+### ToolManifest
+
+Capability identity, interface details, verifier hints. Prevents silent identity swaps.
+
+### AuthorityGrant
+
+Constrains spend/scope/time. Prevents unauthorized settlement operations.
+
+### ToolCallAgreement
+
+Commits parties to exact terms including call commitment (`callId`, `inputHash`) and settlement terms.
+
+### FundingHold
+
+Reserves funds before work execution, enabling reliable provider execution with escrow semantics.
+
+### ToolCallEvidence
+
+Signed evidence binding execution facts to the agreement commitment.
+
+### SettlementDecisionRecord
+
+Deterministic evaluation outcome, reason codes, policy linkage, replay-critical facts.
+
+### SettlementReceipt
+
+Finalized settlement artifact describing effective outcome and accounting effect.
+
+### Dispute artifacts
+
+- `DisputeOpenEnvelope` proves opener legitimacy for non-admin opens.
+- `ArbitrationCase` tracks active dispute subject.
+- `ArbitrationVerdict` resolves dispute.
+- `SettlementAdjustment` applies deterministic held-fund routing effect.
 
 ## Critical invariants
 
-- One deterministic settlement result per agreement hash.
-- Evidence must match committed agreement identifiers (`callId`, `inputHash`).
-- Holdback auto-release must be blocked while an open arbitration case exists.
-- Deterministic adjustment IDs must prevent double application.
-- Replay-evaluate must compare recomputed outcome to stored decision facts.
+- One deterministic settlement result per agreement hash
+- Evidence must match agreement commitment (`callId`/`inputHash`)
+- Open arbitration case blocks holdback auto-release
+- Deterministic adjustment identity prevents double-apply
+- Replay checks compare recomputed vs stored decision path
 
-## Policy and replay pinning
+## Determinism in practice
 
-SettlementDecisionRecord v2 pins replay-critical policy data (such as policy hash usage), so re-evaluation can be audited against the exact logic context that produced the original decision.
-
-## Determinism scope
-
-Determinism in Settld means:
+Determinism means:
 
 - canonicalized artifact hashing
-- signed payloads with explicit bindings
-- deterministic IDs for idempotent effects
-- reproducible verification/replay checks
+- explicit signer ownership
+- deterministic artifact IDs for idempotent side effects
+- reproducible replay/verification checks
 
-It does **not** mean all business logic is universally objective; it means the system can prove how a decision was made under a declared policy/verifier surface.
+It does not mean all policy semantics are universal truth. It means outcomes are provably tied to declared policy and evidence.
 
-## Related spec docs
+## Related references
 
 - `docs/spec/README.md`
 - `docs/spec/INVARIANTS.md`

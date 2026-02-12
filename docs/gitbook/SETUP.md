@@ -2,20 +2,24 @@
 
 Use this folder as your GitBook project directory.
 
-## Recommended settings
+## Recommended
 
 - Repository: `aidenlippert/settld`
 - Project directory: `docs/gitbook`
 - Initial sync: import from GitHub
 
+## If your project directory is currently `docs`
+
+You can keep it. Root `docs/README.md` and `docs/SUMMARY.md` route to this curated set.
+
 ## Domain
 
-- Custom domain: `docs.settld.work`
-- Required DNS: `CNAME docs -> 47701540b1-hosting.gitbook.io`
+- custom domain: `docs.settld.work`
+- DNS record: `CNAME docs -> 47701540b1-hosting.gitbook.io`
 
 ## Update workflow
 
-1. Edit docs in this folder.
-2. Open PR.
-3. Merge to `main`.
-4. GitBook updates automatically via sync.
+1. edit docs in repo
+2. open PR
+3. merge to `main`
+4. GitBook sync updates docs site

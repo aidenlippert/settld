@@ -1,59 +1,56 @@
 # Conformance
 
-Conformance ensures your implementation satisfies Kernel v0 behavioral guarantees, not just schema shape.
+Conformance verifies behavioral correctness of Kernel v0, not just schema validity.
 
-## Why conformance matters
+## Why conformance exists
 
-Passing conformance proves the economic loop is correct under replay, disputes, and deterministic adjustment handling.
+Conformance catches high-impact regressions:
 
-It catches regressions that simple unit tests often miss.
+- replay mismatches
+- dispute/holdback lifecycle drift
+- deterministic adjustment/idempotency violations
+- closepack verification failures
 
 ## Run conformance
 
-### Installed CLI
+Installed CLI:
 
 ```bash
 npx settld conformance kernel --ops-token tok_ops --json-out /tmp/kernel-report.json
 ```
 
-### Repo checkout
+Repo checkout:
 
 ```bash
 ./bin/settld.js conformance kernel --ops-token tok_ops --json-out /tmp/kernel-report.json
 ```
 
-## What it should validate
+## Minimum assertions expected
 
-At minimum, your conformance run should verify:
-
-- settlement artifact chain generation
-- replay-evaluate consistency checks
-- closepack export + offline verify roundtrip
-- dispute flow integration with holdback freeze behavior
-- deterministic/idempotent adjustment application constraints
+- kernel artifact chain is complete
+- replay-evaluate matches stored outcomes
+- closepack export + offline verify succeeds
+- dispute flow blocks auto-release and routes held funds deterministically
+- idempotency constraints hold under retries
 
 ## CI usage
 
-Run conformance in CI and store artifacts:
+Store these as build artifacts:
 
-- JSON report output
-- closepack verification output (if generated)
-- release metadata/checksums where applicable
+- conformance JSON report
+- closepack verify report
+- release artifact checksum list (for releases)
 
-This makes release confidence auditable.
+## Run-twice idempotency check
 
-## Run twice rule
+Run critical flows twice and confirm deterministic uniqueness surfaces hold (no duplicate deterministic effects).
 
-A good idempotency signal is running critical flows twice and verifying no duplicate side effects where deterministic uniqueness is expected.
+## Failure triage pattern
 
-## Failure handling
-
-When conformance fails:
-
-1. Identify failing assertion from report JSON.
-2. Map failure to primitive/invariant (agreement binding, dispute state, adjustment uniqueness, replay mismatch, etc.).
-3. Fix at invariant layer (not only endpoint response shape).
-4. Re-run until green.
+1. Inspect failing assertion from report JSON.
+2. Map failure to primitive/invariant.
+3. Fix invariant behavior (not only response shape).
+4. Re-run until all assertions pass.
 
 ## Related files
 

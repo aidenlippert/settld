@@ -1,65 +1,48 @@
 # Guides
 
-Use these implementation patterns to move from local proof to production deployment.
+Use these guides to move from local proof-of-concept to production-grade operation.
 
-## 1) Local kernel proof flow
-
-Goal: prove end-to-end lifecycle quickly.
+## Local proof flow
 
 - Start stack
 - Run conformance
-- Inspect artifacts
-- Export + verify closepack
-- Replay-evaluate sample agreement
+- Replay-evaluate a real agreement
+- Export and verify closepack
 
-Start with: [Quickstart](./quickstart.md)
+See [Quickstart](./quickstart.md).
 
-## 2) Build a paid capability
+## Build a paid capability
 
-Goal: turn a capability into an enforceable paid call.
+- Generate capability template
+- Publish signed manifest
+- Emit evidence correctly
+- Set holdback/challenge-window settlement terms
+- Validate with conformance
 
-- generate capability template
-- publish signed manifest
-- integrate evidence emission
-- set settlement terms (including holdback/challenge window)
-- run conformance
+## Integrate with your existing backend
 
-## 3) Integrate with existing app/backend
+- Choose SDK (JS/Python) or raw API
+- Map your lifecycle to agreement/evidence/decision stages
+- Persist artifact IDs for audit and replay
+- Add replay and closepack checks into operational workflows
 
-Goal: embed Settld in current agent or API architecture.
+## Operate disputes safely
 
-- choose SDK (JS/Python) or raw API
-- map your call lifecycle to agreement/evidence/decision stages
-- persist returned artifact IDs for auditability
-- run replay checks in ops workflows
+- Require signer-bound dispute envelope for non-admin opens
+- Enforce challenge window
+- Prevent multiple active dispute conflicts
+- Ensure verdict routes held funds via deterministic adjustment
 
-## 4) Enable disputes and holdback controls
-
-Goal: operationalize contested outcomes safely.
-
-- require signer-bound dispute open envelope flows
-- enforce challenge window constraints
-- ensure open case blocks auto-release
-- verify verdict-to-adjustment determinism
-
-## 5) Release and audit workflow
-
-Goal: ship with machine-checkable confidence.
+## Release process
 
 - run tests + conformance
-- produce release artifacts/checksums
-- include closepack verify evidence in release packet
+- produce release checksums/artifacts
+- include closepack verify evidence
+- document regression and replay findings
 
-## Integration references
+## Deep-dive pages
 
-- `docs/integrations/README.md`
-- `docs/integrations/github-actions.md`
-- `docs/RELEASING.md`
-- `docs/RELEASE_CHECKLIST.md`
-
-## Ops and hosted maturity references
-
-- `docs/ops/HOSTED_BASELINE_R2.md`
-- `docs/ops/PAYMENTS_ALPHA_R5.md`
-- `docs/ALERTS.md`
-- `docs/SLO.md`
+- [Dispute lifecycle](./dispute-lifecycle.md)
+- [Replay and audit](./replay-and-audit.md)
+- [SDK usage](./sdk-reference.md)
+- [Operations runbook](./operations-runbook.md)
