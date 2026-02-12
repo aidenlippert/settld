@@ -6,8 +6,6 @@
  *  - jobIds
  *  - month
  */
-import { createEd25519Keypair, keyIdFromPublicKeyPem } from "../../src/core/crypto.js";
-import { createChainedEvent, finalizeChainedEvent } from "../../src/core/event-chain.js";
 import { createBackupRestoreApiClient } from "./client.mjs";
 import { makeBookedPayload } from "../../test/api-test-harness.js";
 
@@ -20,11 +18,17 @@ const JOBS = Number(process.env.JOBS ?? "10");
 const SCHEMA = process.env.PROXY_PG_SCHEMA ?? "public";
 
 if (!Number.isSafeInteger(JOBS) || JOBS <= 0) throw new Error("JOBS must be a positive integer");
+if (!/^\d{4}-\d{2}$/.test(MONTH)) throw new Error("MONTH must match YYYY-MM");
+
+let nowMs = Date.parse(`${MONTH}-15T10:00:00.000Z`);
+if (!Number.isFinite(nowMs)) throw new Error("invalid MONTH timestamp anchor");
+const nowIso = () => new Date(nowMs).toISOString();
 
 const { api, request, close, tenantId } = await createBackupRestoreApiClient({
   databaseUrl: DATABASE_URL,
   schema: SCHEMA,
-  tenantId: TENANT_ID
+  tenantId: TENANT_ID,
+  now: nowIso
 });
 
 const accountMap = await request({
@@ -34,43 +38,53 @@ const accountMap = await request({
     mapping: {
       schemaVersion: "FinanceAccountMap.v1",
       accounts: {
-        acct_cash: "ext_cash",
-        acct_customer_escrow: "ext_customer_escrow",
-        acct_platform_revenue: "ext_platform_revenue",
-        acct_operator_payable: "ext_operator_payable"
+        acct_cash: "1000",
+        acct_customer_escrow: "2100",
+        acct_platform_revenue: "4000",
+        acct_owner_payable: "2000",
+        acct_operator_payable: "2010",
+        acct_insurance_reserve: "2150",
+        acct_coverage_reserve: "2160",
+        acct_coverage_unearned: "2170",
+        acct_coverage_revenue: "4010",
+        acct_coverage_payout_expense: "5100",
+        acct_insurer_receivable: "1200",
+        acct_operator_chargeback_receivable: "1210",
+        acct_claims_expense: "5200",
+        acct_claims_payable: "2200",
+        acct_operator_labor_expense: "5300",
+        acct_operator_cost_accrued: "2210",
+        acct_developer_royalty_payable: "2020",
+        acct_sla_credits_expense: "4900",
+        acct_customer_credits_payable: "2110"
       }
     }
   }
 });
 if (accountMap.statusCode !== 200) throw new Error(`ops finance account-map failed: ${accountMap.statusCode} ${accountMap.body}`);
 
-// Fixed time anchors for determinism.
-const baseNow = Date.parse("2026-01-15T10:00:00.000Z");
-const bookingStartAt = new Date(baseNow + 5 * 60_000).toISOString();
-const bookingEndAt = new Date(baseNow + 65 * 60_000).toISOString();
-const accessValidFrom = new Date(baseNow - 60_000).toISOString();
-const accessValidTo = new Date(baseNow + 90 * 60_000).toISOString();
-
-// Register one robot + one operator with signing keys.
-const { publicKeyPem: robotPublicKeyPem, privateKeyPem: robotPrivateKeyPem } = createEd25519Keypair();
-const robotKeyId = keyIdFromPublicKeyPem(robotPublicKeyPem);
-
 const regRobot = await request({
   method: "POST",
   path: "/robots/register",
   headers: { "x-idempotency-key": "backup_robot_reg_1" },
-  body: { robotId: "rob_backup", publicKeyPem: robotPublicKeyPem, trustScore: 0.9, homeZoneId: "zone_a" }
+  body: { robotId: "rob_backup", trustScore: 0.9, homeZoneId: "zone_a" }
 });
 if (regRobot.statusCode !== 201) throw new Error(`robot register failed: ${regRobot.statusCode} ${regRobot.body}`);
+let robotPrev = regRobot.json?.robot?.lastChainHash ?? null;
+if (!robotPrev) throw new Error("robot registration missing lastChainHash");
 
-const robotPrev = regRobot.json?.robot?.lastChainHash;
+nowMs += 1_000;
 const setAvail = await request({
   method: "POST",
   path: "/robots/rob_backup/availability",
   headers: { "x-idempotency-key": "backup_robot_avail_1", "x-proxy-expected-prev-chain-hash": robotPrev },
-  body: { availability: [{ startAt: "2026-01-01T00:00:00.000Z", endAt: "2026-03-01T00:00:00.000Z" }] }
+  body: { availability: [{ startAt: `${MONTH}-01T00:00:00.000Z`, endAt: `${MONTH}-28T23:59:59.999Z` }] }
 });
 if (setAvail.statusCode !== 201) throw new Error(`robot availability failed: ${setAvail.statusCode} ${setAvail.body}`);
+robotPrev = setAvail.json?.robot?.lastChainHash ?? robotPrev;
+
+const bookingStartAt = `${MONTH}-15T10:30:00.000Z`;
+const bookingEndAt = `${MONTH}-15T11:00:00.000Z`;
 
 const jobIds = [];
 
@@ -88,42 +102,21 @@ for (let i = 0; i < JOBS; i += 1) {
   if (!jobId || !prev) throw new Error("job create did not return id/lastChainHash");
   jobIds.push(jobId);
 
-  const postServerEvent = async (type, payload, idempotencyKey, { at } = {}) => {
-    const body = { type, actor: { type: "system", id: "backup" }, payload };
-    if (at) body.at = at;
+  const postServerEvent = async (type, payload, idempotencyKey) => {
     const res = await request({
       method: "POST",
       path: `/jobs/${jobId}/events`,
       headers: { "x-proxy-expected-prev-chain-hash": prev, "x-idempotency-key": idempotencyKey },
-      body
+      body: { type, actor: { type: "system", id: "backup" }, payload }
     });
     if (res.statusCode !== 201) throw new Error(`post ${type} failed: ${res.statusCode} ${res.body}`);
     prev = res.json?.job?.lastChainHash;
     return res;
   };
 
-  const postRobotEvent = async (type, payload, { at } = {}) => {
-    const draft = createChainedEvent({ streamId: jobId, type, actor: { type: "robot", id: "rob_backup" }, payload, at });
-    const finalized = finalizeChainedEvent({
-      event: draft,
-      prevChainHash: prev,
-      signer: { keyId: robotKeyId, privateKeyPem: robotPrivateKeyPem }
-    });
-    const res = await request({ method: "POST", path: `/jobs/${jobId}/events`, body: finalized });
-    if (res.statusCode !== 201) throw new Error(`robot event ${type} failed: ${res.statusCode} ${res.body}`);
-    prev = res.json?.job?.lastChainHash;
-    return res;
-  };
-
-  const quoteAt = new Date(baseNow + 30_000).toISOString();
-  const bookedAt = new Date(baseNow + 40_000).toISOString();
-  const matchedAt = new Date(baseNow + 50_000).toISOString();
-  const reservedAt = new Date(baseNow + 55_000).toISOString();
-  const accessPlanIssuedAt = new Date(baseNow + 5 * 60_000 + 10_000).toISOString();
-  const settledAt = new Date(baseNow + 5 * 60_000 + 80_000).toISOString();
-
-  // Quote/book/match/reserve/execute/settle.
-  await postServerEvent("QUOTE_PROPOSED", { amountCents: 6500 + i, currency: "USD" }, `backup_quote_${i}`, { at: quoteAt });
+  nowMs += 1_000;
+  await postServerEvent("QUOTE_PROPOSED", { amountCents: 6500 + i, currency: "USD" }, `backup_quote_${i}`);
+  nowMs += 1_000;
   await postServerEvent(
     "BOOKED",
     makeBookedPayload({
@@ -135,46 +128,14 @@ for (let i = 0; i < JOBS; i += 1) {
       customerId: "cust_backup",
       siteId: "site_backup"
     }),
-    `backup_book_${i}`,
-    { at: bookedAt }
+    `backup_book_${i}`
   );
-  await postServerEvent("MATCHED", { robotId: "rob_backup", operatorPartyId: "pty_operator_backup" }, `backup_match_${i}`, {
-    at: matchedAt
-  });
-  await postServerEvent(
-    "RESERVED",
-    { robotId: "rob_backup", startAt: bookingStartAt, endAt: bookingEndAt, reservationId: `rsv_backup_${i}` },
-    `backup_reserve_${i}`,
-    { at: reservedAt }
-  );
-
-  const enRouteAt = new Date(baseNow + 5 * 60_000 + 5_000).toISOString();
-  const accessGrantedAt = new Date(baseNow + 5 * 60_000 + 15_000).toISOString();
-  const executionStartedAt = new Date(baseNow + 5 * 60_000 + 30_000).toISOString();
-  const executionCompletedAt = new Date(baseNow + 5 * 60_000 + 60_000).toISOString();
-
-  const accessPlanId = `ap_backup_${jobId}`;
-  await postRobotEvent("EN_ROUTE", { etaSeconds: 60 }, { at: enRouteAt });
-  await postServerEvent(
-    "ACCESS_PLAN_ISSUED",
-    {
-      jobId,
-      accessPlanId,
-      method: "BUILDING_CONCIERGE",
-      credentialRef: `vault://access/${accessPlanId}/v1`,
-      scope: { areas: ["LOBBY"], noGo: [] },
-      validFrom: accessValidFrom,
-      validTo: accessValidTo,
-      revocable: true,
-      requestedBy: "backup"
-    },
-    `backup_access_plan_${i}`,
-    { at: accessPlanIssuedAt }
-  );
-  await postRobotEvent("ACCESS_GRANTED", { jobId, accessPlanId, method: "BUILDING_CONCIERGE" }, { at: accessGrantedAt });
-  await postRobotEvent("EXECUTION_STARTED", { plan: ["navigate"] }, { at: executionStartedAt });
-  await postRobotEvent("EXECUTION_COMPLETED", { report: { durationSeconds: 10 } }, { at: executionCompletedAt });
-  await postServerEvent("SETTLED", { settlement: "backup" }, `backup_settle_${i}`, { at: settledAt });
+  nowMs += 1_000;
+  await postServerEvent("MATCHED", { robotId: "rob_backup", operatorPartyId: "pty_operator_backup" }, `backup_match_${i}`);
+  nowMs += 1_000;
+  await postServerEvent("JOB_CANCELLED", { jobId, cancelledAt: nowIso(), reason: "OPS", requestedBy: "ops" }, `backup_cancel_${i}`);
+  nowMs += 1_000;
+  await postServerEvent("SETTLED", { settlement: "backup" }, `backup_settle_${i}`);
 }
 
 for (let i = 0; i < 50; i += 1) {
@@ -186,7 +147,7 @@ for (let i = 0; i < 50; i += 1) {
   if (!Array.isArray(tick?.processed) || tick.processed.length === 0) break;
 }
 
-// Request month close and wait for CLOSED.
+nowMs += 1_000;
 const closeReq = await request({ method: "POST", path: "/ops/month-close", body: { month: MONTH } });
 if (closeReq.statusCode !== 202) throw new Error(`month close request failed: ${closeReq.statusCode} ${closeReq.body}`);
 
@@ -199,7 +160,6 @@ for (let i = 0; i < 240; i += 1) {
     closed = true;
     break;
   }
-  // allow outbox catch up
   await new Promise((r) => setTimeout(r, 250));
 }
 if (!closed) throw new Error("month close did not reach CLOSED");

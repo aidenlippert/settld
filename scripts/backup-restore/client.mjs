@@ -57,7 +57,8 @@ export async function createBackupRestoreApiClient({
   schema = null,
   tenantId = DEFAULT_TENANT_ID,
   scopes = ["ops_write", "finance_write", "audit_read"],
-  protocol = "1.0"
+  protocol = "1.0",
+  now = null
 } = {}) {
   if (!databaseUrl) throw new Error("databaseUrl is required");
   tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
@@ -66,7 +67,7 @@ export async function createBackupRestoreApiClient({
     schema: schema ?? (process.env.PROXY_PG_SCHEMA ?? "public"),
     migrateOnStartup: true
   });
-  const api = createApi({ store });
+  const api = createApi({ store, ...(typeof now === "function" ? { now } : null) });
 
   const auth = await ensureAuth({ store, tenantId, scopes });
 
@@ -94,4 +95,3 @@ export async function createBackupRestoreApiClient({
 
   return { store, api, request, close, tenantId };
 }
-
