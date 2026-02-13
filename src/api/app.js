@@ -19864,28 +19864,51 @@ export function createApi({
             stripeConnectAccountId = resolvedConnect.account.accountId;
           }
 
-	          const statementHash = record.artifactHash;
-	          const payoutKey = payoutKeyFor({ tenantId, partyId, period, statementHash });
-	          const payoutArtifactId = `payout_${tenantId}_${partyId}_${period}_${statementHash}`;
-	          const generatedAt = monthClose.requestedAt ?? record.closedAt ?? nowIso();
-	          const payoutBody = buildPayoutInstructionV1({
-	            tenantId,
-	            partyId,
-	            partyRole,
-	            period,
-	            statementHash,
-	            payoutKey,
-	            currency: "USD",
-	            amountCents: payoutAmountCents,
-	            destinationRef: null,
-	            events: monthEvents,
-	            artifactId: payoutArtifactId,
-	            generatedAt
-	          });
-	          const payoutCore = { ...payoutBody, sourceEventId: monthClose.lastEventId ?? null, atChainHash: monthClose.lastChainHash ?? null };
-	          const payoutHash = computeArtifactHash(payoutCore);
-	          const payoutArtifact = { ...payoutCore, artifactHash: payoutHash };
-	          await store.putArtifact({ tenantId, artifact: payoutArtifact });
+		          const statementHash = record.artifactHash;
+		          const payoutKey = payoutKeyFor({ tenantId, partyId, period, statementHash });
+		          const payoutArtifactId = `payout_${tenantId}_${partyId}_${period}_${statementHash}`;
+		          // Determinism: month-close workers slice eventProof through the MONTH_CLOSE_REQUESTED anchor,
+		          // not the later MONTH_CLOSED event. Keep payout instruction hashing aligned so enqueue is idempotent.
+		          let requestedEvent = null;
+		          for (let i = monthEvents.length - 1; i >= 0; i -= 1) {
+		            const e = monthEvents[i];
+		            if (e?.type === "MONTH_CLOSE_REQUESTED") {
+		              requestedEvent = e;
+		              break;
+		            }
+		          }
+		          const requestedChainHash =
+		            typeof requestedEvent?.chainHash === "string" && requestedEvent.chainHash.trim() ? requestedEvent.chainHash : null;
+		          const proofEvents = requestedChainHash ? sliceEventsThroughChainHash(monthEvents, requestedChainHash) : monthEvents;
+		          const generatedAt =
+		            (typeof requestedEvent?.payload?.requestedAt === "string" && requestedEvent.payload.requestedAt.trim()
+		              ? String(requestedEvent.payload.requestedAt)
+		              : null) ??
+		            monthClose.requestedAt ??
+		            record.closedAt ??
+		            nowIso();
+		          const payoutBody = buildPayoutInstructionV1({
+		            tenantId,
+		            partyId,
+		            partyRole,
+		            period,
+		            statementHash,
+		            payoutKey,
+		            currency: "USD",
+		            amountCents: payoutAmountCents,
+		            destinationRef: null,
+		            events: proofEvents,
+		            artifactId: payoutArtifactId,
+		            generatedAt
+		          });
+		          const payoutCore = {
+		            ...payoutBody,
+		            sourceEventId: monthClose.lastEventId ?? null,
+		            atChainHash: requestedChainHash ?? monthClose.lastChainHash ?? null
+		          };
+		          const payoutHash = computeArtifactHash(payoutCore);
+		          const payoutArtifact = { ...payoutCore, artifactHash: payoutHash };
+		          await store.putArtifact({ tenantId, artifact: payoutArtifact });
 
 	          const destinations = listDestinationsForTenant(tenantId).filter((d) => {
 	            const allowed = Array.isArray(d.artifactTypes) && d.artifactTypes.length ? d.artifactTypes : null;
