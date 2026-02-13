@@ -135,7 +135,7 @@ function buildBookedPayload({
   };
 }
 
-async function waitForOutboxDrain({ baseUrl, tenantId, opsToken, protocol, timeoutMs = 120_000 }) {
+async function waitForOutboxDrain({ baseUrl, tenantId, opsToken, protocol, timeoutMs = 600_000 }) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const hz = await requestJson({ baseUrl, tenantId, opsToken, protocol, method: "GET", path: "/healthz" });
@@ -149,7 +149,7 @@ async function waitForOutboxDrain({ baseUrl, tenantId, opsToken, protocol, timeo
   throw new Error("timed out waiting for outbox to drain");
 }
 
-async function drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, timeoutMs = 120_000 } = {}) {
+async function drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, timeoutMs = 600_000 } = {}) {
   // Preferred: explicit ops endpoint (works even when PROXY_AUTOTICK is disabled).
   // Fallback: wait for background workers to drain (requires PROXY_AUTOTICK=1).
   const started = Date.now();
@@ -161,7 +161,7 @@ async function drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, ti
       protocol,
       method: "POST",
       path: "/ops/maintenance/outbox/run",
-      body: { maxMessages: 1000 }
+      body: { maxMessages: 1000, passes: 10 }
     });
 
     // If the endpoint doesn't exist yet on the target baseUrl, fall back to passive waiting.
@@ -177,12 +177,12 @@ async function drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, ti
     }
 
     // eslint-disable-next-line no-await-in-loop
-    await new Promise((r) => setTimeout(r, 750));
+    await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error("timed out draining outbox");
 }
 
-async function pollMonthCloseClosed({ baseUrl, tenantId, opsToken, protocol, month, timeoutMs = 120_000 }) {
+async function pollMonthCloseClosed({ baseUrl, tenantId, opsToken, protocol, month, timeoutMs = 600_000 }) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const st = await requestJson({
@@ -360,7 +360,7 @@ async function main() {
   await postServerEvent("SETTLED", { note: "p0_money_rails_seed" }, "settle");
 
   // Ensure ledger/outbox work has time to apply before month-close.
-  await drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, timeoutMs: 120_000 });
+  await drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, timeoutMs: 600_000 });
 
   const monthCloseReq = await requestJson({
     baseUrl,
@@ -375,8 +375,8 @@ async function main() {
   assertOk(monthCloseReq, "month close request failed");
 
   // Month-close runs via outbox processing.
-  await drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, timeoutMs: 120_000 });
-  await pollMonthCloseClosed({ baseUrl, tenantId, opsToken, protocol, month: period, timeoutMs: 120_000 });
+  await drainOutboxBestEffort({ baseUrl, tenantId, opsToken, protocol, timeoutMs: 600_000 });
+  await pollMonthCloseClosed({ baseUrl, tenantId, opsToken, protocol, month: period, timeoutMs: 600_000 });
 
   const partyStatements = await requestJson({
     baseUrl,

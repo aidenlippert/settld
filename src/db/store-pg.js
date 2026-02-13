@@ -2079,9 +2079,12 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     const jobId = String(artifact.jobId ?? "");
     const sourceEventId = typeof artifact.sourceEventId === "string" && artifact.sourceEventId.trim() !== "" ? String(artifact.sourceEventId) : "";
 
-    // Invariant: for artifacts tied to a specific source event, there must be exactly one artifact per
+    // Invariant: for artifacts tied to a specific *job* source event, there must be exactly one artifact per
     // (jobId + artifactType + sourceEventId). This prevents duplicate settlement-backed certificates.
-    if (sourceEventId) {
+    //
+    // Important: many non-job artifacts (month close statements, party statements, payout instructions, etc.) set a
+    // sourceEventId but intentionally do not have a jobId. Do not apply this invariant to those artifacts.
+    if (sourceEventId && jobId) {
       const existingBySource = await client.query(
         "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",
         [tenantId, jobId, artifactType, sourceEventId]
@@ -2137,12 +2140,12 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
 	    } catch (err) {
 	      // Under concurrency, two workers may attempt to persist the same artifact at the same time. Treat this as
 	      // idempotent when the existing row's hash matches, and retryable otherwise.
-	      if (err?.code === "23505") {
-	        if (sourceEventId) {
-	          const bySource = await client.query(
-	            "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",
-	            [tenantId, jobId, artifactType, sourceEventId]
-	          );
+		      if (err?.code === "23505") {
+		        if (sourceEventId && jobId) {
+		          const bySource = await client.query(
+		            "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",
+		            [tenantId, jobId, artifactType, sourceEventId]
+		          );
 	          if (bySource.rows.length) {
 	            const currentId = String(bySource.rows[0].artifact_id);
 	            const currentHash = String(bySource.rows[0].artifact_hash);
