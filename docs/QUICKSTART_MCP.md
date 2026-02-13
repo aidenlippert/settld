@@ -28,6 +28,23 @@ npm run mcp:server
 The server speaks JSON-RPC 2.0 over `stdio` and exposes curated tools.
 If you run it in a normal terminal, it will just sit waiting for JSON-RPC input (this is expected). Use `mcp:probe` below to validate it end-to-end.
 
+## Optional: HTTP Gateway (HTTP -> MCP stdio)
+
+This is useful if you can do HTTP calls but cannot spawn a local MCP process.
+
+```bash
+export MCP_HTTP_PORT=8787
+npm run mcp:http
+```
+
+Then send JSON-RPC requests:
+
+```bash
+curl -sS http://127.0.0.1:8787/rpc \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"curl","version":"0"},"capabilities":{}}}' | jq .
+```
+
 ## Sanity Check (No Manual JSON Copy/Paste)
 
 ```bash
