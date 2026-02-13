@@ -108,7 +108,8 @@ Tool: `settld.open_dispute`
 {
   "runId": "<runId>",
   "reason": "Disputing for demo purposes",
-  "evidenceRefs": ["evidence://demo/dispute/1"]
+  "evidenceRefs": ["evidence://demo/dispute/1"],
+  "waitMs": 5000
 }
 ```
 

@@ -15,6 +15,10 @@ function nowMs() {
   return Date.now();
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function assertNonEmptyString(v, name) {
   if (typeof v !== "string" || v.trim() === "") throw new TypeError(`${name} must be a non-empty string`);
 }
@@ -302,6 +306,12 @@ function buildTools() {
           runId: { type: "string" },
           reason: { type: ["string", "null"], default: null },
           evidenceRefs: { type: "array", items: { type: "string" }, default: [] },
+          waitMs: {
+            type: "integer",
+            minimum: 0,
+            default: 0,
+            description: "Optional: wait up to this many milliseconds for settlement resolution before opening the dispute."
+          },
           disputeType: { type: ["string", "null"], default: null },
           priority: { type: ["string", "null"], default: null },
           channel: { type: ["string", "null"], default: null }
@@ -553,11 +563,40 @@ async function main() {
               body,
               idem: makeIdempotencyKey("mcp_run_event_terminal")
             });
-            result = { ok: true, ...redactSecrets(out) };
+            let settlement = null;
+            try {
+              settlement = await client.requestJson(`/runs/${encodeURIComponent(runId)}/settlement`, { method: "GET" });
+            } catch {
+              settlement = null;
+            }
+            result = { ok: true, ...redactSecrets(out), settlement };
           } else if (name === "settld.open_dispute") {
             const runId = String(args?.runId ?? "").trim();
             assertNonEmptyString(runId, "runId");
             const evidenceRefs = Array.isArray(args?.evidenceRefs) ? args.evidenceRefs.map((v) => String(v ?? "").trim()).filter(Boolean) : [];
+
+            const waitMsRaw = args?.waitMs ?? 0;
+            const waitMs = Number(waitMsRaw);
+            if (!Number.isSafeInteger(waitMs) || waitMs < 0) throw new TypeError("waitMs must be a non-negative safe integer");
+            const deadline = nowMs() + Math.min(waitMs, 60_000);
+
+            if (waitMs > 0) {
+              // Wait for settlement resolution so `open` doesn't immediately 409 on interactive demos.
+              // (The API requires settlement.status != locked to open a dispute.)
+              // eslint-disable-next-line no-constant-condition
+              while (true) {
+                let settlement = null;
+                try {
+                  settlement = await client.requestJson(`/runs/${encodeURIComponent(runId)}/settlement`, { method: "GET" });
+                } catch {
+                  settlement = null;
+                }
+                const status = String(settlement?.status ?? "").toLowerCase();
+                if (status && status !== "locked") break;
+                if (nowMs() >= deadline) break;
+                await sleep(500);
+              }
+            }
             const out = await client.requestJson(`/runs/${encodeURIComponent(runId)}/dispute/open`, {
               method: "POST",
               write: true,
