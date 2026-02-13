@@ -429,10 +429,20 @@ test("API e2e: production provider event mapping ingests statuses deterministica
       "x-idempotency-key": "ops_money_rail_prod_ingest_2"
     },
     body: {
-      operationId,
-      providerStatus: "paid_out",
-      eventId: "evt_prod_paid_1",
-      at: "2026-02-07T00:02:00.000Z"
+      payload: {
+        id: "evt_prod_paid_1",
+        type: "transfer.paid",
+        created: 1770422520,
+        data: {
+          object: {
+            id: "tr_prod_paid_1",
+            status: "paid",
+            metadata: {
+              settld_operation_id: operationId
+            }
+          }
+        }
+      }
     }
   });
   assert.equal(confirmed.statusCode, 200);
@@ -447,6 +457,13 @@ test("API e2e: production provider event mapping ingests statuses deterministica
   });
   assert.equal(status.statusCode, 200);
   assert.equal(status.json?.operation?.state, "confirmed");
+
+  const audits = await api.store.listOpsAudit({ tenantId, limit: 200, offset: 0 });
+  const ingestAudits = audits.filter((row) => row?.action === "MONEY_RAIL_PROVIDER_EVENT_INGEST");
+  assert.ok(ingestAudits.length >= 2);
+  const webhookAudit = ingestAudits.find((row) => row?.details?.eventId === "evt_prod_paid_1");
+  assert.equal(webhookAudit?.details?.source, "stripe_webhook");
+  assert.equal(webhookAudit?.details?.operationId, operationId);
 
   const mismatch = await request(api, {
     method: "POST",

@@ -2427,6 +2427,121 @@ export function createApi({
     throw new TypeError("eventType or providerStatus is required");
   }
 
+  function mapStripeWebhookEventTypeToMoneyRailEventType({ eventType, objectStatus = null, objectReversed = null } = {}) {
+    const normalizedType = normalizeNonEmptyStringOrNull(eventType)?.toLowerCase() ?? null;
+    const normalizedStatus = normalizeNonEmptyStringOrNull(objectStatus)?.toLowerCase() ?? null;
+    if (!normalizedType) return null;
+
+    if (normalizedType === "transfer.paid") return MONEY_RAIL_PROVIDER_EVENT_TYPE.CONFIRMED;
+    if (normalizedType === "transfer.failed") return MONEY_RAIL_PROVIDER_EVENT_TYPE.FAILED;
+    if (normalizedType === "transfer.reversed" || normalizedType === "transfer.refunded") {
+      return MONEY_RAIL_PROVIDER_EVENT_TYPE.REVERSED;
+    }
+    if (normalizedType === "transfer.canceled" || normalizedType === "transfer.cancelled") {
+      return MONEY_RAIL_PROVIDER_EVENT_TYPE.CANCELLED;
+    }
+    if (normalizedType === "transfer.created" || normalizedType === "transfer.pending") {
+      return MONEY_RAIL_PROVIDER_EVENT_TYPE.SUBMITTED;
+    }
+    if (normalizedType === "transfer.updated") {
+      if (objectReversed === true) return MONEY_RAIL_PROVIDER_EVENT_TYPE.REVERSED;
+      if (normalizedStatus === "paid") return MONEY_RAIL_PROVIDER_EVENT_TYPE.CONFIRMED;
+      if (normalizedStatus === "failed") return MONEY_RAIL_PROVIDER_EVENT_TYPE.FAILED;
+      if (normalizedStatus === "canceled" || normalizedStatus === "cancelled") return MONEY_RAIL_PROVIDER_EVENT_TYPE.CANCELLED;
+      return MONEY_RAIL_PROVIDER_EVENT_TYPE.SUBMITTED;
+    }
+    if (normalizedType === "payout.paid") return MONEY_RAIL_PROVIDER_EVENT_TYPE.CONFIRMED;
+    if (normalizedType === "payout.failed") return MONEY_RAIL_PROVIDER_EVENT_TYPE.FAILED;
+    if (normalizedType === "payout.canceled" || normalizedType === "payout.cancelled") {
+      return MONEY_RAIL_PROVIDER_EVENT_TYPE.CANCELLED;
+    }
+    return null;
+  }
+
+  function extractStripeMoneyRailWebhookHints(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const root = value;
+    const eventType = normalizeNonEmptyStringOrNull(root.type);
+    const eventId = normalizeNonEmptyStringOrNull(root.id);
+    const object =
+      root?.data && typeof root.data === "object" && !Array.isArray(root.data) && root.data.object && typeof root.data.object === "object" && !Array.isArray(root.data.object)
+        ? root.data.object
+        : root?.object && typeof root.object === "object" && !Array.isArray(root.object)
+          ? root.object
+          : null;
+    const metadata =
+      object?.metadata && typeof object.metadata === "object" && !Array.isArray(object.metadata) ? object.metadata : null;
+
+    const operationId =
+      normalizeNonEmptyStringOrNull(root.operationId) ??
+      normalizeNonEmptyStringOrNull(object?.operationId) ??
+      normalizeNonEmptyStringOrNull(metadata?.settld_operation_id) ??
+      normalizeNonEmptyStringOrNull(metadata?.operation_id);
+    const payoutKey =
+      normalizeNonEmptyStringOrNull(root?.payoutKey) ??
+      normalizeNonEmptyStringOrNull(object?.payoutKey) ??
+      normalizeNonEmptyStringOrNull(metadata?.settld_payout_key);
+    const providerRef =
+      normalizeNonEmptyStringOrNull(root.providerRef) ??
+      normalizeNonEmptyStringOrNull(object?.providerRef) ??
+      normalizeNonEmptyStringOrNull(object?.id);
+    const providerStatus =
+      normalizeMoneyRailProviderStatusValue(root.providerStatus) ??
+      normalizeMoneyRailProviderStatusValue(object?.status);
+    const mappedEventType = mapStripeWebhookEventTypeToMoneyRailEventType({
+      eventType,
+      objectStatus: providerStatus,
+      objectReversed: object?.reversed === true
+    });
+
+    let occurredAt = null;
+    if (Number.isSafeInteger(Number(root?.created))) {
+      occurredAt = new Date(Number(root.created) * 1000).toISOString();
+    } else if (typeof root?.created === "string" && root.created.trim() !== "" && Number.isFinite(Date.parse(root.created))) {
+      occurredAt = new Date(Date.parse(root.created)).toISOString();
+    }
+
+    return {
+      eventId,
+      eventType,
+      mappedEventType,
+      providerStatus,
+      operationId,
+      payoutKey,
+      providerRef,
+      at: occurredAt,
+      rawEvent: root
+    };
+  }
+
+  async function resolveMoneyRailOperationIdFromStripeHints({ tenantId, adapter, hints } = {}) {
+    if (!hints || typeof hints !== "object") return null;
+    const directCandidates = [];
+    if (hints.operationId) directCandidates.push(hints.operationId);
+    if (hints.payoutKey) directCandidates.push(`mop_${hints.payoutKey}`);
+    for (const candidate of directCandidates) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const operation = await adapter.status({ tenantId, operationId: candidate });
+        if (operation) return candidate;
+      } catch {
+        // ignore and continue to next candidate
+      }
+    }
+    if (typeof adapter.listOperations !== "function") return null;
+    const operations = await adapter.listOperations({ tenantId });
+    const matches = operations.filter((operation) => {
+      if (!operation || typeof operation !== "object") return false;
+      if (hints.providerRef && normalizeNonEmptyStringOrNull(operation.providerRef) === hints.providerRef) return true;
+      if (hints.payoutKey && extractPayoutKeyFromMoneyRailOperation(operation) === hints.payoutKey) return true;
+      return false;
+    });
+    if (matches.length === 1) {
+      return normalizeNonEmptyStringOrNull(matches[0]?.operationId);
+    }
+    return null;
+  }
+
   function extractPayoutKeyFromMoneyRailOperation(operation) {
     if (!operation || typeof operation !== "object") return null;
     const metadataPayoutKey =
@@ -19997,6 +20112,27 @@ export function createApi({
                   }
                 });
               } catch (err) {
+                if (typeof store.appendOpsAudit === "function") {
+                  try {
+                    await store.appendOpsAudit({
+                      tenantId,
+                      audit: makeOpsAudit({
+                        action: "MONEY_RAIL_OPERATION_SUBMIT_REJECTED",
+                        targetType: "money_rail_operation",
+                        targetId: operationId,
+                        details: {
+                          providerId,
+                          operationId,
+                          mode: providerConfig.mode,
+                          error: serializeStripeProviderError(err),
+                          code: "MONEY_RAIL_PROVIDER_UPSTREAM_ERROR"
+                        }
+                      })
+                    });
+                  } catch {
+                    // best-effort
+                  }
+                }
                 return sendError(
                   res,
                   stripeProviderErrorStatusCode(err, 502),
@@ -20008,6 +20144,27 @@ export function createApi({
 
               providerRef = normalizeNonEmptyStringOrNull(stripeTransfer?.id);
               if (!providerRef) {
+                if (typeof store.appendOpsAudit === "function") {
+                  try {
+                    await store.appendOpsAudit({
+                      tenantId,
+                      audit: makeOpsAudit({
+                        action: "MONEY_RAIL_OPERATION_SUBMIT_REJECTED",
+                        targetType: "money_rail_operation",
+                        targetId: operationId,
+                        details: {
+                          providerId,
+                          operationId,
+                          mode: providerConfig.mode,
+                          code: "MONEY_RAIL_PROVIDER_INVALID_RESPONSE",
+                          response: stripeTransfer ?? null
+                        }
+                      })
+                    });
+                  } catch {
+                    // best-effort
+                  }
+                }
                 return sendError(
                   res,
                   502,
@@ -20241,30 +20398,86 @@ export function createApi({
               }
             }
 
-            const operationId = typeof body?.operationId === "string" && body.operationId.trim() !== "" ? body.operationId.trim() : null;
-            if (!operationId) return sendError(res, 400, "operationId is required");
+            const stripeWebhookHints = isStripeMoneyRailProviderId(providerId) ? extractStripeMoneyRailWebhookHints(body?.payload ?? body) : null;
+            let operationId = normalizeNonEmptyStringOrNull(body?.operationId);
+            if (!operationId && stripeWebhookHints) {
+              operationId = await resolveMoneyRailOperationIdFromStripeHints({
+                tenantId,
+                adapter,
+                hints: stripeWebhookHints
+              });
+            }
+            if (!operationId) {
+              if (typeof store.appendOpsAudit === "function") {
+                try {
+                  await store.appendOpsAudit({
+                    tenantId,
+                    audit: makeOpsAudit({
+                      action: "MONEY_RAIL_PROVIDER_EVENT_REJECTED",
+                      targetType: "money_rail_operation",
+                      targetId: "unknown",
+                      details: {
+                        providerId,
+                        code: "MONEY_RAIL_OPERATION_ID_REQUIRED",
+                        source: stripeWebhookHints ? "stripe_webhook" : "ops_ingest"
+                      }
+                    })
+                  });
+                } catch {
+                  // best-effort
+                }
+              }
+              return sendError(res, 400, "operationId is required");
+            }
 
             let eventType = null;
+            const providerStatusInput = body?.providerStatus ?? stripeWebhookHints?.providerStatus ?? null;
+            const eventTypeInput = body?.eventType ?? stripeWebhookHints?.mappedEventType ?? null;
             try {
               eventType = resolveMoneyRailProviderEventType({
                 providerId,
-                eventType: body?.eventType ?? null,
-                providerStatus: body?.providerStatus ?? null
+                eventType: eventTypeInput,
+                providerStatus: providerStatusInput
               });
             } catch (err) {
+              if (typeof store.appendOpsAudit === "function") {
+                try {
+                  await store.appendOpsAudit({
+                    tenantId,
+                    audit: makeOpsAudit({
+                      action: "MONEY_RAIL_PROVIDER_EVENT_REJECTED",
+                      targetType: "money_rail_operation",
+                      targetId: operationId,
+                      details: {
+                        providerId,
+                        operationId,
+                        eventType: eventTypeInput,
+                        providerStatus: normalizeMoneyRailProviderStatusValue(providerStatusInput),
+                        message: err?.message ?? null,
+                        code: "MONEY_RAIL_PROVIDER_EVENT_TYPE_INVALID",
+                        source: stripeWebhookHints ? "stripe_webhook" : "ops_ingest"
+                      }
+                    })
+                  });
+                } catch {
+                  // best-effort
+                }
+              }
               return sendError(res, 400, "invalid provider event", { message: err?.message });
             }
 
-            const eventId = typeof body?.eventId === "string" && body.eventId.trim() !== "" ? body.eventId.trim() : null;
-            const providerRef = typeof body?.providerRef === "string" && body.providerRef.trim() !== "" ? body.providerRef.trim() : null;
+            const eventId = normalizeNonEmptyStringOrNull(body?.eventId) ?? stripeWebhookHints?.eventId ?? null;
+            const providerRef = normalizeNonEmptyStringOrNull(body?.providerRef) ?? stripeWebhookHints?.providerRef ?? null;
             const reasonCode = typeof body?.reasonCode === "string" && body.reasonCode.trim() !== "" ? body.reasonCode.trim() : null;
-            const payload = body?.payload;
+            const payload = Object.prototype.hasOwnProperty.call(body, "payload") ? body?.payload : stripeWebhookHints?.rawEvent ?? null;
             if (payload !== undefined && payload !== null && (typeof payload !== "object" || Array.isArray(payload))) {
               return sendError(res, 400, "payload must be an object or null");
             }
             const at =
               typeof body?.at === "string" && body.at.trim() !== ""
                 ? body.at.trim()
+                : stripeWebhookHints?.at
+                  ? stripeWebhookHints.at
                 : nowIso();
             if (!Number.isFinite(Date.parse(at))) return sendError(res, 400, "at must be an ISO date-time");
 
@@ -20281,6 +20494,32 @@ export function createApi({
                 payload: payload ?? null
               });
             } catch (err) {
+              if (typeof store.appendOpsAudit === "function") {
+                try {
+                  await store.appendOpsAudit({
+                    tenantId,
+                    audit: makeOpsAudit({
+                      action: "MONEY_RAIL_PROVIDER_EVENT_REJECTED",
+                      targetType: "money_rail_operation",
+                      targetId: operationId,
+                      details: {
+                        providerId,
+                        operationId,
+                        eventType,
+                        providerStatus: normalizeMoneyRailProviderStatusValue(providerStatusInput),
+                        eventId: eventId ?? null,
+                        providerRef: providerRef ?? null,
+                        reasonCode: reasonCode ?? null,
+                        message: err?.message ?? null,
+                        code: err?.code ?? "MONEY_RAIL_PROVIDER_EVENT_REJECTED",
+                        source: stripeWebhookHints ? "stripe_webhook" : "ops_ingest"
+                      }
+                    })
+                  });
+                } catch {
+                  // best-effort
+                }
+              }
               if (err?.code === "MONEY_RAIL_OPERATION_NOT_FOUND") return sendError(res, 404, "money rail operation not found");
               if (err?.code === "MONEY_RAIL_INVALID_TRANSITION") {
                 return sendError(res, 409, "money rail provider event rejected", { message: err?.message, code: err?.code ?? null });
@@ -20293,8 +20532,34 @@ export function createApi({
               event: ingested?.event ?? null,
               applied: Boolean(ingested?.applied),
               eventType,
-              providerStatus: normalizeMoneyRailProviderStatusValue(body?.providerStatus ?? null)
+              providerStatus: normalizeMoneyRailProviderStatusValue(providerStatusInput)
             };
+            if (typeof store.appendOpsAudit === "function") {
+              try {
+                await store.appendOpsAudit({
+                  tenantId,
+                  audit: makeOpsAudit({
+                    action: "MONEY_RAIL_PROVIDER_EVENT_INGEST",
+                    targetType: "money_rail_operation",
+                    targetId: operationId,
+                    details: {
+                      providerId,
+                      operationId,
+                      eventType,
+                      providerStatus: responseBody.providerStatus,
+                      eventId: eventId ?? null,
+                      providerRef: providerRef ?? null,
+                      reasonCode: reasonCode ?? null,
+                      applied: responseBody.applied === true,
+                      duplicate: responseBody.applied !== true,
+                      source: stripeWebhookHints ? "stripe_webhook" : "ops_ingest"
+                    }
+                  })
+                });
+              } catch {
+                // best-effort
+              }
+            }
             if (
               responseBody.applied === true &&
               eventType === MONEY_RAIL_PROVIDER_EVENT_TYPE.REVERSED &&

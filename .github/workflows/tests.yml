@@ -73,6 +73,93 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
 
+  deploy_safety_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+      RESTORE_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Runtime import smoke
+        run: npm run -s test:ci:runtime-import-smoke
+      - name: Secret hygiene guard
+        run: npm run -s test:ci:secret-hygiene
+      - name: Start Settld API (pg mode)
+        run: |
+          set -euo pipefail
+          STORE=pg \
+          NODE_ENV=production \
+          DATABASE_URL="${DATABASE_URL}" \
+          PROXY_PG_SCHEMA="deploy_safety_ci" \
+          PROXY_MIGRATE_ON_STARTUP=1 \
+          PROXY_OPS_TOKENS="ops_ci:ops_read,ops_write,finance_read,finance_write,audit_read" \
+          PROXY_BILLING_STRIPE_SYNC_ENABLED=1 \
+          PROXY_FINANCE_RECONCILE_ENABLED=1 \
+          PROXY_MONEY_RAIL_RECONCILE_ENABLED=1 \
+          PORT=3000 \
+          node src/api/server.js &
+          echo $! > /tmp/settld_pid
+      - name: Wait for readiness
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3000/healthz" >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not become ready" >&2
+          exit 1
+      - name: Generate ephemeral signing key
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm Ed25519 -out /tmp/ops-ed25519.pem
+          chmod 600 /tmp/ops-ed25519.pem
+      - name: Run hosted baseline evidence gate (backup/restore required)
+        run: |
+          set -euo pipefail
+          npm run -s ops:hosted-baseline:evidence -- \
+            --base-url http://127.0.0.1:3000 \
+            --tenant-id tenant_default \
+            --ops-token ops_ci \
+            --environment ci \
+            --run-backup-restore true \
+            --require-backup-restore true \
+            --database-url "${DATABASE_URL}" \
+            --restore-database-url "${RESTORE_DATABASE_URL}" \
+            --backup-restore-jobs 1 \
+            --signing-key-file /tmp/ops-ed25519.pem \
+            --signature-key-id ops_ci_k1 \
+            --out artifacts/ops/hosted-baseline-ci.json
+      - name: Upload deploy safety artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-safety-${{ github.run_id }}
+          path: |
+            artifacts/ops/hosted-baseline-ci.json
+      - name: Stop server
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -f /tmp/settld_pid ]]; then kill "$(cat /tmp/settld_pid)" || true; fi
+
   openapi_drift:
     runs-on: ubuntu-latest
     timeout-minutes: 5

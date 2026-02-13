@@ -36,3 +36,6 @@ demo/**/output/
 # Misc
 *.tmp
 *.swp
+
+# Local signing / ops keys
+keys/

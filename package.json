@@ -82,6 +82,8 @@
     "test:ops:self-serve-gate": "node scripts/ci/run-self-serve-launch-gate.mjs",
     "test:ops:self-serve-benchmark": "node scripts/ci/build-self-serve-benchmark-report.mjs",
     "test:ops:launch-cutover-packet": "node scripts/ci/build-launch-cutover-packet.mjs",
+    "test:ci:runtime-import-smoke": "node scripts/ci/runtime-import-smoke.mjs",
+    "test:ci:secret-hygiene": "node scripts/ci/check-secret-hygiene.mjs",
     "test:cli:pack-smoke": "node scripts/ci/cli-pack-smoke.mjs",
     "ops:lighthouse:update": "node scripts/ci/update-lighthouse-tracker.mjs",
     "ops:tenant:bootstrap:conformance": "node scripts/ops/bootstrap-tenant-conformance.mjs",
