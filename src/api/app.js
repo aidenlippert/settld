@@ -19903,7 +19903,7 @@ export function createApi({
 		          });
 		          const payoutCore = {
 		            ...payoutBody,
-		            sourceEventId: monthClose.lastEventId ?? null,
+		            sourceEventId: requestedEvent?.id ?? monthClose.lastEventId ?? null,
 		            atChainHash: requestedChainHash ?? monthClose.lastChainHash ?? null
 		          };
 		          const payoutHash = computeArtifactHash(payoutCore);
