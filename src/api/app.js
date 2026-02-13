@@ -33479,14 +33479,21 @@ export function createApi({
             return sendError(res, 400, "invalid payload", { message: err?.message });
           }
 
-          const existing = getRobotEvents(tenantId, robotId);
-          const currentPrevChainHash = getCurrentPrevChainHash(existing);
-          if (expectedHeader.expectedPrevChainHash !== currentPrevChainHash) {
-            return sendError(res, 409, "event append conflict", {
-              expectedPrevChainHash: currentPrevChainHash,
-              gotExpectedPrevChainHash: expectedHeader.expectedPrevChainHash
-            });
-          }
+	          let existing = getRobotEvents(tenantId, robotId);
+	          if (!existing.length && typeof store.listAggregateEvents === "function") {
+	            try {
+	              existing = await store.listAggregateEvents({ tenantId, aggregateType: "robot", aggregateId: robotId });
+	            } catch {
+	              existing = [];
+	            }
+	          }
+	          const currentPrevChainHash = getCurrentPrevChainHash(existing);
+	          if (expectedHeader.expectedPrevChainHash !== currentPrevChainHash) {
+	            return sendError(res, 409, "event append conflict", {
+	              expectedPrevChainHash: currentPrevChainHash,
+	              gotExpectedPrevChainHash: expectedHeader.expectedPrevChainHash
+	            });
+	          }
 
           const draft = createChainedEvent({ streamId: robotId, type: "ROBOT_AVAILABILITY_SET", actor: { type: "system", id: "proxy" }, payload, at: nowIso() });
           const nextEvents = appendChainedEvent({ events: existing, event: draft, signer: serverSigner });
@@ -33519,14 +33526,21 @@ export function createApi({
             return sendError(res, 400, "invalid payload", { message: err?.message });
           }
 
-          const existing = getRobotEvents(tenantId, robotId);
-          const currentPrevChainHash = getCurrentPrevChainHash(existing);
-          if (expectedHeader.expectedPrevChainHash !== currentPrevChainHash) {
-            return sendError(res, 409, "event append conflict", {
-              expectedPrevChainHash: currentPrevChainHash,
-              gotExpectedPrevChainHash: expectedHeader.expectedPrevChainHash
-            });
-          }
+	          let existing = getRobotEvents(tenantId, robotId);
+	          if (!existing.length && typeof store.listAggregateEvents === "function") {
+	            try {
+	              existing = await store.listAggregateEvents({ tenantId, aggregateType: "robot", aggregateId: robotId });
+	            } catch {
+	              existing = [];
+	            }
+	          }
+	          const currentPrevChainHash = getCurrentPrevChainHash(existing);
+	          if (expectedHeader.expectedPrevChainHash !== currentPrevChainHash) {
+	            return sendError(res, 409, "event append conflict", {
+	              expectedPrevChainHash: currentPrevChainHash,
+	              gotExpectedPrevChainHash: expectedHeader.expectedPrevChainHash
+	            });
+	          }
 
           const draft = createChainedEvent({ streamId: robotId, type: "ROBOT_STATUS_CHANGED", actor: { type: "system", id: "proxy" }, payload, at: nowIso() });
           const nextEvents = appendChainedEvent({ events: existing, event: draft, signer: serverSigner });
