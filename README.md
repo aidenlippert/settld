@@ -16,6 +16,8 @@ This repository is a runnable Node.js prototype (API + agent simulator) and a se
 - Overview: `docs/OVERVIEW.md`
 - Quickstart: `docs/QUICKSTART_VERIFY.md`
 - Kernel v0 quickstart (local dev stack + conformance + explorer): `docs/QUICKSTART_KERNEL_V0.md`
+- Kernel v0 product surface (enforced vs not enforced): `docs/KERNEL_V0.md`
+- Kernel Compatible policy + listing format: `docs/KERNEL_COMPATIBLE.md`
 - Producer bootstrap: `docs/QUICKSTART_PRODUCE.md` (trust → produce → strict verify)
 - SDK quickstart (first verified run): `docs/QUICKSTART_SDK.md`
 - SDK quickstart (Python): `docs/QUICKSTART_SDK_PYTHON.md`
@@ -117,6 +119,18 @@ Run conformance (kernel control plane, disputes + holdback):
 ./bin/settld.js conformance kernel --ops-token tok_ops
 ```
 
+No-clone registry flow:
+
+```sh
+npx settld conformance kernel --ops-token tok_ops
+```
+
+No-clone release artifact flow (download `settld-<version>.tgz` from GitHub Releases):
+
+```sh
+npx --yes --package ./settld-<version>.tgz settld conformance kernel --ops-token tok_ops
+```
+
 Ops workspaces (HTML):
 
 - Kernel Explorer: `GET /ops/kernel/workspace` (requires ops token)
@@ -145,6 +159,9 @@ Ops workspaces (HTML):
 - `docs/ADOPTION_CHECKLIST.md`
 - `docs/SUPPORT.md`
 - `docs/OPERATIONS_SIGNING.md`
+- `docs/KERNEL_V0.md`
+- `docs/KERNEL_COMPATIBLE.md`
+- `docs/ops/PAYMENTS_ALPHA_R5.md`
 - `docs/ops/ARTIFACT_VERIFICATION_STATUS.md`
 - `docs/ops/TRUST_CONFIG_WIZARD.md`
 - `docs/integrations/README.md`

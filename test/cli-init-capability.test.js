@@ -25,11 +25,13 @@ test("CLI: settld init capability writes a signed ToolManifest.v1 starter", asyn
   const sigPath = path.join(outDir, "manifest.sig.json");
   const pubKeyPath = path.join(outDir, "keys", "dev-public-key.pem");
   const keypairPath = path.join(outDir, "keys", "dev-keypair.json");
+  const kernelProvePath = path.join(outDir, "scripts", "kernel-prove.mjs");
 
   const manifest = await readJson(manifestPath);
   const sig = await readJson(sigPath);
   const pubKeyPem = await fs.readFile(pubKeyPath, "utf8");
   const keypair = await readJson(keypairPath);
+  const kernelProveSource = await fs.readFile(kernelProvePath, "utf8");
 
   assert.equal(manifest.schemaVersion, "ToolManifest.v1");
   assert.ok(typeof manifest.toolId === "string" && manifest.toolId.length > 0);
@@ -59,4 +61,11 @@ test("CLI: settld init capability writes a signed ToolManifest.v1 starter", asyn
     true,
     "manifest signature should verify"
   );
+
+  assert.match(kernelProveSource, /new SettldClient/);
+  assert.match(kernelProveSource, /createAgreement\(/);
+  assert.match(kernelProveSource, /signEvidence\(/);
+  assert.match(kernelProveSource, /settle\(/);
+  assert.match(kernelProveSource, /openDispute\(/);
+  assert.match(kernelProveSource, /getArtifacts\(/);
 });

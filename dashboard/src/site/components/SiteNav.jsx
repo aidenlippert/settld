@@ -1,11 +1,10 @@
 const links = [
   { href: "/kernel-v0/", label: "Kernel v0" },
   { href: "#product", label: "Product" },
-  { href: "#developers", label: "Developers" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "#developers", label: "Quickstart" },
   { href: "#protocol", label: "Protocol" },
-  { href: "#pricing", label: "Pricing" },
   { href: "#changelog", label: "Changelog" },
-  { href: "#blog", label: "Blog" },
   { href: "#security", label: "Security" },
 ];
 
@@ -24,10 +23,10 @@ export default function SiteNav() {
           ))}
         </ul>
         <div className="site-nav-cta">
-          <a className="btn btn-ghost" href="https://app.settld.work/login">
-            Log in
+          <a className="btn btn-ghost" href="/demo">
+            Live demo
           </a>
-          <a className="btn btn-solid" href="#quickstart">
+          <a className="btn btn-solid" href="/pricing">
             Start building
           </a>
         </div>

@@ -44,6 +44,9 @@ Production enforcement:
 
 - `PROXY_RATE_LIMIT_RPM` (default: `0` = disabled)
 - `PROXY_RATE_LIMIT_BURST` (default: `PROXY_RATE_LIMIT_RPM`)
+- `PROXY_RATE_LIMIT_PER_KEY_RPM` (default: `0` = disabled)  
+  Applies an additional token bucket per authenticated API key (`auth.keyId`) after tenant-level limiting.
+- `PROXY_RATE_LIMIT_PER_KEY_BURST` (default: `PROXY_RATE_LIMIT_PER_KEY_RPM`)
 
 ## Outbox reclaim / worker loop
 
@@ -205,6 +208,23 @@ Finance reconciliation scheduling:
 
 - `PROXY_FINANCE_RECONCILE_MAX_PERIODS_PER_TENANT` (default: `2`)  
   Max GL periods reconciled per tenant in one run.
+
+Money-rail reconciliation scheduling:
+
+- `PROXY_MONEY_RAIL_RECONCILE_ENABLED` (default: `1`)  
+  Enables periodic money-rail reconciliation maintenance ticks.
+
+- `PROXY_MONEY_RAIL_RECONCILE_INTERVAL_SECONDS` (default: `300`)  
+  Minimum interval between automatic money-rail reconciliation runs.
+
+- `PROXY_MONEY_RAIL_RECONCILE_MAX_TENANTS` (default: `50`)  
+  Max tenants scanned per automatic run.
+
+- `PROXY_MONEY_RAIL_RECONCILE_MAX_PERIODS_PER_TENANT` (default: `2`)  
+  Max payout periods reconciled per tenant in one run.
+
+- `PROXY_MONEY_RAIL_RECONCILE_MAX_PROVIDERS_PER_TENANT` (default: `10`)  
+  Max money-rail providers reconciled per tenant in one run.
 
 Maintenance runner (recommended in prod):
 

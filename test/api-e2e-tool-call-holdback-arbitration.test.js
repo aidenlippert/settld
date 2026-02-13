@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createApi } from "../src/api/app.js";
 import { createEd25519Keypair, sha256Hex, signHashHexEd25519 } from "../src/core/crypto.js";
 import { canonicalJsonStringify, normalizeForCanonicalJson } from "../src/core/canonical-json.js";
+import { buildDisputeOpenEnvelopeV1 } from "../src/core/dispute-open-envelope.js";
 import { request } from "./api-test-harness.js";
 
 async function registerAgent(api, { agentId, publicKeyPem = null, tenantId = "tenant_default" } = {}) {
@@ -86,9 +87,40 @@ function buildSignedToolCallVerdict({
   };
 }
 
+function buildSignedDisputeOpenEnvelope({
+  tenantId,
+  agreementHash,
+  receiptHash,
+  holdHash,
+  openedByAgentId,
+  signerKeyId,
+  signerPrivateKeyPem,
+  openedAt
+} = {}) {
+  const envelopeWithPlaceholder = buildDisputeOpenEnvelopeV1({
+    envelopeId: `dopen_tc_${agreementHash}`,
+    caseId: `arb_case_tc_${agreementHash}`,
+    tenantId,
+    agreementHash,
+    receiptHash,
+    holdHash,
+    openedByAgentId,
+    openedAt: openedAt ?? new Date().toISOString(),
+    reasonCode: "TOOL_CALL_DISPUTE",
+    nonce: `nonce_${agreementHash.slice(0, 16)}`,
+    signerKeyId,
+    signature: "placeholder"
+  });
+  const signature = signHashHexEd25519(envelopeWithPlaceholder.envelopeHash, signerPrivateKeyPem);
+  return {
+    ...envelopeWithPlaceholder,
+    signature
+  };
+}
+
 test("API e2e: tool-call dispute freezes holdback auto-release; payee-win verdict releases held escrow with deterministic adjustment", async () => {
   let nowMs = Date.parse("2026-02-10T00:00:00.000Z");
-  const api = createApi({ now: () => new Date(nowMs).toISOString() });
+  const api = createApi({ now: () => new Date(nowMs).toISOString(), opsToken: "tok_ops" });
   const tenantId = "tenant_default";
 
   const payerAgentId = "agt_tc_payer_1";
@@ -96,8 +128,8 @@ test("API e2e: tool-call dispute freezes holdback auto-release; payee-win verdic
   const arbiterAgentId = "agt_tc_arbiter_1";
   const arbiterKeypair = createEd25519Keypair();
 
-  await registerAgent(api, { tenantId, agentId: payerAgentId });
-  await registerAgent(api, { tenantId, agentId: payeeAgentId });
+  const payerRegistration = await registerAgent(api, { tenantId, agentId: payerAgentId });
+  const payeeRegistration = await registerAgent(api, { tenantId, agentId: payeeAgentId });
   const arbiterRegistration = await registerAgent(api, { tenantId, agentId: arbiterAgentId, publicKeyPem: arbiterKeypair.publicKeyPem });
   assert.ok(typeof arbiterRegistration.keyId === "string" && arbiterRegistration.keyId.length > 0);
 
@@ -138,6 +170,16 @@ test("API e2e: tool-call dispute freezes holdback auto-release; payee-win verdic
       receiptHash,
       holdHash,
       openedByAgentId: payeeAgentId,
+      disputeOpenEnvelope: buildSignedDisputeOpenEnvelope({
+        tenantId,
+        agreementHash,
+        receiptHash,
+        holdHash,
+        openedByAgentId: payeeAgentId,
+        signerKeyId: payeeRegistration.keyId,
+        signerPrivateKeyPem: payeeRegistration.keypair.privateKeyPem,
+        openedAt: new Date(nowMs).toISOString()
+      }),
       arbiterAgentId,
       summary: "tool-call dispute: payee claims non-payment",
       evidenceRefs: []
@@ -152,6 +194,34 @@ test("API e2e: tool-call dispute freezes holdback auto-release; payee-win verdic
   assert.equal(arbitrationCase.metadata?.agreementHash, agreementHash);
   assert.equal(arbitrationCase.metadata?.receiptHash, receiptHash);
   assert.equal(arbitrationCase.metadata?.holdHash, holdHash);
+  assert.equal(open.json?.disputeOpenEnvelopeArtifact?.artifactId, `dopen_tc_${agreementHash}`);
+
+  const duplicateOpen = await request(api, {
+    method: "POST",
+    path: "/tool-calls/arbitration/open",
+    headers: { "x-proxy-tenant-id": tenantId, "x-settld-protocol": "1.0", "x-idempotency-key": "idmp_tc_open_1_duplicate" },
+    body: {
+      agreementHash,
+      receiptHash,
+      holdHash,
+      openedByAgentId: payeeAgentId,
+      disputeOpenEnvelope: buildSignedDisputeOpenEnvelope({
+        tenantId,
+        agreementHash,
+        receiptHash,
+        holdHash,
+        openedByAgentId: payeeAgentId,
+        signerKeyId: payeeRegistration.keyId,
+        signerPrivateKeyPem: payeeRegistration.keypair.privateKeyPem,
+        openedAt: new Date(nowMs).toISOString()
+      }),
+      arbiterAgentId,
+      summary: "duplicate open should fail",
+      evidenceRefs: []
+    }
+  });
+  assert.equal(duplicateOpen.statusCode, 409);
+  assert.equal(duplicateOpen.json?.code, "DISPUTE_ALREADY_OPEN");
 
   const listCases = await request(api, {
     method: "GET",
@@ -214,6 +284,35 @@ test("API e2e: tool-call dispute freezes holdback auto-release; payee-win verdic
   assert.equal(verdict.json?.settlementAdjustment?.kind, "holdback_release");
   assert.equal(verdict.json?.settlementAdjustment?.amountCents, 2000);
 
+  const reputationFacts = await request(api, {
+    method: "GET",
+    path: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(reputationFacts.statusCode, 200, reputationFacts.body);
+  assert.equal(reputationFacts.json?.facts?.totals?.disputes?.opened, 1);
+  assert.equal(reputationFacts.json?.facts?.totals?.disputes?.payeeWin, 1);
+  assert.equal(reputationFacts.json?.facts?.totals?.economics?.adjustmentAppliedCents, 2000);
+  const reputationFactsWithEvents = await request(api, {
+    method: "GET",
+    path: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime&includeEvents=1`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(reputationFactsWithEvents.statusCode, 200, reputationFactsWithEvents.body);
+  const eventIdsBeforeRetry = (reputationFactsWithEvents.json?.events ?? []).map((row) => String(row?.eventId ?? "")).filter(Boolean);
+  assert.equal(new Set(eventIdsBeforeRetry).size, eventIdsBeforeRetry.length);
+  const eventCountBeforeRetry = Number(reputationFactsWithEvents.json?.facts?.totals?.eventCount ?? eventIdsBeforeRetry.length);
+
+  const replay = await request(api, {
+    method: "GET",
+    path: `/ops/tool-calls/replay-evaluate?agreementHash=${agreementHash}`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(replay.statusCode, 200, replay.body);
+  assert.equal(replay.json?.replay?.stage, "terminal_dispute");
+  assert.equal(replay.json?.replay?.expected?.adjustmentKind, "holdback_release");
+  assert.equal(replay.json?.comparisons?.chainConsistent, true);
+
   const payerWalletAfter = await getWallet(api, { tenantId, agentId: payerAgentId });
   const payeeWalletAfter = await getWallet(api, { tenantId, agentId: payeeAgentId });
   assert.equal(payerWalletAfter.escrowLockedCents, 0);
@@ -231,11 +330,30 @@ test("API e2e: tool-call dispute freezes holdback auto-release; payee-win verdic
   assert.equal(verdictReplay.statusCode, 200, verdictReplay.body);
   assert.equal(verdictReplay.json?.alreadyExisted, true);
   assert.equal(verdictReplay.json?.settlementAdjustment?.adjustmentId, `sadj_agmt_${agreementHash}_holdback`);
+
+  const maintenanceReplay = await request(api, {
+    method: "POST",
+    path: "/ops/maintenance/tool-call-holdback/run",
+    headers: { "x-proxy-tenant-id": tenantId, "x-settld-protocol": "1.0", "x-proxy-ops-token": "tok_ops" },
+    body: { dryRun: false, limit: 1000 }
+  });
+  assert.equal(maintenanceReplay.statusCode, 200, maintenanceReplay.body);
+
+  const reputationFactsAfterRetry = await request(api, {
+    method: "GET",
+    path: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime&includeEvents=1`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(reputationFactsAfterRetry.statusCode, 200, reputationFactsAfterRetry.body);
+  const eventIdsAfterRetry = (reputationFactsAfterRetry.json?.events ?? []).map((row) => String(row?.eventId ?? "")).filter(Boolean);
+  assert.equal(new Set(eventIdsAfterRetry).size, eventIdsAfterRetry.length);
+  const eventCountAfterRetry = Number(reputationFactsAfterRetry.json?.facts?.totals?.eventCount ?? eventIdsAfterRetry.length);
+  assert.equal(eventCountAfterRetry, eventCountBeforeRetry);
 });
 
 test("API e2e: tool-call dispute payer-win verdict refunds held escrow; admin override can open after challenge window", async () => {
   let nowMs = Date.parse("2026-02-10T00:10:00.000Z");
-  const api = createApi({ now: () => new Date(nowMs).toISOString() });
+  const api = createApi({ now: () => new Date(nowMs).toISOString(), opsToken: "tok_ops" });
   const tenantId = "tenant_default";
 
   const payerAgentId = "agt_tc_payer_2";
@@ -243,7 +361,7 @@ test("API e2e: tool-call dispute payer-win verdict refunds held escrow; admin ov
   const arbiterAgentId = "agt_tc_arbiter_2";
   const arbiterKeypair = createEd25519Keypair();
 
-  await registerAgent(api, { tenantId, agentId: payerAgentId });
+  const payerRegistration = await registerAgent(api, { tenantId, agentId: payerAgentId });
   await registerAgent(api, { tenantId, agentId: payeeAgentId });
   const arbiterRegistration = await registerAgent(api, { tenantId, agentId: arbiterAgentId, publicKeyPem: arbiterKeypair.publicKeyPem });
 
@@ -282,13 +400,23 @@ test("API e2e: tool-call dispute payer-win verdict refunds held escrow; admin ov
       receiptHash,
       holdHash,
       openedByAgentId: payerAgentId,
+      disputeOpenEnvelope: buildSignedDisputeOpenEnvelope({
+        tenantId,
+        agreementHash,
+        receiptHash,
+        holdHash,
+        openedByAgentId: payerAgentId,
+        signerKeyId: payerRegistration.keyId,
+        signerPrivateKeyPem: payerRegistration.keypair.privateKeyPem,
+        openedAt: new Date(nowMs).toISOString()
+      }),
       arbiterAgentId,
       summary: "late open should fail",
       evidenceRefs: []
     }
   });
   assert.equal(openTooLate.statusCode, 409);
-  assert.equal(openTooLate.json?.code, "CHALLENGE_WINDOW_CLOSED");
+  assert.equal(openTooLate.json?.code, "DISPUTE_WINDOW_EXPIRED");
 
   const open = await request(api, {
     method: "POST",
@@ -337,6 +465,16 @@ test("API e2e: tool-call dispute payer-win verdict refunds held escrow; admin ov
   assert.equal(verdict.json?.settlementAdjustment?.adjustmentId, `sadj_agmt_${agreementHash}_holdback`);
   assert.equal(verdict.json?.settlementAdjustment?.kind, "holdback_refund");
 
+  const replay = await request(api, {
+    method: "GET",
+    path: `/ops/tool-calls/replay-evaluate?agreementHash=${agreementHash}`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(replay.statusCode, 200, replay.body);
+  assert.equal(replay.json?.replay?.stage, "terminal_dispute");
+  assert.equal(replay.json?.replay?.expected?.adjustmentKind, "holdback_refund");
+  assert.equal(replay.json?.comparisons?.chainConsistent, true);
+
   const payerWalletAfter = await getWallet(api, { tenantId, agentId: payerAgentId });
   const payeeWalletAfter = await getWallet(api, { tenantId, agentId: payeeAgentId });
   assert.equal(payerWalletAfter.escrowLockedCents, 0);
@@ -346,3 +484,54 @@ test("API e2e: tool-call dispute payer-win verdict refunds held escrow; admin ov
   assert.equal(storedHold?.status, "refunded");
 });
 
+test("API e2e: tool-call holdback auto-release emits reputation facts when no dispute is open", async () => {
+  let nowMs = Date.parse("2026-02-10T01:00:00.000Z");
+  const api = createApi({ now: () => new Date(nowMs).toISOString(), opsToken: "tok_ops" });
+  const tenantId = "tenant_default";
+
+  const payerAgentId = "agt_tc_payer_auto_1";
+  const payeeAgentId = "agt_tc_payee_auto_1";
+
+  await registerAgent(api, { tenantId, agentId: payerAgentId });
+  await registerAgent(api, { tenantId, agentId: payeeAgentId });
+  await creditWallet(api, { tenantId, agentId: payerAgentId, amountCents: 5000, key: "idmp_tc_credit_auto_1" });
+
+  const agreementHash = "5".repeat(64);
+  const receiptHash = "6".repeat(64);
+  const lock = await request(api, {
+    method: "POST",
+    path: "/ops/tool-calls/holds/lock",
+    headers: { "x-proxy-tenant-id": tenantId, "x-settld-protocol": "1.0", "x-idempotency-key": "idmp_tc_hold_auto_1" },
+    body: {
+      agreementHash,
+      receiptHash,
+      payerAgentId,
+      payeeAgentId,
+      amountCents: 5000,
+      currency: "USD",
+      holdbackBps: 2000,
+      challengeWindowMs: 1000
+    }
+  });
+  assert.equal(lock.statusCode, 201, lock.body);
+  assert.equal(lock.json?.hold?.heldAmountCents, 1000);
+
+  nowMs += 2000;
+  const maintenance = await request(api, {
+    method: "POST",
+    path: "/ops/maintenance/tool-call-holdback/run",
+    headers: { "x-proxy-tenant-id": tenantId, "x-settld-protocol": "1.0", "x-proxy-ops-token": "tok_ops" },
+    body: { dryRun: false, limit: 1000 }
+  });
+  assert.equal(maintenance.statusCode, 200, maintenance.body);
+  assert.equal(maintenance.json?.released, 1);
+  assert.equal(maintenance.json?.blocked, 0);
+
+  const reputationFacts = await request(api, {
+    method: "GET",
+    path: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(reputationFacts.statusCode, 200, reputationFacts.body);
+  assert.equal(reputationFacts.json?.facts?.totals?.economics?.autoReleasedCents, 1000);
+});

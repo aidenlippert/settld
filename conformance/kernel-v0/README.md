@@ -30,6 +30,8 @@ Example (docker compose dev stack):
 
 ```sh
 ./bin/settld.js conformance kernel --ops-token tok_ops
+# or, once published:
+npx settld conformance kernel --ops-token tok_ops
 ```
 
 Optional:
@@ -38,6 +40,7 @@ Optional:
 node conformance/kernel-v0/run.mjs --ops-token tok_ops --case tool_call_holdback_release
 node conformance/kernel-v0/run.mjs --ops-token tok_ops --case marketplace_run_replay_evaluate
 node conformance/kernel-v0/run.mjs --ops-token tok_ops --list
+node conformance/kernel-v0/run.mjs --ops-token tok_ops --closepack-out-dir /tmp/settld-closepacks
 ```
 
 Write a machine-readable report:
@@ -58,3 +61,7 @@ The runner prints `INFO ...` lines with `agreementHash` / `runId` and direct lin
   - `adjustmentId = sadj_agmt_${agreementHash}_holdback`
   - `kind = holdback_release` (payee win) or `holdback_refund` (payer win)
 - Applying the same verdict again is **idempotent** (returns the existing adjustment and reports `alreadyExisted=true`).
+- Reputation facts remain stable under retries/tick reruns, and closepack verify enforces sourceRef hash resolution against the portable artifact graph.
+- A kernel closepack can be exported from `agreementHash` and verified offline:
+  - `settld closepack export ...`
+  - `settld closepack verify ...`

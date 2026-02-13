@@ -9,8 +9,8 @@ export default function Quickstart() {
     <section id="developers" className="section-shell section-highlight">
       <div className="section-heading" id="quickstart">
         <p className="eyebrow">Quickstart</p>
-        <h2>Five-minute path.</h2>
-        <p>Bring up the local stack, generate a capability template, and run the kernel conformance pack.</p>
+        <h2>Try it now in one command.</h2>
+        <p>Run the conformance pack locally, then compare to the live interactive demo.</p>
       </div>
       <div className="quickstart-grid">
         <article className="panel panel-strong">
@@ -32,11 +32,11 @@ export default function Quickstart() {
             <li>Conformance report that can be attached to releases</li>
           </ul>
           <div className="hero-actions">
-            <a className="btn btn-solid" href="#quickstart">
-              Open quickstart
+            <a className="btn btn-solid" href="/demo">
+              Open interactive demo
             </a>
-            <a className="btn btn-ghost" href="#developers">
-              Developers
+            <a className="btn btn-ghost" href="/kernel-v0/">
+              Protocol details
             </a>
           </div>
         </article>

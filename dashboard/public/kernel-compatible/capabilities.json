@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "KernelCompatibleDirectory.v0",
+  "updatedAt": "2026-02-11T00:00:00.000Z",
+  "entries": [
+    {
+      "id": "reference-deterministic-latency-threshold",
+      "name": "Reference Capability: Deterministic Latency Threshold",
+      "owner": "settld",
+      "type": "reference",
+      "deterministicVerifierRef": "verifier://settld/deterministic/latency-threshold-v1",
+      "repoPath": "examples/reference-capabilities/deterministic-latency-threshold",
+      "status": "listed"
+    },
+    {
+      "id": "reference-deterministic-schema-check",
+      "name": "Reference Capability: Deterministic Schema Check",
+      "owner": "settld",
+      "type": "reference",
+      "deterministicVerifierRef": "verifier://settld/deterministic/schema-check-v1",
+      "repoPath": "examples/reference-capabilities/deterministic-schema-check",
+      "status": "listed"
+    }
+  ]
+}

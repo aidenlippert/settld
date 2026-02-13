@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import random
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from urllib import error, parse, request
 
@@ -12,6 +14,76 @@ def _assert_non_empty_string(value: Any, name: str) -> str:
     if not isinstance(value, str) or value.strip() == "":
         raise ValueError(f"{name} must be a non-empty string")
     return value
+
+
+def _assert_sha256_hex(value: Any, name: str) -> str:
+    raw = str(value).strip().lower() if isinstance(value, str) else ""
+    if len(raw) != 64 or any(ch not in "0123456789abcdef" for ch in raw):
+        raise ValueError(f"{name} must be sha256 hex")
+    return raw
+
+
+def _as_non_empty_string_or_none(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed if trimmed else None
+
+
+def _assert_reason_code(value: Any, name: str) -> str:
+    raw = _assert_non_empty_string(value, name).strip().upper()
+    if not (2 <= len(raw) <= 64) or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for ch in raw):
+        raise ValueError(f"{name} must match ^[A-Z0-9_]{{2,64}}$")
+    return raw
+
+
+def _canonicalize(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+            raise ValueError("Unsupported number for canonical JSON: non-finite")
+        if isinstance(value, float) and value == 0.0 and str(value).startswith("-"):
+            raise ValueError("Unsupported number for canonical JSON: -0")
+        return value
+    if isinstance(value, list):
+        return [_canonicalize(item) for item in value]
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key in sorted(value.keys()):
+            normalized = _canonicalize(value[key])
+            if normalized is not None or value[key] is None:
+                out[str(key)] = normalized
+        return out
+    raise ValueError(f"Unsupported value for canonical JSON: {type(value).__name__}")
+
+
+def _canonical_json_dumps(value: Any) -> str:
+    return json.dumps(_canonicalize(value), separators=(",", ":"), ensure_ascii=False)
+
+
+def _sha256_hex_utf8(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _normalize_iso_date(value: Any, *, fallback_now: bool = False, name: str = "timestamp") -> str:
+    if isinstance(value, str) and value.strip():
+        raw = value.strip()
+    elif fallback_now:
+        return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    else:
+        raise ValueError(f"{name} is required")
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception as exc:
+        raise ValueError(f"{name} must be an ISO date string") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _random_request_id() -> str:
@@ -59,6 +131,7 @@ class SettldClient:
         protocol: str = "1.0",
         api_key: Optional[str] = None,
         x_api_key: Optional[str] = None,
+        ops_token: Optional[str] = None,
         user_agent: Optional[str] = None,
         timeout_seconds: float = 30.0,
     ) -> None:
@@ -67,6 +140,7 @@ class SettldClient:
         self.protocol = protocol
         self.api_key = api_key
         self.x_api_key = x_api_key
+        self.ops_token = ops_token
         self.user_agent = user_agent
         self.timeout_seconds = timeout_seconds
 
@@ -94,6 +168,8 @@ class SettldClient:
             headers["authorization"] = f"Bearer {self.api_key}"
         if self.x_api_key:
             headers["x-api-key"] = str(self.x_api_key)
+        if self.ops_token:
+            headers["x-proxy-ops-token"] = str(self.ops_token)
         if idempotency_key:
             headers["x-idempotency-key"] = str(idempotency_key)
         if expected_prev_chain_hash:
@@ -225,9 +301,36 @@ class SettldClient:
         suffix = f"?{parse.urlencode(params)}" if params else ""
         return self._request("GET", f"/ops/tool-calls/holds{suffix}", **opts)
 
+    def ops_get_tool_call_replay_evaluate(self, agreement_hash: str, **opts: Any) -> Dict[str, Any]:
+        agreement_hash_norm = _assert_sha256_hex(agreement_hash, "agreement_hash")
+        qs = parse.urlencode({"agreementHash": agreement_hash_norm})
+        return self._request("GET", f"/ops/tool-calls/replay-evaluate?{qs}", **opts)
+
     def ops_get_tool_call_hold(self, hold_hash: str, **opts: Any) -> Dict[str, Any]:
         _assert_non_empty_string(hold_hash, "hold_hash")
         return self._request("GET", f"/ops/tool-calls/holds/{parse.quote(hold_hash, safe='')}", **opts)
+
+    def ops_get_reputation_facts(self, query: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        if not isinstance(query, dict):
+            raise ValueError("query must be an object")
+        agent_id = _as_non_empty_string_or_none(query.get("agentId")) or _as_non_empty_string_or_none(query.get("agent_id"))
+        if not agent_id:
+            raise ValueError("agentId is required")
+        params: Dict[str, Any] = {"agentId": agent_id}
+        tool_id = _as_non_empty_string_or_none(query.get("toolId")) or _as_non_empty_string_or_none(query.get("tool_id"))
+        if tool_id:
+            params["toolId"] = tool_id
+        if query.get("window") is not None:
+            params["window"] = str(query.get("window"))
+        as_of = _as_non_empty_string_or_none(query.get("asOf")) or _as_non_empty_string_or_none(query.get("as_of"))
+        if as_of:
+            params["asOf"] = as_of
+        include_events = query.get("includeEvents")
+        if include_events is None:
+            include_events = query.get("include_events")
+        if include_events is not None:
+            params["includeEvents"] = "1" if bool(include_events) else "0"
+        return self._request("GET", f"/ops/reputation/facts?{parse.urlencode(params)}", **opts)
 
     def ops_run_tool_call_holdback_maintenance(self, body: Optional[Dict[str, Any]] = None, **opts: Any) -> Dict[str, Any]:
         payload = {} if body is None else body
@@ -261,6 +364,262 @@ class SettldClient:
     def ops_get_settlement_adjustment(self, adjustment_id: str, **opts: Any) -> Dict[str, Any]:
         _assert_non_empty_string(adjustment_id, "adjustment_id")
         return self._request("GET", f"/ops/settlement-adjustments/{parse.quote(adjustment_id, safe='')}", **opts)
+
+    def get_artifact(self, artifact_id: str, **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(artifact_id, "artifact_id")
+        return self._request("GET", f"/artifacts/{parse.quote(artifact_id, safe='')}", **opts)
+
+    def get_artifacts(self, artifact_ids: list[str], **opts: Any) -> Dict[str, Any]:
+        if not isinstance(artifact_ids, list) or len(artifact_ids) == 0:
+            raise ValueError("artifact_ids[] is required")
+        rows = []
+        responses = []
+        for idx, artifact_id in enumerate(artifact_ids):
+            aid = _assert_non_empty_string(artifact_id, f"artifact_ids[{idx}]")
+            response = self.get_artifact(aid, **opts)
+            rows.append({"artifactId": aid, "artifact": response.get("body", {}).get("artifact") if isinstance(response.get("body"), dict) else None})
+            responses.append(response)
+        return {"artifacts": rows, "responses": responses}
+
+    def create_agreement(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        tool_id = _assert_non_empty_string(params.get("toolId"), "params.toolId")
+        call_id = _assert_non_empty_string(params.get("callId"), "params.callId")
+        manifest_hash = _assert_sha256_hex(params.get("manifestHash"), "params.manifestHash")
+        created_at = _normalize_iso_date(params.get("createdAt"), fallback_now=True, name="params.createdAt")
+        input_canonical = _canonical_json_dumps(params.get("input", {}))
+        input_hash = _sha256_hex_utf8(input_canonical)
+        agreement_core = _canonicalize(
+            {
+                "schemaVersion": "ToolCallAgreement.v1",
+                "toolId": tool_id,
+                "manifestHash": manifest_hash,
+                "callId": call_id,
+                "inputHash": input_hash,
+                "acceptanceCriteria": params.get("acceptanceCriteria"),
+                "settlementTerms": params.get("settlementTerms"),
+                "payerAgentId": _as_non_empty_string_or_none(params.get("payerAgentId")),
+                "payeeAgentId": _as_non_empty_string_or_none(params.get("payeeAgentId")),
+                "createdAt": created_at,
+            }
+        )
+        agreement_hash = _sha256_hex_utf8(_canonical_json_dumps(agreement_core))
+        agreement = _canonicalize({**agreement_core, "agreementHash": agreement_hash})
+        return {
+            "agreement": agreement,
+            "agreementHash": agreement_hash,
+            "inputHash": input_hash,
+            "canonicalJson": _canonical_json_dumps(agreement),
+        }
+
+    def sign_evidence(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        agreement = params.get("agreement") if isinstance(params.get("agreement"), dict) else {}
+        agreement_hash = _assert_sha256_hex(params.get("agreementHash", agreement.get("agreementHash")), "agreementHash")
+        call_id = _assert_non_empty_string(params.get("callId", agreement.get("callId")), "callId")
+        input_hash = _assert_sha256_hex(params.get("inputHash", agreement.get("inputHash")), "inputHash")
+        started_at = _normalize_iso_date(params.get("startedAt"), fallback_now=True, name="startedAt")
+        completed_at = _normalize_iso_date(params.get("completedAt", started_at), fallback_now=True, name="completedAt")
+        output_canonical = _canonical_json_dumps(params.get("output", {}))
+        output_hash = _sha256_hex_utf8(output_canonical)
+        evidence_core = _canonicalize(
+            {
+                "schemaVersion": "ToolCallEvidence.v1",
+                "agreementHash": agreement_hash,
+                "callId": call_id,
+                "inputHash": input_hash,
+                "outputHash": output_hash,
+                "outputRef": _as_non_empty_string_or_none(params.get("outputRef")),
+                "metrics": params.get("metrics"),
+                "startedAt": started_at,
+                "completedAt": completed_at,
+                "createdAt": _normalize_iso_date(params.get("createdAt", completed_at), fallback_now=True, name="createdAt"),
+            }
+        )
+        evidence_hash = _sha256_hex_utf8(_canonical_json_dumps(evidence_core))
+        evidence = _canonicalize({**evidence_core, "evidenceHash": evidence_hash})
+        return {
+            "evidence": evidence,
+            "evidenceHash": evidence_hash,
+            "outputHash": output_hash,
+            "canonicalJson": _canonical_json_dumps(evidence),
+        }
+
+    def create_hold(self, params: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        agreement = params.get("agreement") if isinstance(params.get("agreement"), dict) else {}
+        agreement_hash = _assert_sha256_hex(params.get("agreementHash", agreement.get("agreementHash")), "agreementHash")
+        receipt_hash = _assert_sha256_hex(params.get("receiptHash"), "receiptHash")
+        payer_agent_id = _assert_non_empty_string(params.get("payerAgentId"), "payerAgentId")
+        payee_agent_id = _assert_non_empty_string(params.get("payeeAgentId"), "payeeAgentId")
+        if payer_agent_id == payee_agent_id:
+            raise ValueError("payerAgentId and payeeAgentId must differ")
+        amount_cents = params.get("amountCents")
+        if not isinstance(amount_cents, int) or amount_cents <= 0:
+            raise ValueError("amountCents must be a positive safe integer")
+        holdback_bps = int(params.get("holdbackBps", 0))
+        if holdback_bps < 0 or holdback_bps > 10000:
+            raise ValueError("holdbackBps must be an integer within 0..10000")
+        challenge_window_ms = int(params.get("challengeWindowMs", 0))
+        if challenge_window_ms < 0:
+            raise ValueError("challengeWindowMs must be a non-negative safe integer")
+        return self.ops_lock_tool_call_hold(
+            {
+                "agreementHash": agreement_hash,
+                "receiptHash": receipt_hash,
+                "payerAgentId": payer_agent_id,
+                "payeeAgentId": payee_agent_id,
+                "amountCents": amount_cents,
+                "currency": _as_non_empty_string_or_none(params.get("currency")) or "USD",
+                "holdbackBps": holdback_bps,
+                "challengeWindowMs": challenge_window_ms,
+            },
+            **opts,
+        )
+
+    def settle(self, params: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        agreement = params.get("agreement") if isinstance(params.get("agreement"), dict) else {}
+        evidence = params.get("evidence") if isinstance(params.get("evidence"), dict) else {}
+        agreement_hash = _assert_sha256_hex(params.get("agreementHash", agreement.get("agreementHash")), "agreementHash")
+        evidence_hash = params.get("evidenceHash", evidence.get("evidenceHash"))
+        evidence_hash_norm = _assert_sha256_hex(evidence_hash, "evidenceHash") if evidence_hash else None
+        amount_cents = params.get("amountCents")
+        if not isinstance(amount_cents, int) or amount_cents <= 0:
+            raise ValueError("amountCents must be a positive safe integer")
+        currency = _as_non_empty_string_or_none(params.get("currency")) or "USD"
+        settled_at = _normalize_iso_date(params.get("settledAt"), fallback_now=True, name="settledAt")
+        receipt_ref = _canonicalize(
+            {
+                "schemaVersion": "ToolCallSettlementReceiptRef.v1",
+                "agreementHash": agreement_hash,
+                "evidenceHash": evidence_hash_norm,
+                "amountCents": amount_cents,
+                "currency": currency,
+                "settledAt": settled_at,
+            }
+        )
+        receipt_hash = (
+            _assert_sha256_hex(params.get("receiptHash"), "receiptHash")
+            if params.get("receiptHash") is not None
+            else _sha256_hex_utf8(_canonical_json_dumps(receipt_ref))
+        )
+        hold_response = self.create_hold(
+            {
+                "agreementHash": agreement_hash,
+                "receiptHash": receipt_hash,
+                "payerAgentId": params.get("payerAgentId"),
+                "payeeAgentId": params.get("payeeAgentId"),
+                "amountCents": amount_cents,
+                "currency": currency,
+                "holdbackBps": params.get("holdbackBps", 0),
+                "challengeWindowMs": params.get("challengeWindowMs", 0),
+            },
+            **opts,
+        )
+        hold_body = hold_response.get("body", {}) if isinstance(hold_response.get("body"), dict) else {}
+        return {
+            "agreementHash": agreement_hash,
+            "receiptHash": receipt_hash,
+            "receiptRef": receipt_ref,
+            "hold": hold_body.get("hold"),
+            "holdResponse": hold_response,
+        }
+
+    def open_dispute(self, params: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        agreement_hash = _assert_sha256_hex(params.get("agreementHash"), "agreementHash")
+        receipt_hash = _assert_sha256_hex(params.get("receiptHash"), "receiptHash")
+        hold_hash = _assert_sha256_hex(params.get("holdHash"), "holdHash")
+        arbiter_agent_id = _assert_non_empty_string(params.get("arbiterAgentId"), "arbiterAgentId")
+        summary = _assert_non_empty_string(params.get("summary"), "summary")
+        evidence_refs = params.get("evidenceRefs") if isinstance(params.get("evidenceRefs"), list) else []
+        admin_override = params.get("adminOverride") if isinstance(params.get("adminOverride"), dict) else None
+        override_enabled = bool(admin_override.get("enabled")) if isinstance(admin_override, dict) else False
+        dispute_open_envelope = params.get("disputeOpenEnvelope") if isinstance(params.get("disputeOpenEnvelope"), dict) else None
+        opened_by_agent_id = _as_non_empty_string_or_none(params.get("openedByAgentId"))
+        if opened_by_agent_id is None and isinstance(dispute_open_envelope, dict):
+            opened_by_agent_id = _as_non_empty_string_or_none(dispute_open_envelope.get("openedByAgentId"))
+        if dispute_open_envelope is None and not override_enabled:
+            if opened_by_agent_id is None:
+                raise ValueError("openedByAgentId is required when disputeOpenEnvelope is not provided")
+            dispute_open_envelope = self.build_dispute_open_envelope(
+                {
+                    "agreementHash": agreement_hash,
+                    "receiptHash": receipt_hash,
+                    "holdHash": hold_hash,
+                    "openedByAgentId": opened_by_agent_id,
+                    "signerKeyId": params.get("signerKeyId"),
+                    "signature": params.get("signature"),
+                    "caseId": params.get("caseId"),
+                    "envelopeId": params.get("envelopeId"),
+                    "reasonCode": params.get("reasonCode"),
+                    "nonce": params.get("nonce"),
+                    "openedAt": params.get("openedAt"),
+                    "tenantId": params.get("tenantId"),
+                }
+            )["disputeOpenEnvelope"]
+        body: Dict[str, Any] = {
+            "agreementHash": agreement_hash,
+            "receiptHash": receipt_hash,
+            "holdHash": hold_hash,
+            "arbiterAgentId": arbiter_agent_id,
+            "summary": summary,
+            "evidenceRefs": [str(item) for item in evidence_refs],
+        }
+        if opened_by_agent_id is not None:
+            body["openedByAgentId"] = opened_by_agent_id
+        if dispute_open_envelope is not None:
+            body["disputeOpenEnvelope"] = dispute_open_envelope
+        if admin_override is not None:
+            body["adminOverride"] = admin_override
+        return self.tool_call_open_arbitration(body, **opts)
+
+    def build_dispute_open_envelope(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        agreement_hash = _assert_sha256_hex(params.get("agreementHash"), "agreementHash")
+        receipt_hash = _assert_sha256_hex(params.get("receiptHash"), "receiptHash")
+        hold_hash = _assert_sha256_hex(params.get("holdHash"), "holdHash")
+        opened_by_agent_id = _assert_non_empty_string(params.get("openedByAgentId"), "openedByAgentId")
+        signer_key_id = _assert_non_empty_string(params.get("signerKeyId"), "signerKeyId")
+        signature = _assert_non_empty_string(params.get("signature"), "signature")
+        case_id = _as_non_empty_string_or_none(params.get("caseId")) or f"arb_case_tc_{agreement_hash}"
+        envelope_id = _as_non_empty_string_or_none(params.get("envelopeId")) or f"dopen_tc_{agreement_hash}"
+        tenant_id = _as_non_empty_string_or_none(params.get("tenantId")) or self.tenant_id
+        opened_at = _normalize_iso_date(params.get("openedAt"), fallback_now=True, name="openedAt")
+        reason_code = _assert_reason_code(params.get("reasonCode") or "TOOL_CALL_DISPUTE", "reasonCode")
+        nonce = _as_non_empty_string_or_none(params.get("nonce")) or f"nonce_{uuid.uuid4().hex[:16]}"
+        core = _canonicalize(
+            {
+                "schemaVersion": "DisputeOpenEnvelope.v1",
+                "artifactType": "DisputeOpenEnvelope.v1",
+                "artifactId": envelope_id,
+                "envelopeId": envelope_id,
+                "caseId": case_id,
+                "tenantId": tenant_id,
+                "agreementHash": agreement_hash,
+                "receiptHash": receipt_hash,
+                "holdHash": hold_hash,
+                "openedByAgentId": opened_by_agent_id,
+                "openedAt": opened_at,
+                "reasonCode": reason_code,
+                "nonce": nonce,
+                "signerKeyId": signer_key_id,
+            }
+        )
+        envelope_hash = _sha256_hex_utf8(_canonical_json_dumps(core))
+        dispute_open_envelope = _canonicalize({**core, "envelopeHash": envelope_hash, "signature": signature})
+        return {
+            "disputeOpenEnvelope": dispute_open_envelope,
+            "envelopeHash": envelope_hash,
+            "canonicalJson": _canonical_json_dumps(dispute_open_envelope),
+        }
 
     def open_run_dispute(self, run_id: str, body: Optional[Dict[str, Any]] = None, **opts: Any) -> Dict[str, Any]:
         _assert_non_empty_string(run_id, "run_id")

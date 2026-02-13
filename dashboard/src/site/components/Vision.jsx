@@ -1,13 +1,13 @@
 const shippingNow = [
   "Kernel v0 artifact chain and settlement loop",
   "Conformance, replay, and offline closepacks",
-  "Starter template and SDK workflows",
+  "Self-serve pricing, SDKs, and onboarding surfaces",
 ];
 
 const nextLayers = [
   "Hosted baseline hardening and operational controls",
-  "Reputation fact surfaces and policy tooling",
-  "Real-money settlement adapters (design-partner alpha)",
+  "Real-money settlement adapters with reconciliation",
+  "Live customer dashboard over production API",
 ];
 
 export default function Vision() {

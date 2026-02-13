@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/DisputeOpenEnvelope.v1.schema.json",
+  "title": "DisputeOpenEnvelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "artifactId",
+    "envelopeId",
+    "caseId",
+    "tenantId",
+    "agreementHash",
+    "receiptHash",
+    "holdHash",
+    "openedByAgentId",
+    "openedAt",
+    "reasonCode",
+    "nonce",
+    "signerKeyId",
+    "envelopeHash",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "DisputeOpenEnvelope.v1" },
+    "artifactType": { "const": "DisputeOpenEnvelope.v1" },
+    "artifactId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 240,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "envelopeId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 240,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "caseId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 240,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "agreementHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "receiptHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "holdHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "openedByAgentId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "openedAt": { "type": "string", "format": "date-time" },
+    "reasonCode": { "type": "string", "pattern": "^[A-Z0-9_]{2,64}$" },
+    "nonce": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 240,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "signerKeyId": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 240,
+      "pattern": "^[A-Za-z0-9:_-]+$"
+    },
+    "envelopeHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "signature": { "type": "string", "minLength": 16 }
+  }
+}

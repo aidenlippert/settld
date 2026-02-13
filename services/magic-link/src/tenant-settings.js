@@ -51,44 +51,64 @@ export const TENANT_PLAN_CATALOG = Object.freeze({
       maxVerificationsPerMonth: 100,
       maxStoredBundles: 100,
       maxPolicyVersions: 10,
-      maxIntegrations: 2,
-      retentionDays: 30
+      maxIntegrations: 5,
+      retentionDays: 30,
     }),
     billing: Object.freeze({
       subscriptionCents: 0,
-      pricePerVerificationCents: 25
-    })
+      pricePerVerificationCents: 0,
+    }),
+  }),
+  builder: Object.freeze({
+    plan: "builder",
+    displayName: "Builder",
+    limits: Object.freeze({
+      maxVerificationsPerMonth: 10000,
+      maxStoredBundles: 1000,
+      maxPolicyVersions: 20,
+      maxIntegrations: 10,
+      retentionDays: 30,
+    }),
+    billing: Object.freeze({
+      subscriptionCents: 9900,
+      pricePerVerificationCents: 1,
+      pricePerSettledVolumeBps: 75,
+      pricePerArbitrationCaseCents: 200,
+    }),
   }),
   growth: Object.freeze({
     plan: "growth",
     displayName: "Growth",
     limits: Object.freeze({
-      maxVerificationsPerMonth: 2_000,
-      maxStoredBundles: 2_000,
-      maxPolicyVersions: 100,
-      maxIntegrations: 10,
-      retentionDays: 90
+      maxVerificationsPerMonth: 100000,
+      maxStoredBundles: 10000,
+      maxPolicyVersions: 50,
+      maxIntegrations: 25,
+      retentionDays: 180,
     }),
     billing: Object.freeze({
-      subscriptionCents: 4_900,
-      pricePerVerificationCents: 15
-    })
+      subscriptionCents: 59900,
+      pricePerVerificationCents: 0.7,
+      pricePerSettledVolumeBps: 45,
+      pricePerArbitrationCaseCents: 100,
+    }),
   }),
-  scale: Object.freeze({
-    plan: "scale",
-    displayName: "Scale",
+  enterprise: Object.freeze({
+    plan: "enterprise",
+    displayName: "Enterprise",
     limits: Object.freeze({
       maxVerificationsPerMonth: null,
       maxStoredBundles: null,
       maxPolicyVersions: null,
       maxIntegrations: null,
-      retentionDays: 365
+      retentionDays: 365,
     }),
     billing: Object.freeze({
-      subscriptionCents: 19_900,
-      pricePerVerificationCents: 8
-    })
-  })
+      // Enterprise is contract-priced; defaults are zero and set via negotiated terms.
+      subscriptionCents: 0,
+      pricePerVerificationCents: 0,
+    }),
+  }),
 });
 
 export function normalizeTenantPlan(value, { allowNull = false } = {}) {
@@ -96,9 +116,11 @@ export function normalizeTenantPlan(value, { allowNull = false } = {}) {
     if (allowNull) return null;
     return "free";
   }
-  const plan = String(value).trim().toLowerCase();
+  const rawPlan = String(value).trim().toLowerCase();
+  // Backward compatibility for older persisted settings.
+  const plan = rawPlan === "scale" ? "enterprise" : rawPlan;
   if (!Object.prototype.hasOwnProperty.call(TENANT_PLAN_CATALOG, plan)) {
-    throw new TypeError("plan must be free|growth|scale");
+    throw new TypeError("plan must be free|builder|growth|enterprise");
   }
   return plan;
 }
@@ -144,8 +166,8 @@ export function resolveTenantEntitlements({ settings, defaultBilling = null } = 
   const plan = normalizeTenantPlan(source.plan, { allowNull: false });
   const base = TENANT_PLAN_CATALOG[plan] ?? TENANT_PLAN_CATALOG.free;
   const fallbackBilling = isPlainObject(defaultBilling) ? defaultBilling : null;
-  const fallbackSubscriptionCents = Number.parseInt(String(fallbackBilling?.subscriptionCents ?? ""), 10);
-  const fallbackPerVerificationCents = Number.parseInt(String(fallbackBilling?.pricePerVerificationCents ?? ""), 10);
+  const fallbackSubscriptionCents = Number(String(fallbackBilling?.subscriptionCents ?? ""));
+  const fallbackPerVerificationCents = Number(String(fallbackBilling?.pricePerVerificationCents ?? ""));
 
   const maxVerificationsPerMonth = Number.isInteger(source.maxVerificationsPerMonth) ? source.maxVerificationsPerMonth : base.limits.maxVerificationsPerMonth;
   const maxStoredBundles = Number.isInteger(source.maxStoredBundles) ? source.maxStoredBundles : base.limits.maxStoredBundles;
@@ -158,16 +180,16 @@ export function resolveTenantEntitlements({ settings, defaultBilling = null } = 
     ? source.rateLimits.decisionsPerHour
     : defaultTenantSettings().rateLimits.decisionsPerHour;
 
-  const baseSubscriptionCents = Number.parseInt(String(base?.billing?.subscriptionCents ?? ""), 10);
-  const basePerVerificationCents = Number.parseInt(String(base?.billing?.pricePerVerificationCents ?? ""), 10);
-  const subscriptionCents = Number.isInteger(baseSubscriptionCents)
+  const baseSubscriptionCents = Number(String(base?.billing?.subscriptionCents ?? ""));
+  const basePerVerificationCents = Number(String(base?.billing?.pricePerVerificationCents ?? ""));
+  const subscriptionCents = Number.isFinite(baseSubscriptionCents) && baseSubscriptionCents >= 0
     ? baseSubscriptionCents
-    : Number.isInteger(fallbackSubscriptionCents)
+    : Number.isFinite(fallbackSubscriptionCents) && fallbackSubscriptionCents >= 0
       ? fallbackSubscriptionCents
       : 0;
-  const pricePerVerificationCents = Number.isInteger(basePerVerificationCents)
+  const pricePerVerificationCents = Number.isFinite(basePerVerificationCents) && basePerVerificationCents >= 0
     ? basePerVerificationCents
-    : Number.isInteger(fallbackPerVerificationCents)
+    : Number.isFinite(fallbackPerVerificationCents) && fallbackPerVerificationCents >= 0
       ? fallbackPerVerificationCents
       : 0;
 
@@ -602,7 +624,7 @@ function normalizeSettingsPatch(patch, { currentSettings }) {
     try {
       out.plan = normalizeTenantPlan(patch.plan, { allowNull: false });
     } catch (err) {
-      return { ok: false, error: err?.message ?? "plan must be free|growth|scale" };
+      return { ok: false, error: err?.message ?? "plan must be free|builder|growth|enterprise" };
     }
   }
 
@@ -874,11 +896,11 @@ export function sanitizeTenantSettingsForApi(settings) {
   }
   out.webhooks = Array.isArray(out.webhooks)
     ? out.webhooks.map((w) => ({
-        url: typeof w?.url === "string" ? w.url : null,
-        events: Array.isArray(w?.events) ? w.events : [],
-        enabled: Boolean(w?.enabled),
-        secret: null
-      }))
+      url: typeof w?.url === "string" ? w.url : null,
+      events: Array.isArray(w?.events) ? w.events : [],
+      enabled: Boolean(w?.enabled),
+      secret: null
+    }))
     : [];
   out.vendorPolicies = isPlainObject(out.vendorPolicies) ? out.vendorPolicies : out.vendorPolicies === null ? null : null;
   out.contractPolicies = isPlainObject(out.contractPolicies) ? out.contractPolicies : out.contractPolicies === null ? null : null;
@@ -886,30 +908,30 @@ export function sanitizeTenantSettingsForApi(settings) {
   out.buyerUserRoles = isPlainObject(out.buyerUserRoles) ? out.buyerUserRoles : out.buyerUserRoles === null ? null : null;
   out.buyerNotifications = isPlainObject(out.buyerNotifications)
     ? {
-        emails: Array.isArray(out.buyerNotifications.emails) ? out.buyerNotifications.emails.map((x) => normalizeEmailLower(x)).filter(Boolean) : [],
-        deliveryMode: typeof out.buyerNotifications.deliveryMode === "string" ? out.buyerNotifications.deliveryMode : "smtp",
-        webhookUrl: typeof out.buyerNotifications.webhookUrl === "string" ? out.buyerNotifications.webhookUrl : null,
-        webhookSecret: null
-      }
+      emails: Array.isArray(out.buyerNotifications.emails) ? out.buyerNotifications.emails.map((x) => normalizeEmailLower(x)).filter(Boolean) : [],
+      deliveryMode: typeof out.buyerNotifications.deliveryMode === "string" ? out.buyerNotifications.deliveryMode : "smtp",
+      webhookUrl: typeof out.buyerNotifications.webhookUrl === "string" ? out.buyerNotifications.webhookUrl : null,
+      webhookSecret: null
+    }
     : { ...defaultTenantSettings().buyerNotifications, webhookSecret: null };
   out.autoDecision = isPlainObject(out.autoDecision)
     ? {
-        enabled: Boolean(out.autoDecision.enabled),
-        approveOnGreen: Boolean(out.autoDecision.approveOnGreen),
-        approveOnAmber: Boolean(out.autoDecision.approveOnAmber),
-        holdOnRed: Boolean(out.autoDecision.holdOnRed),
-        templateIds: Array.isArray(out.autoDecision.templateIds) ? out.autoDecision.templateIds.map((x) => String(x ?? "").trim()).filter(Boolean) : null,
-        actorName: typeof out.autoDecision.actorName === "string" ? out.autoDecision.actorName : defaultTenantSettings().autoDecision.actorName,
-        actorEmail: normalizeEmailLower(out.autoDecision.actorEmail) ?? defaultTenantSettings().autoDecision.actorEmail
-      }
+      enabled: Boolean(out.autoDecision.enabled),
+      approveOnGreen: Boolean(out.autoDecision.approveOnGreen),
+      approveOnAmber: Boolean(out.autoDecision.approveOnAmber),
+      holdOnRed: Boolean(out.autoDecision.holdOnRed),
+      templateIds: Array.isArray(out.autoDecision.templateIds) ? out.autoDecision.templateIds.map((x) => String(x ?? "").trim()).filter(Boolean) : null,
+      actorName: typeof out.autoDecision.actorName === "string" ? out.autoDecision.actorName : defaultTenantSettings().autoDecision.actorName,
+      actorEmail: normalizeEmailLower(out.autoDecision.actorEmail) ?? defaultTenantSettings().autoDecision.actorEmail
+    }
     : { ...defaultTenantSettings().autoDecision };
   out.paymentTriggers = isPlainObject(out.paymentTriggers)
     ? {
-        enabled: Boolean(out.paymentTriggers.enabled),
-        deliveryMode: typeof out.paymentTriggers.deliveryMode === "string" ? out.paymentTriggers.deliveryMode : "record",
-        webhookUrl: typeof out.paymentTriggers.webhookUrl === "string" ? out.paymentTriggers.webhookUrl : null,
-        webhookSecret: null
-      }
+      enabled: Boolean(out.paymentTriggers.enabled),
+      deliveryMode: typeof out.paymentTriggers.deliveryMode === "string" ? out.paymentTriggers.deliveryMode : "record",
+      webhookUrl: typeof out.paymentTriggers.webhookUrl === "string" ? out.paymentTriggers.webhookUrl : null,
+      webhookSecret: null
+    }
     : { ...defaultTenantSettings().paymentTriggers, webhookSecret: null };
   out.rateLimits = isPlainObject(out.rateLimits) ? { ...defaultTenantSettings().rateLimits, ...out.rateLimits } : { ...defaultTenantSettings().rateLimits };
   out.decisionAuthEmailDomains = Array.isArray(out.decisionAuthEmailDomains) ? out.decisionAuthEmailDomains.map((d) => String(d ?? "").trim().toLowerCase()).filter(Boolean) : [];
@@ -921,19 +943,19 @@ export function sanitizeTenantSettingsForApi(settings) {
   out.artifactStorage = isPlainObject(out.artifactStorage) ? { ...defaultTenantSettings().artifactStorage, ...out.artifactStorage } : defaultTenantSettings().artifactStorage;
   out.archiveExportSink = isPlainObject(out.archiveExportSink)
     ? {
-        type: out.archiveExportSink.type ?? null,
-        enabled: Boolean(out.archiveExportSink.enabled),
-        endpoint: out.archiveExportSink.endpoint ?? null,
-        region: out.archiveExportSink.region ?? null,
-        bucket: out.archiveExportSink.bucket ?? null,
-        prefix: out.archiveExportSink.prefix ?? null,
-        pathStyle: out.archiveExportSink.pathStyle ?? null,
-        accessKeyId: out.archiveExportSink.accessKeyId ?? null,
-        secretAccessKey: null,
-        sessionToken: null,
-        sse: out.archiveExportSink.sse ?? "none",
-        kmsKeyId: out.archiveExportSink.kmsKeyId ?? null
-      }
+      type: out.archiveExportSink.type ?? null,
+      enabled: Boolean(out.archiveExportSink.enabled),
+      endpoint: out.archiveExportSink.endpoint ?? null,
+      region: out.archiveExportSink.region ?? null,
+      bucket: out.archiveExportSink.bucket ?? null,
+      prefix: out.archiveExportSink.prefix ?? null,
+      pathStyle: out.archiveExportSink.pathStyle ?? null,
+      accessKeyId: out.archiveExportSink.accessKeyId ?? null,
+      secretAccessKey: null,
+      sessionToken: null,
+      sse: out.archiveExportSink.sse ?? "none",
+      kmsKeyId: out.archiveExportSink.kmsKeyId ?? null
+    }
     : null;
   return out;
 }

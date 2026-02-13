@@ -1,5 +1,13 @@
+import { createHash, sign as nodeSign } from "node:crypto";
+
 function assertNonEmptyString(value, name) {
   if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${name} must be a non-empty string`);
+}
+
+function assertSha256Hex(value, name) {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!/^[0-9a-f]{64}$/.test(raw)) throw new TypeError(`${name} must be sha256 hex`);
+  return raw;
 }
 
 function randomRequestId() {
@@ -14,6 +22,69 @@ function randomRequestId() {
 function normalizePrefix(value, fallback) {
   if (typeof value === "string" && value.trim() !== "") return value.trim();
   return fallback;
+}
+
+function canonicalize(value) {
+  if (value === null) return null;
+  const valueType = typeof value;
+  if (valueType === "string" || valueType === "boolean") return value;
+  if (valueType === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Unsupported number for canonical JSON: non-finite");
+    if (Object.is(value, -0)) throw new TypeError("Unsupported number for canonical JSON: -0");
+    return value;
+  }
+  if (valueType === "undefined") throw new TypeError("Unsupported value for canonical JSON: undefined");
+  if (valueType === "bigint" || valueType === "function" || valueType === "symbol") {
+    throw new TypeError(`Unsupported type for canonical JSON: ${valueType}`);
+  }
+  if (Array.isArray(value)) return value.map((item) => canonicalize(item));
+  if (valueType === "object") {
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+      throw new TypeError("Unsupported object for canonical JSON: non-plain object");
+    }
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      const normalized = canonicalize(value[key]);
+      if (normalized !== undefined) out[key] = normalized;
+    }
+    return out;
+  }
+  throw new TypeError(`Unsupported value for canonical JSON: ${String(value)}`);
+}
+
+function canonicalJsonStringify(value) {
+  return JSON.stringify(canonicalize(value));
+}
+
+function sha256HexUtf8(text) {
+  return createHash("sha256").update(String(text), "utf8").digest("hex");
+}
+
+function normalizeIsoDate(value, { fallbackNow = false, name = "timestamp" } = {}) {
+  const raw =
+    typeof value === "string" && value.trim() !== ""
+      ? value.trim()
+      : fallbackNow
+        ? new Date().toISOString()
+        : null;
+  if (!raw) throw new TypeError(`${name} is required`);
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) throw new TypeError(`${name} must be an ISO date string`);
+  return new Date(parsed).toISOString();
+}
+
+function asNonEmptyStringOrNull(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function assertReasonCode(value, name) {
+  const raw = asNonEmptyStringOrNull(value);
+  if (!raw) throw new TypeError(`${name} is required`);
+  const normalized = String(raw).toUpperCase();
+  if (!/^[A-Z0-9_]{2,64}$/.test(normalized)) throw new TypeError(`${name} must match ^[A-Z0-9_]{2,64}$`);
+  return normalized;
 }
 
 async function readJson(res) {
@@ -41,6 +112,7 @@ export class SettldClient {
     this.protocol = opts?.protocol ? String(opts.protocol) : "1.0";
     this.apiKey = opts?.apiKey ? String(opts.apiKey) : null;
     this.xApiKey = opts?.xApiKey ? String(opts.xApiKey) : null;
+    this.opsToken = opts?.opsToken ? String(opts.opsToken) : null;
     this.fetchImpl = opts?.fetch ?? fetch;
     this.userAgent = opts?.userAgent ? String(opts.userAgent) : null;
   }
@@ -60,6 +132,7 @@ export class SettldClient {
     if (expectedPrevChainHash) headers["x-proxy-expected-prev-chain-hash"] = String(expectedPrevChainHash);
     if (this.apiKey) headers["authorization"] = `Bearer ${this.apiKey}`;
     if (this.xApiKey) headers["x-api-key"] = this.xApiKey;
+    if (this.opsToken) headers["x-proxy-ops-token"] = this.opsToken;
 
     const res = await this.fetchImpl(url.toString(), {
       method,
@@ -333,9 +406,29 @@ export class SettldClient {
     return this.request("GET", `/ops/tool-calls/holds${suffix}`, opts);
   }
 
+  opsGetToolCallReplayEvaluate(agreementHash, opts) {
+    assertSha256Hex(agreementHash, "agreementHash");
+    return this.request("GET", `/ops/tool-calls/replay-evaluate?agreementHash=${encodeURIComponent(String(agreementHash).toLowerCase())}`, opts);
+  }
+
   opsGetToolCallHold(holdHash, opts) {
     assertNonEmptyString(holdHash, "holdHash");
     return this.request("GET", `/ops/tool-calls/holds/${encodeURIComponent(holdHash)}`, opts);
+  }
+
+  opsGetReputationFacts(params = {}, opts) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    const agentId = asNonEmptyStringOrNull(params.agentId);
+    if (!agentId) throw new TypeError("agentId is required");
+    const qs = new URLSearchParams();
+    qs.set("agentId", agentId);
+    const toolId = asNonEmptyStringOrNull(params.toolId);
+    if (toolId) qs.set("toolId", toolId);
+    if (params.window !== undefined && params.window !== null) qs.set("window", String(params.window));
+    const asOf = asNonEmptyStringOrNull(params.asOf);
+    if (asOf) qs.set("asOf", asOf);
+    if (params.includeEvents !== undefined && params.includeEvents !== null) qs.set("includeEvents", params.includeEvents ? "1" : "0");
+    return this.request("GET", `/ops/reputation/facts?${qs.toString()}`, opts);
   }
 
   opsRunToolCallHoldbackMaintenance(body = {}, opts) {
@@ -368,6 +461,301 @@ export class SettldClient {
   opsGetSettlementAdjustment(adjustmentId, opts) {
     assertNonEmptyString(adjustmentId, "adjustmentId");
     return this.request("GET", `/ops/settlement-adjustments/${encodeURIComponent(adjustmentId)}`, opts);
+  }
+
+  getArtifact(artifactId, opts) {
+    assertNonEmptyString(artifactId, "artifactId");
+    return this.request("GET", `/artifacts/${encodeURIComponent(artifactId)}`, opts);
+  }
+
+  async getArtifacts(params = {}, opts) {
+    const artifactIdsRaw = Array.isArray(params) ? params : params?.artifactIds;
+    if (!Array.isArray(artifactIdsRaw) || artifactIdsRaw.length === 0) {
+      throw new TypeError("artifactIds[] is required");
+    }
+    const artifactIds = artifactIdsRaw.map((id, idx) => {
+      const raw = asNonEmptyStringOrNull(id);
+      if (!raw) throw new TypeError(`artifactIds[${idx}] must be a non-empty string`);
+      return raw;
+    });
+    const rows = await Promise.all(
+      artifactIds.map(async (artifactId) => {
+        const response = await this.getArtifact(artifactId, opts);
+        return { artifactId, response };
+      })
+    );
+    return {
+      artifacts: rows.map((row) => ({ artifactId: row.artifactId, artifact: row.response?.body?.artifact ?? null })),
+      responses: rows.map((row) => row.response)
+    };
+  }
+
+  createAgreement(params = {}) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    assertNonEmptyString(params.toolId, "params.toolId");
+    assertNonEmptyString(params.callId, "params.callId");
+    const manifestHash = assertSha256Hex(params.manifestHash, "params.manifestHash");
+    const createdAt = normalizeIsoDate(params.createdAt, { fallbackNow: true, name: "params.createdAt" });
+
+    const inputCanonical = canonicalJsonStringify(params.input ?? {});
+    const inputHash = sha256HexUtf8(inputCanonical);
+
+    const agreementCore = canonicalize({
+      schemaVersion: "ToolCallAgreement.v1",
+      toolId: String(params.toolId),
+      manifestHash,
+      callId: String(params.callId),
+      inputHash,
+      acceptanceCriteria: params.acceptanceCriteria ?? null,
+      settlementTerms: params.settlementTerms ?? null,
+      payerAgentId: asNonEmptyStringOrNull(params.payerAgentId),
+      payeeAgentId: asNonEmptyStringOrNull(params.payeeAgentId),
+      createdAt
+    });
+    const agreementCanonical = canonicalJsonStringify(agreementCore);
+    const agreementHash = sha256HexUtf8(agreementCanonical);
+    const agreement = canonicalize({ ...agreementCore, agreementHash });
+    return { agreement, agreementHash, inputHash, canonicalJson: canonicalJsonStringify(agreement) };
+  }
+
+  signEvidence(params = {}) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    const agreement = params.agreement && typeof params.agreement === "object" && !Array.isArray(params.agreement) ? params.agreement : null;
+    const agreementHash = assertSha256Hex(params.agreementHash ?? agreement?.agreementHash, "agreementHash");
+    const callId = asNonEmptyStringOrNull(params.callId ?? agreement?.callId);
+    const inputHash = assertSha256Hex(params.inputHash ?? agreement?.inputHash, "inputHash");
+    if (!callId) throw new TypeError("callId is required");
+
+    const startedAt = normalizeIsoDate(params.startedAt, { fallbackNow: true, name: "startedAt" });
+    const completedAt = normalizeIsoDate(params.completedAt ?? startedAt, { fallbackNow: true, name: "completedAt" });
+    const outputCanonical = canonicalJsonStringify(params.output ?? {});
+    const outputHash = sha256HexUtf8(outputCanonical);
+
+    const evidenceCore = canonicalize({
+      schemaVersion: "ToolCallEvidence.v1",
+      agreementHash,
+      callId,
+      inputHash,
+      outputHash,
+      outputRef: asNonEmptyStringOrNull(params.outputRef),
+      metrics: params.metrics ?? null,
+      startedAt,
+      completedAt,
+      createdAt: normalizeIsoDate(params.createdAt ?? completedAt, { fallbackNow: true, name: "createdAt" })
+    });
+    const evidenceHash = sha256HexUtf8(canonicalJsonStringify(evidenceCore));
+
+    const signerPrivateKeyPem = asNonEmptyStringOrNull(params.signerPrivateKeyPem);
+    const signerKeyId = asNonEmptyStringOrNull(params.signerKeyId);
+    let signature = null;
+    if (signerPrivateKeyPem) {
+      if (!signerKeyId) throw new TypeError("signerKeyId is required when signerPrivateKeyPem is provided");
+      const signatureBase64 = nodeSign(null, Buffer.from(evidenceHash, "hex"), signerPrivateKeyPem).toString("base64");
+      signature = {
+        algorithm: "ed25519",
+        signerKeyId,
+        evidenceHash,
+        signature: signatureBase64
+      };
+    }
+
+    const evidence = canonicalize({
+      ...evidenceCore,
+      evidenceHash,
+      ...(signature ? { signature } : {})
+    });
+    return { evidence, evidenceHash, outputHash, canonicalJson: canonicalJsonStringify(evidence) };
+  }
+
+  createHold(params = {}, opts) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    const agreement = params.agreement && typeof params.agreement === "object" && !Array.isArray(params.agreement) ? params.agreement : null;
+    const agreementHash = assertSha256Hex(params.agreementHash ?? agreement?.agreementHash, "agreementHash");
+    const receiptHash = assertSha256Hex(params.receiptHash, "receiptHash");
+    const payerAgentId = asNonEmptyStringOrNull(params.payerAgentId);
+    const payeeAgentId = asNonEmptyStringOrNull(params.payeeAgentId);
+    if (!payerAgentId) throw new TypeError("payerAgentId is required");
+    if (!payeeAgentId) throw new TypeError("payeeAgentId is required");
+    if (payerAgentId === payeeAgentId) throw new TypeError("payerAgentId and payeeAgentId must differ");
+
+    const amountCents = Number(params.amountCents);
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw new TypeError("amountCents must be a positive safe integer");
+    const holdbackBps = params.holdbackBps === undefined ? 0 : Number(params.holdbackBps);
+    if (!Number.isSafeInteger(holdbackBps) || holdbackBps < 0 || holdbackBps > 10_000) {
+      throw new TypeError("holdbackBps must be an integer within 0..10000");
+    }
+    const challengeWindowMs = params.challengeWindowMs === undefined ? 0 : Number(params.challengeWindowMs);
+    if (!Number.isSafeInteger(challengeWindowMs) || challengeWindowMs < 0) {
+      throw new TypeError("challengeWindowMs must be a non-negative safe integer");
+    }
+
+    return this.opsLockToolCallHold(
+      {
+        agreementHash,
+        receiptHash,
+        payerAgentId,
+        payeeAgentId,
+        amountCents,
+        currency: asNonEmptyStringOrNull(params.currency) ?? "USD",
+        holdbackBps,
+        challengeWindowMs
+      },
+      opts
+    );
+  }
+
+  async settle(params = {}, opts) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    const agreement = params.agreement && typeof params.agreement === "object" && !Array.isArray(params.agreement) ? params.agreement : null;
+    const evidence = params.evidence && typeof params.evidence === "object" && !Array.isArray(params.evidence) ? params.evidence : null;
+    const agreementHash = assertSha256Hex(params.agreementHash ?? agreement?.agreementHash, "agreementHash");
+    const evidenceHashRaw = params.evidenceHash ?? evidence?.evidenceHash ?? null;
+    const evidenceHash = evidenceHashRaw ? assertSha256Hex(evidenceHashRaw, "evidenceHash") : null;
+
+    const amountCents = Number(params.amountCents);
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw new TypeError("amountCents must be a positive safe integer");
+    const currency = asNonEmptyStringOrNull(params.currency) ?? "USD";
+    const settledAt = normalizeIsoDate(params.settledAt, { fallbackNow: true, name: "settledAt" });
+    const receiptRef = canonicalize({
+      schemaVersion: "ToolCallSettlementReceiptRef.v1",
+      agreementHash,
+      evidenceHash,
+      amountCents,
+      currency,
+      settledAt
+    });
+    const receiptHash = params.receiptHash
+      ? assertSha256Hex(params.receiptHash, "receiptHash")
+      : sha256HexUtf8(canonicalJsonStringify(receiptRef));
+
+    const holdResponse = await this.createHold(
+      {
+        agreementHash,
+        receiptHash,
+        payerAgentId: params.payerAgentId,
+        payeeAgentId: params.payeeAgentId,
+        amountCents,
+        currency,
+        holdbackBps: params.holdbackBps,
+        challengeWindowMs: params.challengeWindowMs
+      },
+      opts
+    );
+
+    return {
+      agreementHash,
+      receiptHash,
+      receiptRef,
+      hold: holdResponse?.body?.hold ?? null,
+      holdResponse
+    };
+  }
+
+  openDispute(params = {}, opts) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    const agreementHash = assertSha256Hex(params.agreementHash, "agreementHash");
+    const receiptHash = assertSha256Hex(params.receiptHash, "receiptHash");
+    const holdHash = assertSha256Hex(params.holdHash, "holdHash");
+    const arbiterAgentId = asNonEmptyStringOrNull(params.arbiterAgentId);
+    const summary = asNonEmptyStringOrNull(params.summary);
+    if (!arbiterAgentId) throw new TypeError("arbiterAgentId is required");
+    if (!summary) throw new TypeError("summary is required");
+
+    const evidenceRefs = Array.isArray(params.evidenceRefs) ? params.evidenceRefs.map((item) => String(item)) : [];
+    const adminOverride = params.adminOverride && typeof params.adminOverride === "object" && !Array.isArray(params.adminOverride)
+      ? params.adminOverride
+      : null;
+    const overrideEnabled = adminOverride?.enabled === true;
+
+    const providedEnvelope =
+      params.disputeOpenEnvelope && typeof params.disputeOpenEnvelope === "object" && !Array.isArray(params.disputeOpenEnvelope)
+        ? params.disputeOpenEnvelope
+        : null;
+    const openedByAgentId =
+      asNonEmptyStringOrNull(params.openedByAgentId) ?? asNonEmptyStringOrNull(providedEnvelope?.openedByAgentId);
+
+    let disputeOpenEnvelope = providedEnvelope;
+    if (!disputeOpenEnvelope && !overrideEnabled) {
+      if (!openedByAgentId) throw new TypeError("openedByAgentId is required when disputeOpenEnvelope is not provided");
+      disputeOpenEnvelope = this.buildDisputeOpenEnvelope({
+        agreementHash,
+        receiptHash,
+        holdHash,
+        openedByAgentId,
+        signerKeyId: params.signerKeyId,
+        signerPrivateKeyPem: params.signerPrivateKeyPem,
+        signature: params.signature,
+        caseId: params.caseId,
+        envelopeId: params.envelopeId,
+        reasonCode: params.reasonCode,
+        nonce: params.nonce,
+        openedAt: params.openedAt,
+        tenantId: params.tenantId
+      }).disputeOpenEnvelope;
+    }
+
+    return this.toolCallOpenArbitration(
+      {
+        agreementHash,
+        receiptHash,
+        holdHash,
+        ...(openedByAgentId ? { openedByAgentId } : {}),
+        ...(disputeOpenEnvelope ? { disputeOpenEnvelope } : {}),
+        arbiterAgentId,
+        summary,
+        evidenceRefs,
+        ...(adminOverride ? { adminOverride } : {})
+      },
+      opts
+    );
+  }
+
+  buildDisputeOpenEnvelope(params = {}) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new TypeError("params must be an object");
+    const agreementHash = assertSha256Hex(params.agreementHash, "agreementHash");
+    const receiptHash = assertSha256Hex(params.receiptHash, "receiptHash");
+    const holdHash = assertSha256Hex(params.holdHash, "holdHash");
+    const openedByAgentId = asNonEmptyStringOrNull(params.openedByAgentId);
+    if (!openedByAgentId) throw new TypeError("openedByAgentId is required");
+
+    const caseId = asNonEmptyStringOrNull(params.caseId) ?? `arb_case_tc_${agreementHash}`;
+    const envelopeId = asNonEmptyStringOrNull(params.envelopeId) ?? `dopen_tc_${agreementHash}`;
+    const signerKeyId = asNonEmptyStringOrNull(params.signerKeyId);
+    if (!signerKeyId) throw new TypeError("signerKeyId is required");
+    const tenantId = asNonEmptyStringOrNull(params.tenantId) ?? this.tenantId;
+    const openedAt = normalizeIsoDate(params.openedAt, { fallbackNow: true, name: "openedAt" });
+    const reasonCode = assertReasonCode(params.reasonCode ?? "TOOL_CALL_DISPUTE", "reasonCode");
+    const nonce = asNonEmptyStringOrNull(params.nonce) ?? `nonce_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+
+    const core = canonicalize({
+      schemaVersion: "DisputeOpenEnvelope.v1",
+      artifactType: "DisputeOpenEnvelope.v1",
+      artifactId: envelopeId,
+      envelopeId,
+      caseId,
+      tenantId,
+      agreementHash,
+      receiptHash,
+      holdHash,
+      openedByAgentId,
+      openedAt,
+      reasonCode,
+      nonce,
+      signerKeyId
+    });
+    const envelopeHash = sha256HexUtf8(canonicalJsonStringify(core));
+    let signature = asNonEmptyStringOrNull(params.signature);
+    if (!signature) {
+      const signerPrivateKeyPem = asNonEmptyStringOrNull(params.signerPrivateKeyPem);
+      if (!signerPrivateKeyPem) throw new TypeError("signature or signerPrivateKeyPem is required");
+      signature = nodeSign(null, Buffer.from(envelopeHash, "hex"), signerPrivateKeyPem).toString("base64");
+    }
+    const disputeOpenEnvelope = canonicalize({ ...core, envelopeHash, signature });
+    return {
+      disputeOpenEnvelope,
+      envelopeHash,
+      canonicalJson: canonicalJsonStringify(disputeOpenEnvelope)
+    };
   }
 
   openRunDispute(runId, body = {}, opts) {

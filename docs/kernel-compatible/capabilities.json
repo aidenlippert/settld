@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "KernelCompatibleDirectory.v0",
+  "updatedAt": "2026-02-11T00:00:00.000Z",
+  "entries": [
+    {
+      "id": "reference-deterministic-latency-threshold",
+      "name": "Reference Capability: Deterministic Latency Threshold",
+      "owner": "settld",
+      "type": "reference",
+      "repoPath": "examples/reference-capabilities/deterministic-latency-threshold",
+      "deterministicVerifierRef": "verifier://settld/deterministic/latency-threshold-v1",
+      "conformanceCaseIds": [
+        "tool_call_holdback_release",
+        "tool_call_holdback_refund"
+      ],
+      "closepackVerified": true,
+      "lastVerifiedAt": "2026-02-11T00:00:00.000Z",
+      "status": "listed"
+    },
+    {
+      "id": "reference-deterministic-schema-check",
+      "name": "Reference Capability: Deterministic Schema Check",
+      "owner": "settld",
+      "type": "reference",
+      "repoPath": "examples/reference-capabilities/deterministic-schema-check",
+      "deterministicVerifierRef": "verifier://settld/deterministic/schema-check-v1",
+      "conformanceCaseIds": [
+        "tool_call_holdback_release",
+        "marketplace_run_replay_evaluate"
+      ],
+      "closepackVerified": true,
+      "lastVerifiedAt": "2026-02-11T00:00:00.000Z",
+      "status": "listed"
+    }
+  ]
+}

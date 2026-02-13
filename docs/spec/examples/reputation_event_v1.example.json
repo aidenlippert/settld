@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "ReputationEvent.v1",
+  "artifactType": "ReputationEvent.v1",
+  "artifactId": "rep_vrd_6ed7af4431923f9cb4ff8f8f0af36ac168f991f3f9f7f0f3f9ff3f0f9af3f8c9",
+  "eventId": "rep_vrd_6ed7af4431923f9cb4ff8f8f0af36ac168f991f3f9f7f0f3f9ff3f0f9af3f8c9",
+  "tenantId": "tenant_default",
+  "occurredAt": "2026-02-11T12:00:00.000Z",
+  "eventKind": "verdict_issued",
+  "subject": {
+    "agentId": "agt_payee_demo",
+    "toolId": "tool_call",
+    "counterpartyAgentId": "agt_payer_demo",
+    "role": "payee"
+  },
+  "sourceRef": {
+    "kind": "arbitration_verdict",
+    "artifactId": "arbitration_verdict_avd_demo",
+    "agreementHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "verdictHash": "6ed7af4431923f9cb4ff8f8f0af36ac168f991f3f9f7f0f3f9ff3f0f9af3f8c9",
+    "disputeId": "disp_tc_deadbeef",
+    "caseId": "arb_case_tc_deadbeef"
+  },
+  "facts": {
+    "verdictOutcome": "payee_win",
+    "releaseRatePct": 100,
+    "amountCents": 2000
+  },
+  "eventHash": "6c48dc294a69413fe9f4548ef25319c3c73396018249b1667eb52447c3ecba63"
+}

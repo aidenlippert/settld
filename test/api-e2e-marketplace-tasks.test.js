@@ -11,6 +11,7 @@ import {
   normalizeSettlementPolicy,
   normalizeVerificationMethod
 } from "../src/core/settlement-policy.js";
+import { SETTLEMENT_VERIFIER_SOURCE } from "../src/core/settlement-verifier.js";
 import { request } from "./api-test-harness.js";
 
 async function registerAgent(api, agentId, { publicKeyPem: providedPublicKeyPem = null } = {}) {
@@ -1650,6 +1651,227 @@ test("API e2e: policy can require manual settlement review and resolve", async (
   assert.ok(closedTask);
   assert.equal(closedTask?.settlementDecisionStatus, "manual_resolved");
   assert.equal(closedTask?.settlementDecisionReason, "manual policy override");
+});
+
+test("API e2e: deterministic verifier plugin sets settlement decision verifierRef and replay matches", async () => {
+  const api = createApi();
+  await registerAgent(api, "agt_market_det_plugin_poster");
+  await registerAgent(api, "agt_market_det_plugin_bidder");
+  await registerAgent(api, "agt_market_det_plugin_operator");
+  await creditWallet(api, {
+    agentId: "agt_market_det_plugin_poster",
+    amountCents: 9000,
+    idempotencyKey: "wallet_credit_market_det_plugin_poster_1"
+  });
+
+  const createTask = await request(api, {
+    method: "POST",
+    path: "/marketplace/rfqs",
+    headers: { "x-idempotency-key": "market_det_plugin_rfq_create_1" },
+    body: {
+      rfqId: "rfq_det_plugin_1",
+      title: "Deterministic verifier plugin flow",
+      capability: "translate",
+      posterAgentId: "agt_market_det_plugin_poster",
+      budgetCents: 2600,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+
+  const bid = await request(api, {
+    method: "POST",
+    path: "/marketplace/rfqs/rfq_det_plugin_1/bids",
+    headers: { "x-idempotency-key": "market_det_plugin_bid_create_1" },
+    body: {
+      bidId: "bid_det_plugin_1",
+      bidderAgentId: "agt_market_det_plugin_bidder",
+      amountCents: 2100,
+      currency: "USD",
+      verificationMethod: {
+        mode: "deterministic",
+        source: SETTLEMENT_VERIFIER_SOURCE.DETERMINISTIC_LATENCY_THRESHOLD_V1
+      },
+      policy: {
+        mode: "automatic",
+        rules: {
+          requireDeterministicVerification: true,
+          autoReleaseOnGreen: true,
+          autoReleaseOnAmber: false,
+          autoReleaseOnRed: false
+        }
+      }
+    }
+  });
+  assert.equal(bid.statusCode, 201);
+
+  const accept = await request(api, {
+    method: "POST",
+    path: "/marketplace/rfqs/rfq_det_plugin_1/accept",
+    headers: { "x-idempotency-key": "market_det_plugin_accept_1" },
+    body: {
+      bidId: "bid_det_plugin_1",
+      acceptedByAgentId: "agt_market_det_plugin_operator"
+    }
+  });
+  assert.equal(accept.statusCode, 200);
+  const runId = accept.json?.run?.runId;
+  assert.ok(typeof runId === "string" && runId.length > 0);
+
+  const completed = await request(api, {
+    method: "POST",
+    path: `/agents/agt_market_det_plugin_bidder/runs/${encodeURIComponent(runId)}/events`,
+    headers: {
+      "x-proxy-expected-prev-chain-hash": accept.json?.run?.lastChainHash,
+      "x-idempotency-key": "market_det_plugin_complete_1"
+    },
+    body: {
+      type: "RUN_COMPLETED",
+      payload: {
+        outputRef: `evidence://${runId}/output.json`,
+        metrics: { latencyMs: 250 }
+      }
+    }
+  });
+  assert.equal(completed.statusCode, 201);
+  assert.equal(completed.json?.settlement?.status, "released");
+  assert.equal(completed.json?.settlement?.decisionStatus, "auto_resolved");
+
+  const settlementRead = await request(api, {
+    method: "GET",
+    path: `/runs/${encodeURIComponent(runId)}/settlement`
+  });
+  assert.equal(settlementRead.statusCode, 200);
+  const decisionRecord = settlementRead.json?.decisionRecord ?? settlementRead.json?.settlement?.decisionTrace?.decisionRecord ?? null;
+  assert.ok(decisionRecord);
+  assert.equal(decisionRecord?.schemaVersion, "SettlementDecisionRecord.v2");
+  assert.equal(decisionRecord?.verifierRef?.modality, "deterministic");
+  assert.equal(decisionRecord?.verifierRef?.verifierId, "settld.deterministic.latency-threshold");
+  assert.match(String(decisionRecord?.verifierRef?.verifierHash ?? ""), /^[0-9a-f]{64}$/);
+
+  const replayEvaluate = await request(api, {
+    method: "GET",
+    path: `/runs/${encodeURIComponent(runId)}/settlement/replay-evaluate`
+  });
+  assert.equal(replayEvaluate.statusCode, 200);
+  assert.equal(replayEvaluate.json?.comparisons?.matchesStoredDecision, true);
+  assert.equal(replayEvaluate.json?.comparisons?.policyDecisionMatchesStored, true);
+  assert.equal(replayEvaluate.json?.comparisons?.decisionRecordReplayCriticalMatchesStored, true);
+  assert.equal(replayEvaluate.json?.comparisons?.verifierRefMatchesStored, true);
+  assert.equal(replayEvaluate.json?.verifierRef?.modality, "deterministic");
+  assert.equal(replayEvaluate.json?.verifierRef?.verifierId, "settld.deterministic.latency-threshold");
+  assert.match(String(replayEvaluate.json?.verifierRef?.verifierHash ?? ""), /^[0-9a-f]{64}$/);
+  assert.equal(replayEvaluate.json?.verifierExecution?.pluginMatched, true);
+});
+
+test("API e2e: deterministic schema-check verifier plugin can force refunded auto-resolution and replay match", async () => {
+  const api = createApi();
+  await registerAgent(api, "agt_market_det_schema_poster");
+  await registerAgent(api, "agt_market_det_schema_bidder");
+  await registerAgent(api, "agt_market_det_schema_operator");
+  await creditWallet(api, {
+    agentId: "agt_market_det_schema_poster",
+    amountCents: 9000,
+    idempotencyKey: "wallet_credit_market_det_schema_poster_1"
+  });
+
+  const createTask = await request(api, {
+    method: "POST",
+    path: "/marketplace/rfqs",
+    headers: { "x-idempotency-key": "market_det_schema_rfq_create_1" },
+    body: {
+      rfqId: "rfq_det_schema_1",
+      title: "Deterministic schema-check verifier flow",
+      capability: "translate",
+      posterAgentId: "agt_market_det_schema_poster",
+      budgetCents: 2600,
+      currency: "USD"
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+
+  const bid = await request(api, {
+    method: "POST",
+    path: "/marketplace/rfqs/rfq_det_schema_1/bids",
+    headers: { "x-idempotency-key": "market_det_schema_bid_create_1" },
+    body: {
+      bidId: "bid_det_schema_1",
+      bidderAgentId: "agt_market_det_schema_bidder",
+      amountCents: 2100,
+      currency: "USD",
+      verificationMethod: {
+        mode: "deterministic",
+        source: `${SETTLEMENT_VERIFIER_SOURCE.DETERMINISTIC_SCHEMA_CHECK_V1}?latencyMaxMs=300&requireSettlementReleaseRatePct=1`
+      },
+      policy: {
+        mode: "automatic",
+        rules: {
+          requireDeterministicVerification: true,
+          autoReleaseOnGreen: true,
+          autoReleaseOnAmber: false,
+          autoReleaseOnRed: true,
+          redReleaseRatePct: 0
+        }
+      }
+    }
+  });
+  assert.equal(bid.statusCode, 201);
+
+  const accept = await request(api, {
+    method: "POST",
+    path: "/marketplace/rfqs/rfq_det_schema_1/accept",
+    headers: { "x-idempotency-key": "market_det_schema_accept_1" },
+    body: {
+      bidId: "bid_det_schema_1",
+      acceptedByAgentId: "agt_market_det_schema_operator"
+    }
+  });
+  assert.equal(accept.statusCode, 200);
+  const runId = accept.json?.run?.runId;
+  assert.ok(typeof runId === "string" && runId.length > 0);
+
+  const completed = await request(api, {
+    method: "POST",
+    path: `/agents/agt_market_det_schema_bidder/runs/${encodeURIComponent(runId)}/events`,
+    headers: {
+      "x-proxy-expected-prev-chain-hash": accept.json?.run?.lastChainHash,
+      "x-idempotency-key": "market_det_schema_complete_1"
+    },
+    body: {
+      type: "RUN_COMPLETED",
+      payload: {
+        outputRef: `evidence://${runId}/output.json`,
+        metrics: { latencyMs: 1200, settlementReleaseRatePct: 100 }
+      }
+    }
+  });
+  assert.equal(completed.statusCode, 201);
+  assert.equal(completed.json?.settlement?.status, "refunded");
+  assert.equal(completed.json?.settlement?.decisionStatus, "auto_resolved");
+  assert.equal(completed.json?.settlement?.releasedAmountCents, 0);
+  assert.equal(completed.json?.settlement?.refundedAmountCents, 2100);
+
+  const decisionRecord = completed.json?.decisionRecord ?? completed.json?.settlement?.decisionTrace?.decisionRecord ?? null;
+  assert.ok(decisionRecord);
+  assert.equal(decisionRecord?.schemaVersion, "SettlementDecisionRecord.v2");
+  assert.equal(decisionRecord?.verifierRef?.modality, "deterministic");
+  assert.equal(decisionRecord?.verifierRef?.verifierId, "settld.deterministic.schema-check");
+  assert.match(String(decisionRecord?.verifierRef?.verifierHash ?? ""), /^[0-9a-f]{64}$/);
+
+  const replayEvaluate = await request(api, {
+    method: "GET",
+    path: `/runs/${encodeURIComponent(runId)}/settlement/replay-evaluate`
+  });
+  assert.equal(replayEvaluate.statusCode, 200);
+  assert.equal(replayEvaluate.json?.comparisons?.matchesStoredDecision, true);
+  assert.equal(replayEvaluate.json?.comparisons?.policyDecisionMatchesStored, true);
+  assert.equal(replayEvaluate.json?.comparisons?.decisionRecordReplayCriticalMatchesStored, true);
+  assert.equal(replayEvaluate.json?.comparisons?.verifierRefMatchesStored, true);
+  assert.equal(replayEvaluate.json?.verifierRef?.modality, "deterministic");
+  assert.equal(replayEvaluate.json?.verifierRef?.verifierId, "settld.deterministic.schema-check");
+  assert.match(String(replayEvaluate.json?.verifierRef?.verifierHash ?? ""), /^[0-9a-f]{64}$/);
+  assert.equal(replayEvaluate.json?.verifierExecution?.pluginMatched, true);
+  assert.deepEqual(replayEvaluate.json?.verifierExecution?.reasonCodes ?? [], ["verifier_plugin_schema_check_failed"]);
 });
 
 test("API e2e: manual-review settlement preserves dispute window for post-resolve disputes", async () => {

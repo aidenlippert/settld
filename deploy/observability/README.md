@@ -26,8 +26,13 @@ Key signals used:
 - `delivery_dlq_pending_total_gauge`
 - `ingest_rejected_gauge`
 - `maintenance_last_success_unixtime{kind="retention_cleanup"}`
+- `worker_outbox_pending_total_gauge`
+- `worker_deliveries_pending_total_gauge`
+- `replay_mismatch_gauge`
+- `disputes_over_sla_gauge`
+- `arbitration_over_sla_gauge`
+- `settlement_holds_over_24h_gauge`
 
 ## Grafana
 
 Import `grafana-dashboard.json` as a starting point. It uses the same metric names as the rules.
-

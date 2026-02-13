@@ -55,7 +55,9 @@ These specs are written so an independent implementer can build a verifier witho
 - `SettlementAdjustment.v1.md` — deterministic, idempotent adjustment artifact for held-funds release/refund.
 - `SettlementKernel.v1.md` — binding invariants + stable verification error semantics for settlement decision/receipt integrity.
 - `ArbitrationCase.v1.md` — formal arbitration case contract with appeal linkage.
+- `DisputeOpenEnvelope.v1.md` — signed dispute opener-proof envelope bound to tool-call hold/receipt/agreement hashes.
 - `ArbitrationVerdict.v1.md` — signed arbitration verdict contract with appeal references.
+- `ReputationEvent.v1.md` — append-only, deterministic economic reputation fact artifact.
 - `AgentReputation.v1.md` — deterministic trust score snapshot derived from runs + settlement outcomes.
 - `AgentReputation.v2.md` — reputation with recency windows (`7d`, `30d`, `allTime`) for marketplace ranking.
 - `InteractionDirectionMatrix.v1.md` — frozen `4x4` directional interaction matrix (`agent|human|robot|machine`).

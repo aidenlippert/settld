@@ -197,5 +197,19 @@
     ],
     "canonicalJson": "{\"directionalCount\":16,\"directions\":{\"agent\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true},\"human\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true},\"machine\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true},\"robot\":{\"agent\":true,\"human\":true,\"machine\":true,\"robot\":true}},\"entityTypes\":[\"agent\",\"human\",\"robot\",\"machine\"],\"schemaVersion\":\"InteractionDirectionMatrix.v1\"}",
     "sha256": "eb6726525b858f8a0ea293c498783a704816d50d39f205425b0bcba66fa5c24a"
+  },
+  "reputationEvent": {
+    "schemaVersion": "ReputationEvent.v1",
+    "eventKind": "decision_approved",
+    "eventId": "rep_dec_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "canonicalJson": "{\"artifactId\":\"rep_dec_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"artifactType\":\"ReputationEvent.v1\",\"eventHash\":\"f50bda80aed53e8ba6772cbb6ddcb0cbccd0b2644ee73d5f6e683d4172fbfbc4\",\"eventId\":\"rep_dec_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"eventKind\":\"decision_approved\",\"facts\":{\"amountSettledCents\":1250,\"decisionStatus\":\"approved\",\"latencyMs\":1200,\"releaseRatePct\":100},\"occurredAt\":\"2026-02-01T00:02:00.000Z\",\"schemaVersion\":\"ReputationEvent.v1\",\"sourceRef\":{\"decisionHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"kind\":\"settlement_decision\",\"runId\":\"run_vectors_0001\",\"settlementId\":\"setl_run_vectors_0001\"},\"subject\":{\"agentId\":\"agt_vectors_0001\",\"counterpartyAgentId\":\"agt_vectors_payer_0001\",\"role\":\"payee\",\"toolId\":\"tool_call\"},\"tenantId\":\"tenant_vectors\"}",
+    "sha256": "417497c089d5d21ecfef955330ccb096205bb75f8312796559bdff36dca8d716"
+  },
+  "disputeOpenEnvelope": {
+    "schemaVersion": "DisputeOpenEnvelope.v1",
+    "envelopeId": "dopen_tc_1111111111111111111111111111111111111111111111111111111111111111",
+    "caseId": "arb_case_tc_1111111111111111111111111111111111111111111111111111111111111111",
+    "canonicalJson": "{\"agreementHash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"artifactId\":\"dopen_tc_1111111111111111111111111111111111111111111111111111111111111111\",\"artifactType\":\"DisputeOpenEnvelope.v1\",\"caseId\":\"arb_case_tc_1111111111111111111111111111111111111111111111111111111111111111\",\"envelopeHash\":\"a98223d0bd88e2ed4c3e261eddda1883f5cb354e74ca4e98a870d16226969e32\",\"envelopeId\":\"dopen_tc_1111111111111111111111111111111111111111111111111111111111111111\",\"holdHash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"nonce\":\"nonce_vectors_000001\",\"openedAt\":\"2026-02-01T00:03:00.000Z\",\"openedByAgentId\":\"agt_vectors_payee_0001\",\"reasonCode\":\"TOOL_CALL_DISPUTE\",\"receiptHash\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"schemaVersion\":\"DisputeOpenEnvelope.v1\",\"signature\":\"sig_vectors_demo_0001\",\"signerKeyId\":\"key_vectors_payee_0001\",\"tenantId\":\"tenant_vectors\"}",
+    "sha256": "060746e937ce07ccbe1dd83faf49cbf0bc1aa88d18a8c71e0442d3ccb8ea7580"
   }
 }

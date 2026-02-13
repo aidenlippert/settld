@@ -94,6 +94,47 @@ Settld invariants still apply during incidents:
 - Validate post-replay counters and billing plan state.
 - Follow `docs/ops/BILLING_WEBHOOK_REPLAY.md` end-to-end and attach snapshots to incident notes.
 
+### 7) Replay mismatches detected (determinism break)
+
+**Trigger**
+- `replay_mismatch_gauge > 0` for 5m
+
+**First actions**
+- Treat as critical correctness incident.
+- Check `/ops/status` and `/ops/tool-calls/replay-evaluate` for affected agreement hashes.
+- Freeze rollout/cutover changes and investigate policy/version drift before resuming.
+
+### 8) Disputes over SLA / arbitration over SLA
+
+**Trigger**
+- `disputes_over_sla_gauge > 0` for 10m
+- `arbitration_over_sla_gauge > 0` for 10m
+
+**First actions**
+- Inspect `/ops/status` command center dispute section and case backlog.
+- Prioritize oldest open disputes and assign arbiter coverage immediately.
+- If backlog is systemic, scale operator staffing/worker capacity before requeueing traffic.
+
+### 9) Stuck holds (economic lock risk)
+
+**Trigger**
+- `settlement_holds_over_24h_gauge > 0` for 15m
+
+**First actions**
+- Inspect hold status via `/ops/tool-calls/holds`.
+- Correlate open disputes and challenge windows for affected agreement hashes.
+- If holds are blocked by missing verdicts, escalate arbitration path.
+
+### 10) Worker lag (delivery backlog)
+
+**Trigger**
+- `worker_deliveries_pending_total_gauge > 1000` for 10m
+
+**First actions**
+- Check `/ops/status` backlog and destination health.
+- Verify worker process uptime and claim/retry logs.
+- Scale worker replicas or reduce downstream failure rate before reprocessing.
+
 ## Prometheus rule examples
 
 These are examples; tune thresholds for your pilot volume and SLOs.
@@ -141,6 +182,14 @@ groups:
         annotations:
           summary: "Settld retention cleanup not succeeding"
           runbook: "docs/ALERTS.md#5-retention-cleanup-stale--failing-unbounded-growth-risk"
+
+      - alert: SettldReplayMismatchDetected
+        expr: replay_mismatch_gauge > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Replay mismatches detected"
+          runbook: "docs/ALERTS.md#7-replay-mismatches-detected-determinism-break"
 ```
 
 ## Notes on cardinality

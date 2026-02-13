@@ -6,6 +6,7 @@ export type SettldClientOptions = {
   protocol?: ProtocolVersion;
   apiKey?: string;
   xApiKey?: string;
+  opsToken?: string;
   fetch?: typeof fetch;
   userAgent?: string;
 };
@@ -708,6 +709,48 @@ export type FirstVerifiedRunResult = {
   settlement: SettldResponse<{ settlement: AgentRunSettlementV1 }> | null;
 };
 
+export type ToolCallAgreementV1 = {
+  schemaVersion: "ToolCallAgreement.v1";
+  toolId: string;
+  manifestHash: string;
+  callId: string;
+  inputHash: string;
+  acceptanceCriteria?: Record<string, unknown> | null;
+  settlementTerms?: Record<string, unknown> | null;
+  payerAgentId?: string | null;
+  payeeAgentId?: string | null;
+  createdAt: string;
+  agreementHash: string;
+};
+
+export type ToolCallEvidenceV1 = {
+  schemaVersion: "ToolCallEvidence.v1";
+  agreementHash: string;
+  callId: string;
+  inputHash: string;
+  outputHash: string;
+  outputRef?: string | null;
+  metrics?: Record<string, unknown> | null;
+  startedAt: string;
+  completedAt: string;
+  createdAt: string;
+  evidenceHash: string;
+  signature?: {
+    algorithm: "ed25519";
+    signerKeyId: string;
+    evidenceHash: string;
+    signature: string;
+  } | null;
+};
+
+export type ToolCallSettleResult = {
+  agreementHash: string;
+  receiptHash: string;
+  receiptRef: Record<string, unknown>;
+  hold: Record<string, unknown> | null;
+  holdResponse: SettldResponse<{ hold: Record<string, unknown> }>;
+};
+
 export type TenantAnalyticsQuery = {
   month?: string;
   bucket?: "day" | "week" | "month";
@@ -1220,7 +1263,44 @@ export class SettldClient {
       holds: Array<Record<string, unknown>>;
     }>
   >;
+  opsGetToolCallReplayEvaluate(
+    agreementHash: string,
+    opts?: RequestOptions
+  ): Promise<
+    SettldResponse<{
+      ok: boolean;
+      tenantId: string;
+      agreementHash: string;
+      runId: string;
+      replay: Record<string, unknown>;
+      stored: Record<string, unknown>;
+      comparisons: Record<string, unknown>;
+      issues: string[];
+    }>
+  >;
   opsGetToolCallHold(holdHash: string, opts?: RequestOptions): Promise<SettldResponse<{ ok: boolean; tenantId: string; hold: Record<string, unknown> }>>;
+  opsGetReputationFacts(
+    params: {
+      agentId: string;
+      toolId?: string;
+      window?: "7d" | "30d" | "allTime";
+      asOf?: string;
+      includeEvents?: boolean;
+    },
+    opts?: RequestOptions
+  ): Promise<
+    SettldResponse<{
+      ok: boolean;
+      tenantId: string;
+      agentId: string;
+      toolId: string | null;
+      window: "7d" | "30d" | "allTime";
+      asOf: string;
+      windowStartAt: string | null;
+      facts: Record<string, unknown>;
+      events?: Array<Record<string, unknown>>;
+    }>
+  >;
   opsRunToolCallHoldbackMaintenance(
     body?: { dryRun?: boolean; limit?: number; maxHolds?: number } & Record<string, unknown>,
     opts?: RequestOptions
@@ -1239,6 +1319,120 @@ export class SettldClient {
   toolCallOpenArbitration(body: Record<string, unknown>, opts?: RequestOptions): Promise<SettldResponse<Record<string, unknown>>>;
   toolCallSubmitArbitrationVerdict(body: Record<string, unknown>, opts?: RequestOptions): Promise<SettldResponse<Record<string, unknown>>>;
   opsGetSettlementAdjustment(adjustmentId: string, opts?: RequestOptions): Promise<SettldResponse<{ ok: boolean; tenantId: string; adjustment: Record<string, unknown> }>>;
+  getArtifact(artifactId: string, opts?: RequestOptions): Promise<SettldResponse<{ artifact: Record<string, unknown> }>>;
+  getArtifacts(
+    params: { artifactIds: string[] } | string[],
+    opts?: RequestOptions
+  ): Promise<{ artifacts: Array<{ artifactId: string; artifact: Record<string, unknown> | null }>; responses: Array<SettldResponse<{ artifact: Record<string, unknown> }>> }>;
+
+  createAgreement(params: {
+    toolId: string;
+    manifestHash: string;
+    callId: string;
+    input?: Record<string, unknown>;
+    acceptanceCriteria?: Record<string, unknown> | null;
+    settlementTerms?: Record<string, unknown> | null;
+    payerAgentId?: string;
+    payeeAgentId?: string;
+    createdAt?: string;
+  }): {
+    agreement: ToolCallAgreementV1;
+    agreementHash: string;
+    inputHash: string;
+    canonicalJson: string;
+  };
+  signEvidence(params: {
+    agreement?: ToolCallAgreementV1;
+    agreementHash?: string;
+    callId?: string;
+    inputHash?: string;
+    output?: Record<string, unknown>;
+    outputRef?: string;
+    metrics?: Record<string, unknown> | null;
+    startedAt?: string;
+    completedAt?: string;
+    createdAt?: string;
+    signerKeyId?: string;
+    signerPrivateKeyPem?: string;
+  }): {
+    evidence: ToolCallEvidenceV1;
+    evidenceHash: string;
+    outputHash: string;
+    canonicalJson: string;
+  };
+  createHold(
+    params: {
+      agreement?: ToolCallAgreementV1;
+      agreementHash?: string;
+      receiptHash: string;
+      payerAgentId: string;
+      payeeAgentId: string;
+      amountCents: number;
+      currency?: string;
+      holdbackBps?: number;
+      challengeWindowMs?: number;
+    },
+    opts?: RequestOptions
+  ): Promise<SettldResponse<{ hold: Record<string, unknown> }>>;
+  settle(
+    params: {
+      agreement?: ToolCallAgreementV1;
+      agreementHash?: string;
+      evidence?: ToolCallEvidenceV1;
+      evidenceHash?: string;
+      payerAgentId: string;
+      payeeAgentId: string;
+      amountCents: number;
+      currency?: string;
+      holdbackBps?: number;
+      challengeWindowMs?: number;
+      settledAt?: string;
+      receiptHash?: string;
+    },
+    opts?: RequestOptions
+  ): Promise<ToolCallSettleResult>;
+  openDispute(
+    params: {
+      agreementHash: string;
+      receiptHash: string;
+      holdHash: string;
+      openedByAgentId?: string;
+      arbiterAgentId: string;
+      summary: string;
+      evidenceRefs?: string[];
+      disputeOpenEnvelope?: Record<string, unknown>;
+      signerKeyId?: string;
+      signerPrivateKeyPem?: string;
+      signature?: string;
+      caseId?: string;
+      envelopeId?: string;
+      reasonCode?: string;
+      nonce?: string;
+      openedAt?: string;
+      tenantId?: string;
+      adminOverride?: { enabled?: boolean; reason?: string };
+    },
+    opts?: RequestOptions
+  ): Promise<SettldResponse<Record<string, unknown>>>;
+  buildDisputeOpenEnvelope(params: {
+    agreementHash: string;
+    receiptHash: string;
+    holdHash: string;
+    openedByAgentId: string;
+    signerKeyId: string;
+    signerPrivateKeyPem?: string;
+    signature?: string;
+    caseId?: string;
+    envelopeId?: string;
+    reasonCode?: string;
+    nonce?: string;
+    openedAt?: string;
+    tenantId?: string;
+  }): {
+    disputeOpenEnvelope: Record<string, unknown>;
+    envelopeHash: string;
+    canonicalJson: string;
+  };
 
   openRunDispute(
     runId: string,

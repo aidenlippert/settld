@@ -17,6 +17,8 @@ import { buildInteractionDirectionMatrixV1 } from "../../src/core/interaction-di
 import { buildSettlementDecisionRecordV1, buildSettlementDecisionRecordV2, buildSettlementReceipt } from "../../src/core/settlement-kernel.js";
 import { buildMarketplaceOffer, buildMarketplaceAcceptance } from "../../src/core/marketplace-kernel.js";
 import { buildToolManifestV1 } from "../../src/core/tool-manifest.js";
+import { buildReputationEventV1 } from "../../src/core/reputation-event.js";
+import { buildDisputeOpenEnvelopeV1 } from "../../src/core/dispute-open-envelope.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -629,6 +631,46 @@ async function main() {
   const agentReputationV2Canonical = canonicalJsonStringify(agentReputationV2);
   const interactionDirectionMatrix = buildInteractionDirectionMatrixV1();
   const interactionDirectionMatrixCanonical = canonicalJsonStringify(interactionDirectionMatrix);
+  const reputationEvent = buildReputationEventV1({
+    eventId: "rep_dec_" + "b".repeat(64),
+    tenantId,
+    occurredAt: "2026-02-01T00:02:00.000Z",
+    eventKind: "decision_approved",
+    subject: {
+      agentId: agentIdentity.agentId,
+      toolId: "tool_call",
+      counterpartyAgentId: "agt_vectors_payer_0001",
+      role: "payee"
+    },
+    sourceRef: {
+      kind: "settlement_decision",
+      decisionHash: "b".repeat(64),
+      runId: agentRun.runId,
+      settlementId: agentRunSettlement.settlementId
+    },
+    facts: {
+      decisionStatus: "approved",
+      releaseRatePct: 100,
+      amountSettledCents: 1250,
+      latencyMs: 1200
+    }
+  });
+  const reputationEventCanonical = canonicalJsonStringify(reputationEvent);
+  const disputeOpenEnvelope = buildDisputeOpenEnvelopeV1({
+    envelopeId: "dopen_tc_" + "1".repeat(64),
+    caseId: "arb_case_tc_" + "1".repeat(64),
+    tenantId,
+    agreementHash: "1".repeat(64),
+    receiptHash: "2".repeat(64),
+    holdHash: "3".repeat(64),
+    openedByAgentId: "agt_vectors_payee_0001",
+    openedAt: "2026-02-01T00:03:00.000Z",
+    reasonCode: "TOOL_CALL_DISPUTE",
+    nonce: "nonce_vectors_000001",
+    signerKeyId: "key_vectors_payee_0001",
+    signature: "sig_vectors_demo_0001"
+  });
+  const disputeOpenEnvelopeCanonical = canonicalJsonStringify(disputeOpenEnvelope);
 
   const out = {
     schemaVersion: "ProtocolVectors.v1",
@@ -769,6 +811,20 @@ async function main() {
       entityTypes: interactionDirectionMatrix.entityTypes,
       canonicalJson: interactionDirectionMatrixCanonical,
       sha256: sha256Hex(interactionDirectionMatrixCanonical)
+    },
+    reputationEvent: {
+      schemaVersion: reputationEvent.schemaVersion,
+      eventKind: reputationEvent.eventKind,
+      eventId: reputationEvent.eventId,
+      canonicalJson: reputationEventCanonical,
+      sha256: sha256Hex(reputationEventCanonical)
+    },
+    disputeOpenEnvelope: {
+      schemaVersion: disputeOpenEnvelope.schemaVersion,
+      envelopeId: disputeOpenEnvelope.envelopeId,
+      caseId: disputeOpenEnvelope.caseId,
+      canonicalJson: disputeOpenEnvelopeCanonical,
+      sha256: sha256Hex(disputeOpenEnvelopeCanonical)
     }
   };
 

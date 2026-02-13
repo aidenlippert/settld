@@ -46,3 +46,47 @@ groups:
           summary: "Settld retention cleanup has not succeeded recently"
           description: "No successful retention cleanup recorded in the last hour (check maintenance runner / ops audit)."
 
+      - alert: SettldReplayMismatchDetected
+        expr: replay_mismatch_gauge > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Settld replay mismatches detected"
+          description: "replay_mismatch_gauge has been > 0 for 5m (decision replay must be deterministic)."
+
+      - alert: SettldDisputesOverSla
+        expr: disputes_over_sla_gauge > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld disputes over SLA"
+          description: "disputes_over_sla_gauge has been > 0 for 10m."
+
+      - alert: SettldArbitrationCasesOverSla
+        expr: arbitration_over_sla_gauge > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld arbitration cases over SLA"
+          description: "arbitration_over_sla_gauge has been > 0 for 10m."
+
+      - alert: SettldHoldsStuckOver24h
+        expr: settlement_holds_over_24h_gauge > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld settlement holds stuck over 24h"
+          description: "settlement_holds_over_24h_gauge has been > 0 for 15m."
+
+      - alert: SettldWorkerDeliveryLagHigh
+        expr: worker_deliveries_pending_total_gauge > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settld worker delivery lag high"
+          description: "worker_deliveries_pending_total_gauge has been > 1000 for 10m."

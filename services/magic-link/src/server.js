@@ -260,12 +260,14 @@ function formatMoneyFromCentsString({ currency, cents }) {
 }
 
 function formatUsdFromCents(cents) {
-  const n = Number.isInteger(cents) ? cents : 0;
+  const n = Number.isFinite(Number(cents)) ? Number(cents) : 0;
+  const rounded = Math.round(n * 1000) / 1000;
   const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  const major = Math.floor(abs / 100);
-  const minor = String(abs % 100).padStart(2, "0");
-  return `${sign}$${major}.${minor}`;
+  const dollars = Math.abs(rounded) / 100;
+  let out = dollars.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  if (!out.includes(".")) out += ".00";
+  else if (out.split(".")[1].length === 1) out += "0";
+  return `${sign}$${out}`;
 }
 
 function statusFromCliOutput(cliOut) {
@@ -768,8 +770,13 @@ const billingProvider = String(process.env.MAGIC_LINK_BILLING_PROVIDER ?? "strip
 const stripeApiBaseUrl = String(process.env.MAGIC_LINK_BILLING_STRIPE_API_BASE_URL ?? "https://api.stripe.com").trim().replace(/\/+$/, "");
 const stripeSecretKey = process.env.MAGIC_LINK_BILLING_STRIPE_SECRET_KEY ? String(process.env.MAGIC_LINK_BILLING_STRIPE_SECRET_KEY).trim() : "";
 const stripeWebhookSecret = process.env.MAGIC_LINK_BILLING_STRIPE_WEBHOOK_SECRET ? String(process.env.MAGIC_LINK_BILLING_STRIPE_WEBHOOK_SECRET).trim() : "";
+const stripePriceIdBuilder = process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_BUILDER ? String(process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_BUILDER).trim() : "";
 const stripePriceIdGrowth = process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_GROWTH ? String(process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_GROWTH).trim() : "";
-const stripePriceIdScale = process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_SCALE ? String(process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_SCALE).trim() : "";
+const stripePriceIdEnterprise = process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_ENTERPRISE
+  ? String(process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_ENTERPRISE).trim()
+  : process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_SCALE
+    ? String(process.env.MAGIC_LINK_BILLING_STRIPE_PRICE_ID_SCALE).trim()
+    : "";
 const billingCheckoutSuccessUrlDefault = process.env.MAGIC_LINK_BILLING_CHECKOUT_SUCCESS_URL
   ? String(process.env.MAGIC_LINK_BILLING_CHECKOUT_SUCCESS_URL).trim()
   : "https://example.invalid/billing/success";
@@ -880,8 +887,10 @@ if (!billingCurrency || typeof billingCurrency !== "string") throw new Error("MA
 if (!Number.isInteger(billingSubscriptionCents) || billingSubscriptionCents < 0) throw new Error("MAGIC_LINK_BILLING_SUBSCRIPTION_CENTS must be an integer >= 0");
 if (!Number.isInteger(billingPricePerVerificationCents) || billingPricePerVerificationCents < 0) throw new Error("MAGIC_LINK_BILLING_PRICE_PER_VERIFICATION_CENTS must be an integer >= 0");
 if (billingProvider !== "stripe" && billingProvider !== "none") throw new Error("MAGIC_LINK_BILLING_PROVIDER must be stripe|none");
-if (billingProvider === "stripe" && stripeSecretKey && !stripePriceIdGrowth && !stripePriceIdScale) {
-  throw new Error("Stripe billing enabled but no price IDs configured (set MAGIC_LINK_BILLING_STRIPE_PRICE_ID_GROWTH and/or MAGIC_LINK_BILLING_STRIPE_PRICE_ID_SCALE)");
+if (billingProvider === "stripe" && stripeSecretKey && !stripePriceIdBuilder && !stripePriceIdGrowth && !stripePriceIdEnterprise) {
+  throw new Error(
+    "Stripe billing enabled but no price IDs configured (set one of MAGIC_LINK_BILLING_STRIPE_PRICE_ID_BUILDER, MAGIC_LINK_BILLING_STRIPE_PRICE_ID_GROWTH, MAGIC_LINK_BILLING_STRIPE_PRICE_ID_ENTERPRISE)"
+  );
 }
 if (billingProvider === "stripe" && stripeWebhookSecret && !stripeWebhookSecret.startsWith("whsec_")) {
   throw new Error("MAGIC_LINK_BILLING_STRIPE_WEBHOOK_SECRET should be a Stripe webhook secret (whsec_...)");
@@ -1170,7 +1179,7 @@ function countConfiguredIntegrations(settings) {
 }
 
 function suggestPlanUpgradesForFeatureLimit({ currentPlan, featureKey, used }) {
-  const order = ["free", "growth", "scale"];
+  const order = ["free", "builder", "growth", "enterprise"];
   const plan = normalizeTenantPlan(currentPlan, { allowNull: false });
   const currentIndex = Math.max(0, order.indexOf(plan));
   const normalizedUsed = Number.isInteger(used) && used >= 0 ? used : 0;
@@ -1212,16 +1221,18 @@ function buildEntitlementLimitExceededResponse({ tenantId, entitlements, feature
 }
 
 function billingPriceIdForPlan(plan) {
+  if (plan === "builder") return stripePriceIdBuilder || null;
   if (plan === "growth") return stripePriceIdGrowth || null;
-  if (plan === "scale") return stripePriceIdScale || null;
+  if (plan === "enterprise") return stripePriceIdEnterprise || null;
   return null;
 }
 
 function billingPlanFromStripePriceId(priceId) {
   const id = String(priceId ?? "").trim();
   if (!id) return null;
+  if (stripePriceIdBuilder && id === stripePriceIdBuilder) return "builder";
   if (stripePriceIdGrowth && id === stripePriceIdGrowth) return "growth";
-  if (stripePriceIdScale && id === stripePriceIdScale) return "scale";
+  if (stripePriceIdEnterprise && id === stripePriceIdEnterprise) return "enterprise";
   return null;
 }
 
@@ -3871,9 +3882,19 @@ async function handleTenantBillingCheckoutCreate(req, res, tenantId) {
   try {
     plan = normalizeTenantPlan(json.plan, { allowNull: false });
   } catch (err) {
-    return sendJson(res, 400, { ok: false, code: "INVALID_PLAN", message: err?.message ?? "plan must be growth|scale" });
+    return sendJson(
+      res,
+      400,
+      { ok: false, code: "INVALID_PLAN", message: err?.message ?? "plan must be free|builder|growth|enterprise" }
+    );
   }
-  if (plan === "free") return sendJson(res, 400, { ok: false, code: "INVALID_PLAN", message: "checkout only supports paid plans (growth|scale)" });
+  if (plan === "free") {
+    return sendJson(
+      res,
+      400,
+      { ok: false, code: "INVALID_PLAN", message: "checkout only supports paid plans (builder|growth|enterprise)" }
+    );
+  }
 
   const priceId = billingPriceIdForPlan(plan);
   if (!priceId) return sendJson(res, 409, { ok: false, code: "PLAN_NOT_CONFIGURED", message: `no Stripe price ID configured for plan ${plan}` });
@@ -6338,14 +6359,16 @@ async function handleTenantIntegrationTestSend(req, res, tenantId, provider) {
 }
 
 async function handlePricingPage(req, res) {
-  const plans = ["free", "growth", "scale"].map((planKey) => TENANT_PLAN_CATALOG[planKey]).filter(Boolean);
+  const plans = ["free", "builder", "growth", "enterprise"].map((planKey) => TENANT_PLAN_CATALOG[planKey]).filter(Boolean);
   const rows = plans.map((plan) => {
     const maxVerifications = Number.isInteger(plan?.limits?.maxVerificationsPerMonth) ? String(plan.limits.maxVerificationsPerMonth) : "unlimited";
     const maxStoredBundles = Number.isInteger(plan?.limits?.maxStoredBundles) ? String(plan.limits.maxStoredBundles) : "unlimited";
     const maxIntegrations = Number.isInteger(plan?.limits?.maxIntegrations) ? String(plan.limits.maxIntegrations) : "unlimited";
     const retentionDays = Number.isInteger(plan?.limits?.retentionDays) ? String(plan.limits.retentionDays) : "custom";
-    const subscription = formatUsdFromCents(Number.isInteger(plan?.billing?.subscriptionCents) ? plan.billing.subscriptionCents : 0);
-    const perVerification = formatUsdFromCents(Number.isInteger(plan?.billing?.pricePerVerificationCents) ? plan.billing.pricePerVerificationCents : 0);
+    const subscription = formatUsdFromCents(Number.isFinite(Number(plan?.billing?.subscriptionCents)) ? Number(plan.billing.subscriptionCents) : 0);
+    const perVerification = formatUsdFromCents(
+      Number.isFinite(Number(plan?.billing?.pricePerVerificationCents)) ? Number(plan.billing.pricePerVerificationCents) : 0
+    );
     return {
       plan: String(plan.plan ?? ""),
       displayName: String(plan.displayName ?? plan.plan ?? "").trim() || "Plan",
@@ -6409,12 +6432,6 @@ async function handlePricingPage(req, res) {
     "</div>",
     "<div class=\"grid\">",
     cards,
-    "<section class=\"card\">",
-    "<h2>Enterprise</h2>",
-    "<div class=\"price\">Custom<span>annual</span></div>",
-    "<div class=\"muted\">Dedicated contracts, policy governance, and negotiated volume pricing.</div>",
-    "<ul><li>Custom limits and support terms</li><li>Compliance and reporting extensions</li><li>Custom commercial terms</li></ul>",
-    "</section>",
     "</div>",
     "<div class=\"foot\">",
     "<strong>Value-event pricing details</strong>",
@@ -6538,12 +6555,12 @@ async function handleTenantIntegrationsPage(req, res, tenantId) {
     "  render();",
     "  return true;",
     "}",
-    "function nextPaidPlan(plan){ const p=String(plan||'').trim().toLowerCase(); if(p==='free') return 'growth'; if(p==='growth') return 'scale'; return null; }",
+    "function nextPaidPlan(plan){ const p=String(plan||'').trim().toLowerCase(); if(p==='free') return 'builder'; if(p==='builder') return 'growth'; if(p==='growth') return 'enterprise'; return null; }",
     "async function startUpgradeCheckout(){",
     "  const ent = state.payload && state.payload.entitlements ? state.payload.entitlements : {};",
     "  const hintPlans = state.upgradeHintApi && Array.isArray(state.upgradeHintApi.suggestedPlans) ? state.upgradeHintApi.suggestedPlans : [];",
     "  const plan = hintPlans.length ? hintPlans[0] : nextPaidPlan(ent.plan || 'free');",
-    "  if(!plan){ state.upgradeMessage='Scale plan is already active.'; render(); return; }",
+    "  if(!plan){ state.upgradeMessage='Top plan is already active.'; render(); return; }",
     "  state.upgradeMessage = `starting ${plan} checkout…`;",
     "  render();",
     "  try{",
@@ -6626,7 +6643,7 @@ async function handleTenantIntegrationsPage(req, res, tenantId) {
     "  } else if (nextPlan){",
     "    setText('upgradeHintText', `Current plan ${plan}.`);",
     "  } else {",
-    "    setText('upgradeHintText', 'Scale plan has no integration cap.');",
+    "    setText('upgradeHintText', 'Top plan has no integration cap.');",
     "  }",
     "  const oauth = state.payload && state.payload.oauth ? state.payload.oauth : {};",
     "  const slackOauth = oauth.slack || {};",
@@ -6903,13 +6920,13 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "function setClass(id, base, tone){ const el=document.getElementById(id); if(!el) return; el.className = base + (tone ? ' '+tone : ''); }",
     "function setHtml(id, html){ const el=document.getElementById(id); if(el) el.innerHTML=String(html||''); }",
     "function esc(v){ return String(v===undefined||v===null?'':v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\"','&quot;').replaceAll(\"'\",'&#39;'); }",
-    "function nextPaidPlan(plan){ const p=String(plan||'').trim().toLowerCase(); if(p==='free') return 'growth'; if(p==='growth') return 'scale'; return null; }",
+    "function nextPaidPlan(plan){ const p=String(plan||'').trim().toLowerCase(); if(p==='free') return 'builder'; if(p==='builder') return 'growth'; if(p==='growth') return 'enterprise'; return null; }",
     "async function startUpgradeCheckout(){",
     "  const payload = state.payload || {};",
     "  const ent = payload.entitlements || {};",
     "  const hintedPlans = state.upgradeHintApi && Array.isArray(state.upgradeHintApi.suggestedPlans) ? state.upgradeHintApi.suggestedPlans : [];",
     "  const plan = hintedPlans.length ? hintedPlans[0] : nextPaidPlan(ent.plan || 'free');",
-    "  if(!plan){ state.upgradeMessage='Scale plan is already active.'; render(); return; }",
+    "  if(!plan){ state.upgradeMessage='Top plan is already active.'; render(); return; }",
     "  state.upgradeMessage = `starting ${plan} checkout…`;",
     "  render();",
     "  try{",
@@ -7021,7 +7038,7 @@ async function handleTenantSettlementPoliciesPage(req, res, tenantId) {
     "  } else if(nextPlan){",
     "    setText('policyUpgradeHint', `Current plan ${plan}.`);",
     "  } else {",
-    "    setText('policyUpgradeHint', 'Scale plan has no policy version cap.');",
+    "    setText('policyUpgradeHint', 'Top plan has no policy version cap.');",
     "  }",
     "  const rollout = payload.rollout && typeof payload.rollout==='object' ? payload.rollout : {};",
     "  const rolloutStages = rollout.stages && typeof rollout.stages==='object' ? rollout.stages : {};",
@@ -8211,15 +8228,22 @@ async function handleTenantBillingInvoiceExport(req, res, tenantId, url) {
   const tenantSettings = await loadTenantSettings({ dataDir, tenantId });
   const entitlements = resolveTenantEntitlementsFromSettings(tenantSettings);
   const summary = await loadUsageSummary({ dataDir, tenantId, monthKey: month });
-  const runs = BigInt(Number(summary?.verificationRuns ?? 0));
-  const subscriptionCents = Number.isInteger(entitlements?.billing?.subscriptionCents) ? entitlements.billing.subscriptionCents : billingSubscriptionCents;
-  const pricePerVerificationCents = Number.isInteger(entitlements?.billing?.pricePerVerificationCents)
-    ? entitlements.billing.pricePerVerificationCents
+  const runs = Number.isSafeInteger(Number(summary?.verificationRuns ?? 0)) ? Number(summary?.verificationRuns ?? 0) : 0;
+  const subscriptionCents = Number.isFinite(Number(entitlements?.billing?.subscriptionCents))
+    ? Number(entitlements.billing.subscriptionCents)
+    : billingSubscriptionCents;
+  const pricePerVerificationCents = Number.isFinite(Number(entitlements?.billing?.pricePerVerificationCents))
+    ? Number(entitlements.billing.pricePerVerificationCents)
     : billingPricePerVerificationCents;
-  const subscription = BigInt(subscriptionCents);
-  const perRun = BigInt(pricePerVerificationCents);
-  const verificationsAmount = runs * perRun;
-  const total = subscription + verificationsAmount;
+  const verificationsAmount = Math.round(runs * pricePerVerificationCents * 1000) / 1000;
+  const total = Math.round((subscriptionCents + verificationsAmount) * 1000) / 1000;
+  const centsText = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0";
+    const rounded = Math.round(n * 1000) / 1000;
+    const txt = rounded.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    return txt || "0";
+  };
 
   const invoice = {
     schemaVersion: "MagicLinkBillingInvoice.v1",
@@ -8229,26 +8253,26 @@ async function handleTenantBillingInvoiceExport(req, res, tenantId, url) {
     currency: billingCurrency,
     generatedAt: nowIso(),
     pricing: {
-      subscriptionCents: String(subscriptionCents),
-      pricePerVerificationCents: String(pricePerVerificationCents)
+      subscriptionCents: centsText(subscriptionCents),
+      pricePerVerificationCents: centsText(pricePerVerificationCents)
     },
     lineItems: [
       {
         code: "SUBSCRIPTION",
         quantity: "1",
-        unitPriceCents: String(subscriptionCents),
-        amountCents: String(subscriptionCents)
+        unitPriceCents: centsText(subscriptionCents),
+        amountCents: centsText(subscriptionCents)
       },
       {
         code: "VERIFICATIONS",
         quantity: String(runs),
-        unitPriceCents: String(pricePerVerificationCents),
-        amountCents: String(verificationsAmount)
+        unitPriceCents: centsText(pricePerVerificationCents),
+        amountCents: centsText(verificationsAmount)
       }
     ],
     totals: {
-      subtotalCents: String(total),
-      totalCents: String(total)
+      subtotalCents: centsText(total),
+      totalCents: centsText(total)
     },
     usage: summary
   };

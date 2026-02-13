@@ -12,6 +12,9 @@ import {
   signHashHexEd25519,
   verifyHashHexEd25519
 } from "../../src/core/crypto.js";
+import { buildDisputeOpenEnvelopeV1 } from "../../src/core/dispute-open-envelope.js";
+import { exportToolCallClosepack, verifyToolCallClosepackZip } from "../../scripts/closepack/lib.mjs";
+import { SETTLEMENT_VERIFIER_SOURCE } from "../../src/core/settlement-verifier.js";
 
 function parseArgs(argv) {
   const out = {
@@ -22,6 +25,7 @@ function parseArgs(argv) {
     opsToken: null,
     caseId: null,
     jsonOut: null,
+    closepackOutDir: null,
     list: false,
     help: false
   };
@@ -62,6 +66,11 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (a === "--closepack-out-dir") {
+      out.closepackOutDir = String(argv[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
     if (a === "--list") {
       out.list = true;
       continue;
@@ -79,7 +88,7 @@ function usage() {
   // eslint-disable-next-line no-console
   console.error("usage:");
   console.error(
-    "  node conformance/kernel-v0/run.mjs --ops-token <tok_opsw> [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0] [--case <id>] [--json-out <path>] [--list]"
+    "  node conformance/kernel-v0/run.mjs --ops-token <tok_opsw> [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0] [--case <id>] [--json-out <path>] [--closepack-out-dir <dir>] [--list]"
   );
   console.error("");
   console.error("notes:");
@@ -242,6 +251,65 @@ function assertArbitrationVerdictArtifact({ artifact, caseId, runId, disputeId, 
   assertArtifactHash(artifact);
 }
 
+function buildSignedDisputeOpenEnvelopeV1({
+  tenantId,
+  agreementHash,
+  receiptHash,
+  holdHash,
+  openedByAgentId,
+  signerKeyId,
+  signerPrivateKeyPem
+}) {
+  const envelopeCoreWithPlaceholder = buildDisputeOpenEnvelopeV1({
+    envelopeId: `dopen_tc_${agreementHash}`,
+    caseId: `arb_case_tc_${agreementHash}`,
+    tenantId,
+    agreementHash,
+    receiptHash,
+    holdHash,
+    openedByAgentId,
+    openedAt: new Date().toISOString(),
+    reasonCode: "TOOL_CALL_DISPUTE",
+    nonce: `nonce_${sha256Hex(`${agreementHash}:${openedByAgentId}`).slice(0, 16)}`,
+    signerKeyId,
+    signature: "placeholder"
+  });
+  const signature = signHashHexEd25519(envelopeCoreWithPlaceholder.envelopeHash, signerPrivateKeyPem);
+  return { ...envelopeCoreWithPlaceholder, signature };
+}
+
+function assertDisputeOpenEnvelopeArtifact({
+  artifact,
+  agreementHash,
+  receiptHash,
+  holdHash,
+  caseId,
+  openedByAgentId,
+  signerKeyId,
+  signerPublicKeyPem
+}) {
+  assert(artifact && typeof artifact === "object" && !Array.isArray(artifact), "dispute-open artifact must be an object");
+  assert(String(artifact.schemaVersion ?? "") === "DisputeOpenEnvelope.v1", "dispute-open artifact schemaVersion mismatch");
+  assert(String(artifact.artifactType ?? "") === "DisputeOpenEnvelope.v1", "dispute-open artifact artifactType mismatch");
+  assert(String(artifact.caseId ?? "") === String(caseId), "dispute-open artifact caseId mismatch");
+  assert(String(artifact.agreementHash ?? "") === String(agreementHash), "dispute-open artifact agreementHash mismatch");
+  assert(String(artifact.receiptHash ?? "") === String(receiptHash), "dispute-open artifact receiptHash mismatch");
+  assert(String(artifact.holdHash ?? "") === String(holdHash), "dispute-open artifact holdHash mismatch");
+  assert(String(artifact.openedByAgentId ?? "") === String(openedByAgentId), "dispute-open artifact openedByAgentId mismatch");
+  assert(String(artifact.signerKeyId ?? "") === String(signerKeyId), "dispute-open artifact signerKeyId mismatch");
+  assert(isSha256Hex(String(artifact.envelopeHash ?? "")), "dispute-open artifact envelopeHash must be sha256 hex");
+  assert(typeof artifact.signature === "string" && artifact.signature.trim() !== "", "dispute-open artifact signature missing");
+  assert(
+    verifyHashHexEd25519({
+      hashHex: String(artifact.envelopeHash),
+      signatureBase64: String(artifact.signature),
+      publicKeyPem: signerPublicKeyPem
+    }) === true,
+    "dispute-open signature verification failed"
+  );
+  assertArtifactHash(artifact);
+}
+
 function buildSignedArbitrationVerdictV1({
   tenantId,
   runId,
@@ -291,6 +359,8 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
   const arbiterKeys = createEd25519Keypair();
 
   const arbiterKeyId = keyIdFromPublicKeyPem(arbiterKeys.publicKeyPem);
+  const payerKeyId = keyIdFromPublicKeyPem(payerKeys.publicKeyPem);
+  const payeeKeyId = keyIdFromPublicKeyPem(payeeKeys.publicKeyPem);
 
   await requestJson({
     ...opts,
@@ -381,6 +451,15 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
       receiptHash,
       holdHash,
       openedByAgentId: verdict === "payer" ? payerAgentId : payeeAgentId,
+      disputeOpenEnvelope: buildSignedDisputeOpenEnvelopeV1({
+        tenantId: opts.tenantId,
+        agreementHash,
+        receiptHash,
+        holdHash,
+        openedByAgentId: verdict === "payer" ? payerAgentId : payeeAgentId,
+        signerKeyId: verdict === "payer" ? payerKeyId : payeeKeyId,
+        signerPrivateKeyPem: verdict === "payer" ? payerKeys.privateKeyPem : payeeKeys.privateKeyPem
+      }),
       arbiterAgentId,
       summary: "Conformance dispute",
       evidenceRefs: []
@@ -397,12 +476,40 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
   assert(settlementId, "arbitrationCase.settlementId missing");
   assert(runId, "arbitrationCase.runId missing");
 
+  let duplicateOpenErr = null;
+  try {
+    await requestJson({
+      ...opts,
+      method: "POST",
+      pathname: "/tool-calls/arbitration/open",
+      idempotencyKey: `conf_${suffix}_open_duplicate`,
+      body: {
+        agreementHash,
+        receiptHash,
+        holdHash,
+        openedByAgentId: verdict === "payer" ? payerAgentId : payeeAgentId,
+        arbiterAgentId,
+        summary: "Conformance dispute duplicate open",
+        evidenceRefs: []
+      }
+    });
+  } catch (err) {
+    duplicateOpenErr = err;
+  }
+  assert(duplicateOpenErr && Number(duplicateOpenErr.status) === 409, "duplicate dispute open must return 409");
+  assert(
+    String(duplicateOpenErr?.body?.code ?? "") === "DISPUTE_ALREADY_OPEN",
+    "duplicate dispute open must fail with DISPUTE_ALREADY_OPEN"
+  );
+
   // Ensure the case artifact is vendored.
   const caseArtifactId = `arbitration_case_${caseId}`;
   assert(
     open?.arbitrationCaseArtifact && typeof open.arbitrationCaseArtifact === "object" && String(open.arbitrationCaseArtifact.artifactId ?? "") === caseArtifactId,
     "open response missing arbitrationCaseArtifact.artifactId"
   );
+  const disputeOpenEnvelopeArtifactId = String(open?.disputeOpenEnvelopeArtifact?.artifactId ?? "");
+  assert(disputeOpenEnvelopeArtifactId === `dopen_tc_${agreementHash}`, "open response missing disputeOpenEnvelopeArtifact.artifactId");
   await requestJson({
     ...opts,
     method: "GET",
@@ -419,6 +526,17 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
     expectedStatus: "under_review",
     expectedVerdictId: null,
     expectedVerdictHash: null
+  });
+  const disputeOpenEnvelopeArtifact = await fetchArtifact({ opts, artifactId: disputeOpenEnvelopeArtifactId });
+  assertDisputeOpenEnvelopeArtifact({
+    artifact: disputeOpenEnvelopeArtifact,
+    agreementHash,
+    receiptHash,
+    holdHash,
+    caseId,
+    openedByAgentId: verdict === "payer" ? payerAgentId : payeeAgentId,
+    signerKeyId: verdict === "payer" ? payerKeyId : payeeKeyId,
+    signerPublicKeyPem: verdict === "payer" ? payerKeys.publicKeyPem : payeeKeys.publicKeyPem
   });
 
   // Force the maintenance tick into the "window elapsed" branch, but ensure it blocks on the open arbitration case.
@@ -558,6 +676,153 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
     "second verdict submission should include arbitrationVerdictArtifact.artifactId"
   );
 
+  const replayEvaluate = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/ops/tool-calls/replay-evaluate?agreementHash=${encodeURIComponent(agreementHash)}`
+  });
+  assert(replayEvaluate && typeof replayEvaluate === "object", "tool-call replay-evaluate response missing");
+  assert(replayEvaluate?.comparisons?.chainConsistent === true, "tool-call replay-evaluate chainConsistent must be true");
+  assert(
+    String(replayEvaluate?.replay?.expected?.adjustmentKind ?? "") ===
+      (verdict === "payer" ? "holdback_refund" : "holdback_release"),
+    "tool-call replay-evaluate expected.adjustmentKind mismatch"
+  );
+
+  const reputationFacts = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime&includeEvents=1`
+  });
+  assert(reputationFacts && typeof reputationFacts === "object", "reputation facts response missing");
+  assert(Number(reputationFacts?.facts?.totals?.disputes?.opened ?? 0) >= 1, "reputation facts disputes.opened must be >= 1");
+  if (verdict === "payer") {
+    assert(Number(reputationFacts?.facts?.totals?.disputes?.payerWin ?? 0) >= 1, "reputation facts disputes.payerWin must be >= 1");
+  } else {
+    assert(Number(reputationFacts?.facts?.totals?.disputes?.payeeWin ?? 0) >= 1, "reputation facts disputes.payeeWin must be >= 1");
+  }
+  assert(
+    Number(reputationFacts?.facts?.totals?.economics?.adjustmentAppliedCents ?? 0) >= Number(settlementAdjustment?.amountCents ?? 0),
+    "reputation facts economics.adjustmentAppliedCents must include adjustment amount"
+  );
+  const reputationEvents = Array.isArray(reputationFacts?.events) ? reputationFacts.events : [];
+  const reputationEventIds = reputationEvents.map((row) => String(row?.eventId ?? "")).filter(Boolean);
+  assert(new Set(reputationEventIds).size === reputationEventIds.length, "reputation events must not contain duplicate eventId values");
+  const reputationAggregateBeforeRetry = normalizeForCanonicalJson(reputationFacts?.facts ?? {}, { path: "$" });
+  const pinnedAsOf = String(reputationFacts?.asOf ?? "");
+  assert(Number.isFinite(Date.parse(pinnedAsOf)), "reputation facts must include a valid asOf timestamp");
+  const disputeEventId = `rep_dsp_${agreementHash}`;
+  const verdictEventId = `rep_vrd_${String(verdictRes?.arbitrationVerdict?.verdictHash ?? "").toLowerCase()}`;
+  const adjustmentId = `sadj_agmt_${agreementHash}_holdback`;
+  const adjustmentEventId = `rep_adj_${adjustmentId}`;
+
+  const disputeEvent = reputationEvents.find((row) => String(row?.eventId ?? "") === disputeEventId);
+  assert(disputeEvent && typeof disputeEvent === "object", "reputation events must include dispute_opened event");
+  assert(String(disputeEvent?.sourceRef?.artifactId ?? "") === caseArtifactId, "dispute_opened sourceRef.artifactId mismatch");
+  assert(isSha256Hex(String(disputeEvent?.sourceRef?.hash ?? "")), "dispute_opened sourceRef.hash must be sha256");
+  const disputeStatus = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/artifacts/${encodeURIComponent(caseArtifactId)}/status`
+  });
+  assert(
+    String(disputeStatus?.artifactHash ?? "") === String(disputeEvent?.sourceRef?.hash ?? ""),
+    "dispute_opened sourceRef.hash must resolve to arbitration case artifact hash"
+  );
+
+  const verdictEvent = reputationEvents.find((row) => String(row?.eventId ?? "") === verdictEventId);
+  assert(verdictEvent && typeof verdictEvent === "object", "reputation events must include verdict_issued event");
+  assert(String(verdictEvent?.sourceRef?.artifactId ?? "") === verdictArtifactId, "verdict_issued sourceRef.artifactId mismatch");
+  assert(isSha256Hex(String(verdictEvent?.sourceRef?.hash ?? "")), "verdict_issued sourceRef.hash must be sha256");
+  const verdictStatus = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/artifacts/${encodeURIComponent(verdictArtifactId)}/status`
+  });
+  assert(
+    String(verdictStatus?.artifactHash ?? "") === String(verdictEvent?.sourceRef?.hash ?? ""),
+    "verdict_issued sourceRef.hash must resolve to arbitration verdict artifact hash"
+  );
+
+  const adjustmentEvent = reputationEvents.find((row) => String(row?.eventId ?? "") === adjustmentEventId);
+  assert(adjustmentEvent && typeof adjustmentEvent === "object", "reputation events must include adjustment_applied event");
+  assert(String(adjustmentEvent?.sourceRef?.sourceId ?? "") === adjustmentId, "adjustment_applied sourceRef.sourceId mismatch");
+  assert(isSha256Hex(String(adjustmentEvent?.sourceRef?.hash ?? "")), "adjustment_applied sourceRef.hash must be sha256");
+  const adjustmentStatus = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/ops/settlement-adjustments/${encodeURIComponent(adjustmentId)}`
+  });
+  assert(
+    String(adjustmentStatus?.adjustment?.adjustmentHash ?? "") === String(adjustmentEvent?.sourceRef?.hash ?? ""),
+    "adjustment_applied sourceRef.hash must resolve to settlement adjustment hash"
+  );
+  const reputationEventCountBeforeRetry = Number(reputationFacts?.facts?.totals?.eventCount ?? reputationEvents.length);
+
+  const tickAgain = await requestJson({
+    ...opts,
+    method: "POST",
+    pathname: "/ops/maintenance/tool-call-holdback/run",
+    idempotencyKey: `conf_${suffix}_tick_again`,
+    body: { dryRun: false, limit: 250 }
+  });
+  assert(tickAgain && typeof tickAgain === "object", "maintenance retry response missing");
+
+  const reputationFactsAfterRetry = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime&includeEvents=1`
+  });
+  const reputationFactsPinnedAsOf = await requestJson({
+    ...opts,
+    method: "GET",
+    pathname: `/ops/reputation/facts?agentId=${encodeURIComponent(payeeAgentId)}&toolId=tool_call&window=allTime&includeEvents=1&asOf=${encodeURIComponent(
+      pinnedAsOf
+    )}`
+  });
+  const reputationAggregateAfterRetry = normalizeForCanonicalJson(reputationFactsAfterRetry?.facts ?? {}, { path: "$" });
+  const reputationAggregatePinnedAsOf = normalizeForCanonicalJson(reputationFactsPinnedAsOf?.facts ?? {}, { path: "$" });
+  const reputationEventsAfterRetry = Array.isArray(reputationFactsAfterRetry?.events) ? reputationFactsAfterRetry.events : [];
+  const eventCountAfterRetry = Number(reputationFactsAfterRetry?.facts?.totals?.eventCount ?? reputationEventsAfterRetry.length);
+  assert(
+    eventCountAfterRetry === reputationEventCountBeforeRetry,
+    "reputation eventCount must remain stable across retry/tick reruns"
+  );
+  const retryEventIds = reputationEventsAfterRetry.map((row) => String(row?.eventId ?? "")).filter(Boolean);
+  assert(new Set(retryEventIds).size === retryEventIds.length, "reputation events must remain deduplicated after retries");
+  assert(
+    canonicalJsonStringify(reputationAggregateAfterRetry) === canonicalJsonStringify(reputationAggregateBeforeRetry),
+    "reputation aggregates must remain stable across retry/tick reruns"
+  );
+  assert(
+    canonicalJsonStringify(reputationAggregatePinnedAsOf) === canonicalJsonStringify(reputationAggregateBeforeRetry),
+    "reputation aggregates must remain stable for a pinned asOf window"
+  );
+
+  const closepackOutDir =
+    typeof opts.closepackOutDir === "string" && opts.closepackOutDir.trim() !== ""
+      ? path.resolve(process.cwd(), opts.closepackOutDir.trim())
+      : path.resolve("/tmp", "settld-kernel-closepacks");
+  const closepackZipPath = path.join(closepackOutDir, `${agreementHash}.zip`);
+
+  const closepackExport = await exportToolCallClosepack({
+    baseUrl: opts.baseUrl,
+    tenantId: opts.tenantId,
+    protocol: opts.protocol,
+    apiKey: opts.apiKey,
+    opsToken: opts.opsToken,
+    agreementHash,
+    outPath: closepackZipPath
+  });
+  assert(closepackExport?.ok === true, "closepack export must return ok=true");
+  assert(typeof closepackExport?.outPath === "string" && closepackExport.outPath.trim() !== "", "closepack export must return outPath");
+  assert(typeof closepackExport?.zipSha256 === "string" && /^[0-9a-f]{64}$/.test(closepackExport.zipSha256), "closepack export zipSha256 must be sha256 hex");
+
+  const closepackVerify = await verifyToolCallClosepackZip({ zipPath: closepackZipPath });
+  assert(closepackVerify?.ok === true, "closepack verify must return ok=true");
+  assert(closepackVerify?.replayMatch === true, "closepack verify must return replayMatch=true");
+  assert(closepackVerify?.sourceRefResolution?.ok === true, "closepack verify sourceRefResolution.ok must be true");
+
   return {
     agreementHash,
     receiptHash,
@@ -566,7 +831,13 @@ async function runToolCallHoldbackDisputeCase({ opts, verdict }) {
     disputeId,
     settlementId,
     runId,
-    adjustmentId: `sadj_agmt_${agreementHash}_holdback`
+    adjustmentId,
+    replayEvaluate,
+    closepack: {
+      path: closepackZipPath,
+      zipSha256: closepackExport.zipSha256,
+      verify: closepackVerify
+    }
   };
 }
 
@@ -641,7 +912,11 @@ async function runMarketplaceRunReplayEvaluateCase({ opts }) {
       amountCents: 10_000,
       currency: "USD",
       etaSeconds: 60,
-      note: "conformance bid"
+      note: "conformance bid",
+      verificationMethod: {
+        mode: "deterministic",
+        source: SETTLEMENT_VERIFIER_SOURCE.DETERMINISTIC_LATENCY_THRESHOLD_V1
+      }
     }
   });
 
@@ -707,6 +982,17 @@ async function runMarketplaceRunReplayEvaluateCase({ opts }) {
     pathname: `/runs/${encodeURIComponent(runId)}/settlement`
   });
   assert(settlement && typeof settlement === "object", "run settlement missing");
+  const decisionRecord = settlement?.decisionRecord ?? settlement?.settlement?.decisionTrace?.decisionRecord ?? null;
+  assert(decisionRecord && typeof decisionRecord === "object", "run settlement decisionRecord missing");
+  assert(
+    String(decisionRecord?.verifierRef?.modality ?? "").toLowerCase() === "deterministic",
+    "run settlement decisionRecord.verifierRef.modality must be deterministic"
+  );
+  assert(
+    String(decisionRecord?.verifierRef?.verifierId ?? "") === "settld.deterministic.latency-threshold",
+    "run settlement decisionRecord.verifierRef.verifierId mismatch"
+  );
+  assert(isSha256Hex(String(decisionRecord?.verifierRef?.verifierHash ?? "")), "run settlement decisionRecord.verifierRef.verifierHash must be sha256");
 
   const replayEvaluate = await requestJson({
     ...opts,
@@ -720,6 +1006,7 @@ async function runMarketplaceRunReplayEvaluateCase({ opts }) {
     replayEvaluate?.comparisons?.decisionRecordReplayCriticalMatchesStored === true,
     "replay-evaluate decisionRecordReplayCriticalMatchesStored must be true"
   );
+  assert(replayEvaluate?.comparisons?.verifierRefMatchesStored === true, "replay-evaluate verifierRefMatchesStored must be true");
 
   return {
     rfqId,
@@ -758,7 +1045,8 @@ async function main() {
     tenantId: opts.tenantId,
     protocol: opts.protocol,
     apiKey: opts.apiKey,
-    opsToken: opts.opsToken
+    opsToken: opts.opsToken,
+    closepackOutDir: opts.closepackOutDir
   };
 
   let pass = 0;

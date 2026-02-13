@@ -425,6 +425,11 @@ body {
   margin: 0;
 }
 
+.price-card-recommended {
+  border-color: var(--accent-300);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
 .price-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -439,6 +444,50 @@ body {
   margin-bottom: 0.5rem;
   color: var(--ink-600);
   font-weight: 600;
+}
+
+.pricing-hero {
+  padding: 1.2rem;
+}
+
+.pricing-hero h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.proof-metrics {
+  padding-top: 0.2rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.proof-metric-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 0.95rem;
+}
+
+.proof-metric-value {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-weight: 800;
+  color: var(--accent-700);
+}
+
+.proof-metric-label {
+  margin: 0.4rem 0 0;
+  font-weight: 600;
+}
+
+.proof-metric-detail {
+  margin: 0.25rem 0 0;
+  color: var(--ink-600);
+  font-size: 0.9rem;
 }
 
 .site-footer {
@@ -520,6 +569,7 @@ body {
   .hero,
   .split-section,
   .quickstart-grid,
+  .proof-metrics,
   .proof-strip,
   .chain-grid,
   .price-grid,

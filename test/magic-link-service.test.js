@@ -768,14 +768,15 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     const html = page._body().toString("utf8");
     assert.match(html, /Settld Pricing/);
     assert.match(html, /Free/);
+    assert.match(html, /Builder/);
     assert.match(html, /Growth/);
-    assert.match(html, /Scale/);
     assert.match(html, /Enterprise/);
     assert.match(html, /VERIFIED_RUN/);
     assert.match(html, /SETTLED_VOLUME/);
     assert.match(html, /ARBITRATION_USAGE/);
-    assert.match(html, /\$49\.00/);
-    assert.match(html, /\$199\.00/);
+    assert.match(html, /\$99\.00/);
+    assert.match(html, /\$599\.00/);
+    assert.match(html, /\$0\.007/);
   });
 
   await t.test("tenant create: default event relay auto-attaches and integrations URL is returned", async () => {
@@ -827,9 +828,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(stateInitial.integrations?.defaultRelay?.connected, true);
     assert.equal(stateInitial.integrations?.slack?.connected, false);
     assert.equal(stateInitial.integrations?.zapier?.connected, false);
-    assert.equal(stateInitial.quota?.maxIntegrations?.limit, 2);
+    assert.equal(stateInitial.quota?.maxIntegrations?.limit, 5);
     assert.equal(stateInitial.quota?.maxIntegrations?.used, 0);
-    assert.equal(stateInitial.quota?.maxIntegrations?.remaining, 2);
+    assert.equal(stateInitial.quota?.maxIntegrations?.remaining, 5);
     assert.ok(typeof stateInitial.retryQueue === "object" && stateInitial.retryQueue !== null);
     assert.equal(Number(stateInitial.retryQueue.pendingCount ?? 0), 0);
 
@@ -892,9 +893,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(stateAfterBothRes.statusCode, 200);
     const stateAfterBoth = JSON.parse(stateAfterBothRes._body().toString("utf8"));
     assert.equal(stateAfterBoth.quota?.maxIntegrations?.used, 2);
-    assert.equal(stateAfterBoth.quota?.maxIntegrations?.remaining, 0);
-    assert.equal(stateAfterBoth.quota?.maxIntegrations?.atLimit, true);
-    assert.equal(stateAfterBoth.quota?.maxIntegrations?.canCreate, false);
+    assert.equal(stateAfterBoth.quota?.maxIntegrations?.remaining, 3);
+    assert.equal(stateAfterBoth.quota?.maxIntegrations?.atLimit, false);
+    assert.equal(stateAfterBoth.quota?.maxIntegrations?.canCreate, true);
 
     const disconnectSlack = await runReq({
       method: "POST",
@@ -912,7 +913,7 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(stateFinal.integrations?.slack?.connected, false);
     assert.equal(stateFinal.integrations?.zapier?.connected, true);
     assert.equal(stateFinal.quota?.maxIntegrations?.used, 1);
-    assert.equal(stateFinal.quota?.maxIntegrations?.remaining, 1);
+    assert.equal(stateFinal.quota?.maxIntegrations?.remaining, 4);
     assert.equal(stateFinal.quota?.maxIntegrations?.atLimit, false);
     assert.equal(stateFinal.quota?.maxIntegrations?.canCreate, true);
   });
@@ -931,7 +932,10 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
       patch: {
         webhooks: [
           { url: "https://example.invalid/integration-a", events: ["verification.completed"], enabled: true, secret: "whsec_a" },
-          { url: "https://example.invalid/integration-b", events: ["verification.completed"], enabled: true, secret: "whsec_b" }
+          { url: "https://example.invalid/integration-b", events: ["verification.completed"], enabled: true, secret: "whsec_b" },
+          { url: "https://example.invalid/integration-c", events: ["verification.completed"], enabled: true, secret: "whsec_c" },
+          { url: "https://example.invalid/integration-d", events: ["verification.completed"], enabled: true, secret: "whsec_d" },
+          { url: "https://example.invalid/integration-e", events: ["verification.completed"], enabled: true, secret: "whsec_e" }
         ]
       }
     });
@@ -944,8 +948,8 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     });
     assert.equal(stateRes.statusCode, 200, stateRes._body().toString("utf8"));
     const state = JSON.parse(stateRes._body().toString("utf8"));
-    assert.equal(state.quota?.maxIntegrations?.limit, 2);
-    assert.equal(state.quota?.maxIntegrations?.used, 2);
+    assert.equal(state.quota?.maxIntegrations?.limit, 5);
+    assert.equal(state.quota?.maxIntegrations?.used, 5);
     assert.equal(state.quota?.maxIntegrations?.atLimit, true);
 
     const connectSlackBody = Buffer.from(
@@ -963,10 +967,10 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(blockedJson.ok, false);
     assert.equal(blockedJson.code, "ENTITLEMENT_LIMIT_EXCEEDED");
     assert.equal(blockedJson.detail?.feature, "maxIntegrations");
-    assert.equal(blockedJson.detail?.limit, 2);
-    assert.equal(blockedJson.detail?.used, 2);
+    assert.equal(blockedJson.detail?.limit, 5);
+    assert.equal(blockedJson.detail?.used, 5);
     assert.ok(Array.isArray(blockedJson.upgradeHint?.suggestedPlans));
-    assert.ok(blockedJson.upgradeHint.suggestedPlans.includes("growth"));
+    assert.ok(blockedJson.upgradeHint.suggestedPlans.includes("builder"));
   });
 
   await t.test("tenant settings PUT: cannot bypass maxIntegrations by writing oversized webhook list", async () => {
@@ -983,7 +987,10 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
       patch: {
         webhooks: [
           { url: "https://example.invalid/settings-integration-a", events: ["verification.completed"], enabled: true, secret: "whsec_a" },
-          { url: "https://example.invalid/settings-integration-b", events: ["verification.completed"], enabled: true, secret: "whsec_b" }
+          { url: "https://example.invalid/settings-integration-b", events: ["verification.completed"], enabled: true, secret: "whsec_b" },
+          { url: "https://example.invalid/settings-integration-c", events: ["verification.completed"], enabled: true, secret: "whsec_c" },
+          { url: "https://example.invalid/settings-integration-d", events: ["verification.completed"], enabled: true, secret: "whsec_d" },
+          { url: "https://example.invalid/settings-integration-e", events: ["verification.completed"], enabled: true, secret: "whsec_e" }
         ]
       }
     });
@@ -992,7 +999,10 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
       webhooks: [
         { url: "https://example.invalid/settings-integration-a", events: ["verification.completed"], enabled: true, secret: "whsec_a" },
         { url: "https://example.invalid/settings-integration-b", events: ["verification.completed"], enabled: true, secret: "whsec_b" },
-        { url: "https://example.invalid/settings-integration-c", events: ["verification.completed"], enabled: true, secret: "whsec_c" }
+        { url: "https://example.invalid/settings-integration-c", events: ["verification.completed"], enabled: true, secret: "whsec_c" },
+        { url: "https://example.invalid/settings-integration-d", events: ["verification.completed"], enabled: true, secret: "whsec_d" },
+        { url: "https://example.invalid/settings-integration-e", events: ["verification.completed"], enabled: true, secret: "whsec_e" },
+        { url: "https://example.invalid/settings-integration-f", events: ["verification.completed"], enabled: true, secret: "whsec_f" }
       ]
     };
     const blockedBody = Buffer.from(JSON.stringify(blockedPatch), "utf8");
@@ -1007,10 +1017,10 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(blockedJson.ok, false);
     assert.equal(blockedJson.code, "ENTITLEMENT_LIMIT_EXCEEDED");
     assert.equal(blockedJson.detail?.feature, "maxIntegrations");
-    assert.equal(blockedJson.detail?.limit, 2);
-    assert.equal(blockedJson.detail?.used, 3);
+    assert.equal(blockedJson.detail?.limit, 5);
+    assert.equal(blockedJson.detail?.used, 6);
     assert.ok(Array.isArray(blockedJson.upgradeHint?.suggestedPlans));
-    assert.ok(blockedJson.upgradeHint.suggestedPlans.includes("growth"));
+    assert.ok(blockedJson.upgradeHint.suggestedPlans.includes("builder"));
 
     const unchanged = await runReq({
       method: "GET",
@@ -1020,7 +1030,7 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     });
     assert.equal(unchanged.statusCode, 200, unchanged._body().toString("utf8"));
     const unchangedJson = JSON.parse(unchanged._body().toString("utf8"));
-    assert.equal(unchangedJson.quota?.maxIntegrations?.used, 2);
+    assert.equal(unchangedJson.quota?.maxIntegrations?.used, 5);
     assert.equal(unchangedJson.quota?.maxIntegrations?.remaining, 0);
   });
 
@@ -2136,10 +2146,10 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
 
     const ent = await getTenantEntitlements({ tenantId });
     assert.equal(ent.entitlements.plan, "growth");
-    assert.equal(ent.entitlements.limits.maxVerificationsPerMonth, 2000);
+    assert.equal(ent.entitlements.limits.maxVerificationsPerMonth, 100000);
     assert.equal(ent.entitlements.limits.maxStoredBundles, 7);
-    assert.equal(ent.entitlements.billing.subscriptionCents, 4900);
-    assert.equal(ent.entitlements.billing.pricePerVerificationCents, 15);
+    assert.equal(ent.entitlements.billing.subscriptionCents, 59900);
+    assert.equal(ent.entitlements.billing.pricePerVerificationCents, 0.7);
 
     const usageAlias = await getTenantBillingUsage({ tenantId });
     assert.equal(usageAlias.schemaVersion, "MagicLinkUsageReport.v1");
@@ -2164,13 +2174,13 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(invoice.month, month);
     assert.equal(invoice.currency, "USD");
     assert.equal(invoice.pricing.subscriptionCents, "0");
-    assert.equal(invoice.pricing.pricePerVerificationCents, "25");
+    assert.equal(invoice.pricing.pricePerVerificationCents, "0");
     assert.equal(invoice.lineItems[0].code, "SUBSCRIPTION");
     assert.equal(invoice.lineItems[0].amountCents, "0");
     assert.equal(invoice.lineItems[1].code, "VERIFICATIONS");
     assert.equal(invoice.lineItems[1].quantity, "1");
-    assert.equal(invoice.lineItems[1].amountCents, "25");
-    assert.equal(invoice.totals.totalCents, "25");
+    assert.equal(invoice.lineItems[1].amountCents, "0");
+    assert.equal(invoice.totals.totalCents, "0");
 
     const pdfRes = await getTenantBillingInvoiceRes({ tenantId, month, format: "pdf" });
     assert.equal(pdfRes.statusCode, 200);
@@ -2190,9 +2200,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(invoiceDraftRes.statusCode, 200, invoiceDraftRes._body().toString("utf8"));
     const invoiceDraft = JSON.parse(invoiceDraftRes._body().toString("utf8"));
     assert.equal(invoiceDraft.plan, "growth");
-    assert.equal(invoiceDraft.pricing.subscriptionCents, "4900");
-    assert.equal(invoiceDraft.pricing.pricePerVerificationCents, "15");
-    assert.equal(invoiceDraft.totals.totalCents, "4915");
+    assert.equal(invoiceDraft.pricing.subscriptionCents, "59900");
+    assert.equal(invoiceDraft.pricing.pricePerVerificationCents, "0.7");
+    assert.equal(invoiceDraft.totals.totalCents, "59900.7");
   });
 
   await t.test("stripe billing: checkout + portal + webhook-driven plan lifecycle", async () => {

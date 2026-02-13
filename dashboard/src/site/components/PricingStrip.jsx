@@ -1,46 +1,49 @@
-const plans = [
-  {
-    name: "Free",
-    note: "100 proofs / month",
-    detail: "1 entity, community support.",
-  },
-  {
-    name: "Pro",
-    note: "1,000 proofs / month",
-    detail: "10 entities, webhooks, email support.",
-  },
-  {
-    name: "Scale",
-    note: "10,000 proofs / month",
-    detail: "Unlimited entities, priority support, advanced policy controls.",
-  },
-  {
-    name: "Enterprise",
-    note: "Custom limits + SLAs",
-    detail: "Marketplace volume agreements and design-partner integrations.",
-  },
-];
+import { blendedMonthlyCost, pricingPlans } from "../pricingData.js";
+
+function usd(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: Number.isInteger(value) ? 0 : 2
+  }).format(value);
+}
 
 export default function PricingStrip() {
+  const growthBlend = blendedMonthlyCost({
+    monthlyBaseUsd: 599,
+    settledVolumeUsd: 500000,
+    settledFeePercent: 0.45
+  });
+
   return (
     <section id="pricing" className="section-shell section-highlight">
       <div className="section-heading">
         <p className="eyebrow">Pricing</p>
-        <h2>Pricing</h2>
+        <h2>SaaS + settled-volume pricing.</h2>
         <p>
-          Pricing is based on verification volume and active entities. Settlement adapters for real-money rails are
-          design-partner alpha.
+          Platform fees are the onramp. Revenue scales with Monthly Verified Settled Value, so incentives align with
+          customer outcomes.
         </p>
       </div>
       <div className="price-grid">
-        {plans.map((plan) => (
-          <article className="price-card" key={plan.name}>
+        {pricingPlans.map((plan) => (
+          <article className={`price-card ${plan.recommended ? "price-card-recommended" : ""}`} key={plan.id}>
             <h3>{plan.name}</h3>
-            <p className="price-note">{plan.note}</p>
-            <p>{plan.detail}</p>
+            <p className="price-note">
+              {plan.monthlyUsd === null ? "Custom annual" : `${usd(plan.monthlyUsd)} / month`}
+            </p>
+            <p>{plan.settledFeePercent === null ? "Negotiated volume fee" : `${plan.settledFeePercent}% settled volume fee`}</p>
           </article>
         ))}
       </div>
+      <p className="section-linkline">
+        <span>
+          Growth example: {usd(599)} + 0.45% of {usd(500000)} = <strong>{growthBlend ? usd(growthBlend) : "n/a"}</strong> / month.
+        </span>{" "}
+        <a className="text-link" href="/pricing">
+          Full pricing details
+        </a>
+      </p>
     </section>
   );
 }

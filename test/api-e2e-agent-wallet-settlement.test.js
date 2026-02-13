@@ -33,8 +33,20 @@ async function creditWallet(api, { agentId, amountCents, idempotencyKey }) {
   return response.json.wallet;
 }
 
+async function getReputationFacts(api, { agentId, tenantId = "tenant_default", toolId = null, window = "allTime" } = {}) {
+  const qs = new URLSearchParams({ agentId, window });
+  if (toolId) qs.set("toolId", toolId);
+  const response = await request(api, {
+    method: "GET",
+    path: `/ops/reputation/facts?${qs.toString()}`,
+    headers: { "x-proxy-tenant-id": tenantId, "x-proxy-ops-token": "tok_ops" }
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  return response.json;
+}
+
 test("API e2e: run completion releases escrow to payee wallet", async () => {
-  const api = createApi();
+  const api = createApi({ opsToken: "tok_ops" });
   const payerAgentId = await registerAgent(api, { agentId: "agt_wallet_payer_1" });
   const payeeAgentId = await registerAgent(api, { agentId: "agt_wallet_payee_1" });
 
@@ -91,10 +103,14 @@ test("API e2e: run completion releases escrow to payee wallet", async () => {
   const settlement = await request(api, { method: "GET", path: "/runs/run_wallet_release_1/settlement" });
   assert.equal(settlement.statusCode, 200);
   assert.equal(settlement.json?.settlement?.status, "released");
+
+  const reputation = await getReputationFacts(api, { agentId: payeeAgentId });
+  assert.equal(reputation?.facts?.totals?.decisions?.approved, 1);
+  assert.equal(reputation?.facts?.totals?.decisions?.rejected, 0);
 });
 
 test("API e2e: run failure refunds escrow to payer wallet", async () => {
-  const api = createApi();
+  const api = createApi({ opsToken: "tok_ops" });
   const payerAgentId = await registerAgent(api, { agentId: "agt_wallet_payer_2" });
   const payeeAgentId = await registerAgent(api, { agentId: "agt_wallet_payee_2" });
 
@@ -140,10 +156,14 @@ test("API e2e: run failure refunds escrow to payer wallet", async () => {
   const payeeWallet = await request(api, { method: "GET", path: `/agents/${encodeURIComponent(payeeAgentId)}/wallet` });
   assert.equal(payeeWallet.statusCode, 200);
   assert.equal(payeeWallet.json?.wallet?.availableCents, 0);
+
+  const reputation = await getReputationFacts(api, { agentId: payeeAgentId });
+  assert.equal(reputation?.facts?.totals?.decisions?.approved, 0);
+  assert.equal(reputation?.facts?.totals?.decisions?.rejected, 1);
 });
 
 test("API e2e: partial completion releases a portion and refunds the rest", async () => {
-  const api = createApi();
+  const api = createApi({ opsToken: "tok_ops" });
   const payerAgentId = await registerAgent(api, { agentId: "agt_wallet_payer_partial_1" });
   const payeeAgentId = await registerAgent(api, { agentId: "agt_wallet_payee_partial_1" });
 
@@ -201,4 +221,9 @@ test("API e2e: partial completion releases a portion and refunds the rest", asyn
   assert.equal(verification.statusCode, 200);
   assert.equal(verification.json?.verification?.verificationStatus, "amber");
   assert.equal(verification.json?.verification?.settlementReleaseRatePct, 60);
+
+  const reputation = await getReputationFacts(api, { agentId: payeeAgentId });
+  assert.equal(reputation?.facts?.totals?.decisions?.approved, 1);
+  assert.equal(reputation?.facts?.totals?.economics?.settledCents, 600);
+  assert.equal(reputation?.facts?.totals?.economics?.refundedCents, 400);
 });
