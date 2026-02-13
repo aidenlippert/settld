@@ -4897,7 +4897,13 @@ export function createApi({
 	            artifactId: partyArtifactId,
 	            generatedAt
 	          });
-	          const partyCore = { ...partyBody, sourceEventId: pending.id, atChainHash: pending.chainHash ?? partyBody?.eventProof?.lastChainHash ?? null };
+	          const partyCore = {
+	            ...partyBody,
+	            // Multiple party statements can originate from a single month-close event.
+	            // Add a deterministic suffix to keep source-event dedupe unique per party stream.
+	            sourceEventId: `${pending.id}:party:${partyRole}:${partyId}`,
+	            atChainHash: pending.chainHash ?? partyBody?.eventProof?.lastChainHash ?? null
+	          };
 	          const partyHash = computeArtifactHash(partyCore);
 	          const partyArtifact = { ...partyCore, artifactHash: partyHash };
 	          await store.putArtifact({ tenantId, artifact: partyArtifact });
@@ -4965,7 +4971,12 @@ export function createApi({
 	            artifactId: payoutArtifactId,
 	            generatedAt
 	          });
-	          const payoutCore = { ...payoutBody, sourceEventId: pending.id, atChainHash: pending.chainHash ?? payoutBody?.eventProof?.lastChainHash ?? null };
+	          const payoutCore = {
+	            ...payoutBody,
+	            // Multiple payout instructions can originate from one month-close event.
+	            sourceEventId: `${pending.id}:payout:${info.partyRole}:${info.partyId}`,
+	            atChainHash: pending.chainHash ?? payoutBody?.eventProof?.lastChainHash ?? null
+	          };
 	          const payoutHash = computeArtifactHash(payoutCore);
 	          const payoutArtifact = { ...payoutCore, artifactHash: payoutHash };
 	          await store.putArtifact({ tenantId, artifact: payoutArtifact });

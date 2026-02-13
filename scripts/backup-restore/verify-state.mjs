@@ -19,6 +19,13 @@ import { normalizeTenantId } from "../../src/core/tenancy.js";
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
 const TENANT_ID = normalizeTenantId(process.env.TENANT_ID ?? expected?.tenantId ?? "tenant_default");
+const SCHEMA = (() => {
+  const raw = String(process.env.PROXY_PG_SCHEMA ?? "public").trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) {
+    throw new Error("PROXY_PG_SCHEMA must match [A-Za-z_][A-Za-z0-9_]*");
+  }
+  return raw;
+})();
 
 function digestRows(rows) {
   return sha256Hex(canonicalJsonStringify(rows));
@@ -27,6 +34,7 @@ function digestRows(rows) {
 const { Client } = pg;
 const client = new Client({ connectionString: DATABASE_URL });
 await client.connect();
+await client.query(`SET search_path TO "${SCHEMA}", public`);
 
 const tenantCountRes = await client.query("SELECT COUNT(DISTINCT tenant_id)::int AS n FROM snapshots");
 const jobCountRes = await client.query("SELECT COUNT(*)::int AS n FROM snapshots WHERE tenant_id = $1 AND aggregate_type = 'job'", [TENANT_ID]);
