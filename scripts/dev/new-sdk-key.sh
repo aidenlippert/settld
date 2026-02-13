@@ -19,8 +19,10 @@ EOF
   exit 0
 fi
 
+# Prefer x-proxy-ops-token for hosted deployments that may not forward Authorization.
 RESPONSE="$(
   curl -sS -X POST "$SETTLD_BASE_URL/ops/api-keys" \
+    -H "x-proxy-ops-token: $PROXY_OPS_TOKEN" \
     -H "authorization: Bearer $PROXY_OPS_TOKEN" \
     -H "x-proxy-tenant-id: $SETTLD_TENANT_ID" \
     -H "content-type: application/json" \
@@ -48,4 +50,3 @@ chmod 600 "$SETTLD_RUNTIME_ENV_FILE" || true
 
 echo "Wrote $SETTLD_RUNTIME_ENV_FILE"
 echo "export SETTLD_API_KEY='$SETTLD_API_KEY_VALUE'"
-

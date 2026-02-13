@@ -8,6 +8,7 @@
  */
 
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -21,6 +22,12 @@ function parseArgs(argv) {
       const name = argv[i + 1] || "";
       const argsRaw = argv[i + 2] || "{}";
       out.call = { name, argsRaw };
+      i += 2;
+    }
+    if (a === "--call-file") {
+      const name = argv[i + 1] || "";
+      const file = argv[i + 2] || "";
+      out.call = { name, argsRaw: null, file };
       i += 2;
     }
   }
@@ -97,9 +104,15 @@ async function main() {
   if (args.call) {
     let callArgs = {};
     try {
-      callArgs = JSON.parse(args.call.argsRaw);
+      if (args.call.file) {
+        const raw = fs.readFileSync(String(args.call.file), "utf8");
+        callArgs = JSON.parse(raw);
+      } else {
+        callArgs = JSON.parse(args.call.argsRaw);
+      }
     } catch (err) {
-      throw new Error(`--call args must be JSON: ${err?.message ?? err}`);
+      const flag = args.call.file ? "--call-file" : "--call";
+      throw new Error(`${flag} args must be JSON: ${err?.message ?? err}`);
     }
     const called = await rpc("tools/call", { name: args.call.name, arguments: callArgs });
     process.stdout.write(JSON.stringify(called, null, 2) + "\n");
@@ -113,4 +126,3 @@ main().catch((err) => {
   process.stderr.write(String(err?.stack || err?.message || err) + "\n");
   process.exitCode = 1;
 });
-

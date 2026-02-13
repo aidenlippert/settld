@@ -35,6 +35,18 @@ npm run mcp:probe
 
 This spawns the MCP server, runs `initialize` and `tools/list`, prints the responses, and exits.
 
+## Live Call Without Shell-JSON Footguns
+
+If your terminal copy/paste keeps inserting line breaks, pass tool arguments via a JSON file:
+
+```bash
+cat > /tmp/settld-mcp-create-agreement.json <<'JSON'
+{"amountCents":500,"currency":"USD","title":"MCP live probe","capability":"agent-task:demo","disputeWindowDays":7}
+JSON
+
+npm run -s mcp:probe -- --call-file settld.create_agreement /tmp/settld-mcp-create-agreement.json
+```
+
 ## Tool Flow (Typical)
 
 1. Create an agreement (marketplace-backed) and a run:
