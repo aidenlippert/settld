@@ -79,6 +79,51 @@ function tailText(input, maxChars = 12_000) {
   return text.slice(text.length - maxChars);
 }
 
+function validateBackupRestoreDatabaseUrl(raw, { name }) {
+  const value = normalizeOptionalString(raw);
+  if (!value) {
+    return {
+      ok: false,
+      reason: `${name} is missing`
+    };
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return {
+      ok: false,
+      reason: `${name} is not a valid URL`
+    };
+  }
+  if (!(parsed.protocol === "postgres:" || parsed.protocol === "postgresql:")) {
+    return {
+      ok: false,
+      reason: `${name} must use postgres:// or postgresql://`
+    };
+  }
+  const host = normalizeOptionalString(parsed.hostname);
+  if (!host) {
+    return {
+      ok: false,
+      reason: `${name} must include a hostname`
+    };
+  }
+  if (host === "..." || host.toLowerCase() === "redacted" || host.toLowerCase() === "example.com") {
+    return {
+      ok: false,
+      reason: `${name} hostname looks redacted (${host}); pass the real database host`
+    };
+  }
+  if (value.includes("://...") || value.includes("<") || value.includes(">")) {
+    return {
+      ok: false,
+      reason: `${name} appears to be a placeholder; pass the real database URL`
+    };
+  }
+  return { ok: true, reason: null };
+}
+
 function parseArgs(argv) {
   const out = {
     baseUrl: "http://127.0.0.1:3000",
@@ -507,15 +552,27 @@ async function main() {
         error: "DATABASE_URL and RESTORE_DATABASE_URL are required"
       };
     } else {
-      backupRestore = runBackupRestoreDrill({
-        tenantId: args.tenantId,
-        databaseUrl,
-        restoreDatabaseUrl,
-        schema: args.backupRestoreSchema,
-        jobs: args.backupRestoreJobs,
-        month: args.backupRestoreMonth
-      });
-      if (backupRestore.ok !== true) failures.push("backup/restore drill failed");
+      const sourceDbValidation = validateBackupRestoreDatabaseUrl(databaseUrl, { name: "DATABASE_URL" });
+      const restoreDbValidation = validateBackupRestoreDatabaseUrl(restoreDatabaseUrl, { name: "RESTORE_DATABASE_URL" });
+      if (!sourceDbValidation.ok || !restoreDbValidation.ok) {
+        const reasons = [sourceDbValidation.reason, restoreDbValidation.reason].filter(Boolean);
+        failures.push("backup/restore run requested but database URLs are invalid");
+        backupRestore = {
+          source: "command",
+          ok: false,
+          error: reasons.join("; ")
+        };
+      } else {
+        backupRestore = runBackupRestoreDrill({
+          tenantId: args.tenantId,
+          databaseUrl,
+          restoreDatabaseUrl,
+          schema: args.backupRestoreSchema,
+          jobs: args.backupRestoreJobs,
+          month: args.backupRestoreMonth
+        });
+        if (backupRestore.ok !== true) failures.push("backup/restore drill failed");
+      }
     }
   } else if (args.backupRestoreEvidencePath) {
     try {

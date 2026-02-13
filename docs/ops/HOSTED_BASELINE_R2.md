@@ -118,3 +118,12 @@ npm run ops:hosted-baseline:evidence -- \
   --require-backup-restore true \
   --out ./artifacts/ops/hosted-baseline-evidence-staging.json
 ```
+
+Important:
+
+- `DATABASE_URL` and `RESTORE_DATABASE_URL` must be real connection strings (not redacted placeholders like `postgres://...`).
+- Quick preflight:
+
+```bash
+node -e 'for (const n of ["DATABASE_URL","RESTORE_DATABASE_URL"]) { const v=(process.env[n]||"").trim(); if (!v) { console.error(`${n}=missing`); process.exitCode=1; continue; } const u=new URL(v); console.log(`${n} host=${u.hostname} protocol=${u.protocol}`); }'
+```

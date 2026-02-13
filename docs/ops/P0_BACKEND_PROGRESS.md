@@ -1,6 +1,6 @@
 # P0 Backend Progress Tracker
 
-Status date: February 12, 2026
+Status date: February 13, 2026
 
 This tracker is the source of truth for P0 backend execution status in code.
 
@@ -102,9 +102,19 @@ Executed and passing:
 - `node scripts/ops/hosted-baseline-evidence.mjs --help`
 - `node scripts/ops/design-partner-run-packet.mjs --help`
 
+## Current hosted evidence snapshot (2026-02-13)
+
+- [x] `ops:hosted-baseline:evidence` passes against `https://api.settld.work` for:
+  - health/status
+  - required metrics presence
+  - billing catalog/quotas validation
+- [ ] Inline backup/restore drill still pending with real database URLs in environment.
+  - Last failed run used a redacted placeholder URL (`postgres://...`) and failed with `ENOTFOUND`.
+  - Script now fails fast on placeholder/redacted URLs to prevent ambiguous pg errors.
+
 ## Remaining P0 work (outside this code drop)
 
-- [ ] Execute hosted baseline evidence runs in staging/prod and archive signed artifacts
+- [ ] Execute hosted baseline evidence runs in staging/prod with `--run-backup-restore true` and archive signed artifacts
 - [ ] Execute chargeback/refund simulation runs and archive signed artifacts
 - [ ] Execute design-partner run packets against live partner tenants (repeatable, no manual DB edits)
 
