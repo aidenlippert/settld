@@ -2105,84 +2105,84 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       }
     }
 
-    const existing = await client.query("SELECT artifact_hash FROM artifacts WHERE tenant_id = $1 AND artifact_id = $2", [tenantId, artifactId]);
-	    if (existing.rows.length) {
-	      const current = String(existing.rows[0].artifact_hash);
-	      if (current !== String(artifactHash)) {
-	        const err = new Error("artifactId already exists with a different hash");
-	        err.code = "ARTIFACT_HASH_MISMATCH";
-	        err.expectedArtifactHash = current;
-	        err.gotArtifactHash = String(artifactHash);
-	        throw err;
-	      }
-	      await persistReputationEventIndexRow(client, { tenantId, artifactId, artifactHash: current, artifact });
-	      return;
-	    }
+		    const existing = await client.query("SELECT artifact_hash FROM artifacts WHERE tenant_id = $1 AND artifact_id = $2", [tenantId, artifactId]);
+		    if (existing.rows.length) {
+		      const current = String(existing.rows[0].artifact_hash);
+		      if (current !== String(artifactHash)) {
+		        const err = new Error("artifactId already exists with a different hash");
+		        err.code = "ARTIFACT_HASH_MISMATCH";
+		        err.expectedArtifactHash = current;
+		        err.gotArtifactHash = String(artifactHash);
+		        throw err;
+		      }
+		      await persistReputationEventIndexRow(client, { tenantId, artifactId, artifactHash: current, artifact });
+		      return;
+		    }
 
-	    try {
-	      await client.query(
-	        `
-	          INSERT INTO artifacts (tenant_id, artifact_id, artifact_type, job_id, at_chain_hash, source_event_id, artifact_hash, artifact_json)
-	          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-	        `,
-	        [
-	          tenantId,
-	          String(artifactId),
-	          artifactType,
-	          jobId,
-	          String(artifact.atChainHash ?? artifact.eventProof?.lastChainHash ?? ""),
-	          sourceEventId,
-	          String(artifactHash),
-	          JSON.stringify(artifact)
-	        ]
-	      );
-	      await persistReputationEventIndexRow(client, { tenantId, artifactId, artifactHash, artifact });
-	    } catch (err) {
-	      // Under concurrency, two workers may attempt to persist the same artifact at the same time. Treat this as
-	      // idempotent when the existing row's hash matches, and retryable otherwise.
-		      if (err?.code === "23505") {
-		        if (sourceEventId && jobId) {
-		          const bySource = await client.query(
-		            "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",
-		            [tenantId, jobId, artifactType, sourceEventId]
-		          );
-	          if (bySource.rows.length) {
-	            const currentId = String(bySource.rows[0].artifact_id);
-	            const currentHash = String(bySource.rows[0].artifact_hash);
-	            if (currentHash === String(artifactHash)) {
-                await persistReputationEventIndexRow(client, { tenantId, artifactId: currentId, artifactHash: currentHash, artifact });
-                return;
-              }
-	            const conflict = new Error("artifact already exists for this job/type/sourceEventId with a different hash");
-	            conflict.code = "ARTIFACT_SOURCE_EVENT_CONFLICT";
-	            conflict.existingArtifactId = currentId;
-	            conflict.existingArtifactHash = currentHash;
-	            conflict.gotArtifactHash = String(artifactHash);
-	            throw conflict;
-	          }
-	        }
+        // Avoid transaction-aborting unique-constraint errors (we run inside explicit transactions).
+        // Handle all unique conflicts by doing nothing and then checking what already exists.
+        const insertRes = await client.query(
+          `
+            INSERT INTO artifacts (tenant_id, artifact_id, artifact_type, job_id, at_chain_hash, source_event_id, artifact_hash, artifact_json)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            ON CONFLICT DO NOTHING
+          `,
+          [
+            tenantId,
+            String(artifactId),
+            artifactType,
+            jobId,
+            String(artifact.atChainHash ?? artifact.eventProof?.lastChainHash ?? ""),
+            sourceEventId,
+            String(artifactHash),
+            JSON.stringify(artifact)
+          ]
+        );
+        if (Number(insertRes?.rowCount ?? 0) > 0) {
+          await persistReputationEventIndexRow(client, { tenantId, artifactId, artifactHash, artifact });
+          return;
+        }
 
-	        const byId = await client.query("SELECT artifact_hash FROM artifacts WHERE tenant_id = $1 AND artifact_id = $2", [tenantId, artifactId]);
-	        if (byId.rows.length) {
-	          const current = String(byId.rows[0].artifact_hash);
-	          if (current === String(artifactHash)) {
-              await persistReputationEventIndexRow(client, { tenantId, artifactId, artifactHash: current, artifact });
+        // Someone else inserted a conflicting row under a unique constraint. Determine if it's idempotent.
+        const byId = await client.query("SELECT artifact_hash FROM artifacts WHERE tenant_id = $1 AND artifact_id = $2", [tenantId, artifactId]);
+        if (byId.rows.length) {
+          const current = String(byId.rows[0].artifact_hash);
+          if (current === String(artifactHash)) {
+            await persistReputationEventIndexRow(client, { tenantId, artifactId, artifactHash: current, artifact });
+            return;
+          }
+          const mismatch = new Error("artifactId already exists with a different hash");
+          mismatch.code = "ARTIFACT_HASH_MISMATCH";
+          mismatch.expectedArtifactHash = current;
+          mismatch.gotArtifactHash = String(artifactHash);
+          throw mismatch;
+        }
+
+        if (sourceEventId && jobId) {
+          const bySource = await client.query(
+            "SELECT artifact_id, artifact_hash FROM artifacts WHERE tenant_id = $1 AND job_id = $2 AND artifact_type = $3 AND source_event_id = $4 LIMIT 1",
+            [tenantId, jobId, artifactType, sourceEventId]
+          );
+          if (bySource.rows.length) {
+            const currentId = String(bySource.rows[0].artifact_id);
+            const currentHash = String(bySource.rows[0].artifact_hash);
+            if (currentHash === String(artifactHash)) {
+              await persistReputationEventIndexRow(client, { tenantId, artifactId: currentId, artifactHash: currentHash, artifact });
               return;
             }
-	          const mismatch = new Error("artifactId already exists with a different hash");
-	          mismatch.code = "ARTIFACT_HASH_MISMATCH";
-	          mismatch.expectedArtifactHash = current;
-	          mismatch.gotArtifactHash = String(artifactHash);
-	          throw mismatch;
-	        }
+            const conflict = new Error("artifact already exists for this job/type/sourceEventId with a different hash");
+            conflict.code = "ARTIFACT_SOURCE_EVENT_CONFLICT";
+            conflict.existingArtifactId = currentId;
+            conflict.existingArtifactHash = currentHash;
+            conflict.gotArtifactHash = String(artifactHash);
+            throw conflict;
+          }
+        }
 
-	        const raced = new Error("artifact insert raced with another transaction");
-	        raced.code = "ARTIFACT_INSERT_RACE";
-	        throw raced;
-	      }
-	      throw err;
-	    }
-	  }
+        const raced = new Error("artifact insert raced with another transaction");
+        raced.code = "ARTIFACT_INSERT_RACE";
+        throw raced;
+		  }
 
   async function insertDeliveryRow(client, { tenantId, delivery }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
