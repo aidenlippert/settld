@@ -1,92 +1,156 @@
-# Settld Domain Model (v0)
+# Settld Domain Model (v1)
 
 ## Actors
 
-- **Requester**: Household or Business that pays and grants scoped access.
-- **Owner**: supplies executors and receives payouts.
-- **Executor**: endpoint with capabilities, health, and safety profile.
-- **Operator**: remote assist + exception handling; actions are audited.
-- **Developer**: publishes skills.
-- **Trust Counterparty**: insurance/guarantee/claims partner.
+- **Agent**: Any autonomous entity that performs paid work or delegates paid work. Can be an AI agent, a tool endpoint, a robotic system, or any programmatic actor.
+- **Principal**: The human or organization that owns/controls an agent and sets its economic policy (spending limits, delegation rules, approval requirements).
+- **Counterparty**: The entity on the other side of an agreement (buyer or seller — roles are relative to a specific agreement).
+- **Arbiter**: An entity (human, automated, or hybrid) authorized to render verdicts in disputes.
+- **Verifier**: Any entity running settlement protocol verification — can be Settld, a third-party certified verifier, or the counterparty themselves (offline).
 
 ## First-class entities
 
-### Job
+### Agreement
 
-Purchasable outcome with SLA and constraints.
+A machine-readable economic contract between two or more parties for a specific piece of work.
 
 Key fields:
 
-- `templateId` (e.g., `reset_lite`)
-- constraints (rooms allowed, privacy mode, fragile items, pets, etc.)
-- scheduling window
-- price quote + risk premium
-- selected executor + operator coverage (optional)
-- state machine status
+- `agreementHash` (SHA-256, canonical — the identity of the agreement)
+- parties (agent IDs, roles: buyer/seller/arbiter)
+- pricing terms (amount, currency, fee splits, holdback %)
+- SLA definition (completion criteria, time bounds, quality thresholds)
+- evidence requirements (what constitutes proof of completion)
+- dispute rules (window duration, arbitration method, cascading behavior)
+- delegation policy (max depth, sub-agreement budget caps, allowed sub-contractors)
+- settlement policy (auto-settle on pass, manual review, holdback release schedule)
+- governance constraints inherited from principal (spending limit, approval gate)
 
-### Task Template
+### Evidence Bundle
 
-Defines:
+Cryptographically committed proof-of-work artifacts.
 
-- required skills
-- environment requirements (managed vs home)
-- SLA expectations
-- pricing inputs and guardrails
+Structure:
 
-### Skill
+- `manifest.json`: commits to all file paths + SHA-256 hashes
+- `attestation/`: signer commitments binding to the manifest hash
+- `verify/`: verification report (not in manifest — validated by binding + signature)
+- evidence content: referenced by hash, stored out-of-band (S3/object storage)
 
-Signed bundle:
+Bundle types:
 
-- metadata (name, version, developer, description)
-- required capabilities + safety constraints
-- deterministic policy graph (BT/SM) and tests
-- optional model artifacts
-- certification tier
+- JobProofBundle.v1 — proof for a single unit of work
+- MonthProofBundle.v1 — aggregated proof for a billing period
+- FinancePackBundle.v1 — financial reconciliation evidence
+- InvoiceBundle.v1 — work + terms + metering + claim
+- ClosePack.v1 — pre-dispute wedge pack with embedded InvoiceBundle + evaluation surfaces
 
-### Capability
+### Settlement Decision Record
 
-Runtime-agnostic API surface (e.g., `ExecuteWorkflow`, `CallTool`, `CollectEvidence`, `ObserveROI`).
+Deterministic output of settlement policy evaluation.
 
-Executors advertise:
+Key fields:
 
-- mobility/manipulation properties
-- allowed speed/force envelopes
-- autonomy/teleop allowed flags
-- sensor modes (privacy implications)
+- `agreementHash` — links to the agreement
+- `policyHashUsed` — pins which policy version was evaluated
+- `status` — pass/fail/warn
+- evidence summary (findings, warnings, errors with stable codes)
+- payout breakdown (platform fee, agent payout, holdback, reserves)
+- signed by settlement decision signer
 
-### Access Plan
+Invariant: same evidence + same policy → same decision. Always.
 
-Time-bounded, revocable credential set and instructions to access the space:
+### Holdback
 
-- credential scope + expiry
-- revocation path
-- entry/exit safe behaviors
+Portion of settlement held in reserve pending dispute window expiration.
 
-### Incident / Claim
+- Created at settlement time per agreement terms.
+- Released automatically when dispute window closes (if no dispute).
+- Refunded (fully or partially) if dispute verdict favors buyer.
+- Holdback adjustments are deterministic and signed.
 
-Incident: operationally detected anomaly or requester-reported issue.
+### Dispute
 
-Claim: workflow for remediation/payout:
+A structured challenge to a settlement.
 
-- triage, classify, evidence bundle attach
-- approve small payouts quickly, escalate large claims
-- ledger adjustments (refunds, owner clawbacks, reserve draws)
+Lifecycle:
 
-### Ledger
+```
+dispute_opened → evidence_attached → arbitration → verdict → adjustment
+```
 
-Double-entry system of record for money movement:
+Key entities:
 
-- escrow/holds
-- payout splits (owner, Settld fee, operator fee, developer royalty, reserve)
-- refunds, chargebacks, tips
+- `DisputeOpenEnvelope.v1` — signed by disputing party, references agreement + evidence
+- `ArbitrationCase.v1` — case record with evidence links, timeline
+- `ArbitrationVerdict.v1` — arbiter decision (release / partial refund / full refund)
+- `SettlementAdjustment.v1` — deterministic ledger entries adjusting holdback
 
-Invariant: every journal entry balances to zero.
+### Reputation Event
 
-## Trust scores (initially naive)
+Append-only economic fact about an agent.
 
-Used for dispatch, pricing, and environment gating:
+Types:
 
-- executor trust score
-- owner trust score
-- building trust score
-- skill trust score / certification tier
+- `settlement_completed` — on-time, SLA met
+- `settlement_failed` — deadline missed, SLA breached
+- `dispute_opened` — party opened a dispute
+- `dispute_won` / `dispute_lost` — outcome
+- `delegation_depth` — how many hops deep this agent operated
+
+Queryable via windowed API: "show me this agent's last 90 days of settlement history."
+
+### Ledger Entry
+
+Double-entry journal entry for money movement.
+
+- Every entry balances to zero (sum of postings = 0).
+- Account types: cash, escrow, platform revenue, agent payable, developer royalties, insurance reserve, claims expense, claims payable.
+- Supports multi-currency extension (planned).
+
+### Governance Policy
+
+Machine-readable rules set by a principal (human/org) that constrain agent economic behavior.
+
+- Spending limits (per-transaction, daily, monthly)
+- Approval gates (amount thresholds requiring human sign-off)
+- Delegation policy (max sub-agent depth, budget per delegation level)
+- Allowed counterparties (whitelist/blacklist)
+- Allowed settlement rails (fiat only, crypto only, both)
+- Evidence retention requirements
+
+## Entity relationships
+
+```
+Principal ──owns──▶ Agent
+Agent ──creates──▶ Agreement ◀──accepts── Agent
+Agreement ──requires──▶ Evidence Bundle
+Evidence Bundle ──evaluated by──▶ Settlement Decision Record
+Settlement Decision Record ──creates──▶ Ledger Entry + Holdback
+Holdback ──challenged by──▶ Dispute
+Dispute ──resolved by──▶ Arbiter ──renders──▶ Verdict
+Verdict ──adjusts──▶ Holdback ──creates──▶ Ledger Entry (Adjustment)
+Agent ──accumulates──▶ Reputation Events
+Principal ──publishes──▶ Governance Policy ──constrains──▶ Agent
+Agreement ──may spawn──▶ Sub-Agreement (compositional delegation)
+```
+
+## Compositional model (multi-hop)
+
+When Agent A delegates to Agent B who delegates to Agent C:
+
+```
+Agreement_AB ──spawns──▶ Agreement_BC ──spawns──▶ Agreement_CD
+     │                        │                        │
+     ▼                        ▼                        ▼
+Evidence_D ──rolls up──▶ Evidence_C ──rolls up──▶ Evidence_B
+     │                        │                        │
+     ▼                        ▼                        ▼
+Settle_CD ──cascades──▶ Settle_BC ──cascades──▶ Settle_AB
+```
+
+- Sub-agreements inherit budget caps and delegation limits from parent.
+- Evidence at leaf level rolls up through the chain.
+- Settlement cascades bottom-up (deepest first).
+- Disputes can propagate up or down the chain.
+- Total payout across chain ≤ original agreement amount (invariant).

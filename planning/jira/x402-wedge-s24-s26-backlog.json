@@ -1,0 +1,233 @@
+{
+  "meta": {
+    "plan": "x402-wedge-s24-s26",
+    "created_at": "2026-02-13",
+    "baseline_date": "2026-02-26",
+    "sprint_length_weeks": 2,
+    "total_sprints": 3,
+    "notes": [
+      "This is a proposed execution slice. Live status/backlog is tracked in GitHub Issues (see planning/STATUS.md).",
+      "Goal: make Settld feel like a dev-first product (B2D) while selling into B2B budgets via receipts, controls, and escrow semantics."
+    ]
+  },
+  "epics": [
+    {
+      "Epic Key": "STLD-EX402",
+      "Summary": "x402 Gateway Wedge (Dev-First Install)",
+      "Description": "Ship a standalone, self-hosted gateway that turns HTTP 402 flows into Settld escrow + verify-before-release settlement, with receipts as the core output.",
+      "Owner": "Platform",
+      "Priority": "Highest",
+      "Labels": "x402,oss,dx,wedge,s24",
+      "Sprint": "S24"
+    },
+    {
+      "Epic Key": "STLD-EPILOT",
+      "Summary": "Design Partner Pilots (3 Logos, 2 Weeks)",
+      "Description": "Land 3 design partners, run real workflows through the gateway, and convert at least 1 to paid based on measurable outcomes. Billing is manual during pilots (invoice off exports).",
+      "Owner": "GTM + Platform",
+      "Priority": "Highest",
+      "Labels": "gtm,pilot,pricing,pro,s25",
+      "Sprint": "S25"
+    },
+    {
+      "Epic Key": "STLD-EDELEG",
+      "Summary": "Compositional Settlement Demo (3-Hop Unwind)",
+      "Description": "Turn AgreementDelegation from a linking primitive into an executable story: a 3-hop subcontract chain that deterministically unwinds on failure.",
+      "Owner": "Kernel",
+      "Priority": "Highest",
+      "Labels": "delegation,composition,escrow,cascade,s26",
+      "Sprint": "S26"
+    }
+  ],
+  "tickets": [
+    {
+      "Ticket Key": "STLD-TX402-001",
+      "Epic Key": "STLD-EX402",
+      "Summary": "Package x402 gateway as standalone Docker image",
+      "Description": "Add a minimal gateway service (container) with config for Settld base URL/tenant/api key. It should expose a small HTTP surface suitable for a 10-minute demo.",
+      "Owner": "Platform",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "S24",
+      "Dependencies": "",
+      "Labels": "x402,docker,dx",
+      "Acceptance Criteria": "One command starts the gateway; a smoke script can run: request -> 402 -> create hold -> verify -> receipt/decision; exits 0 on success."
+    },
+    {
+      "Ticket Key": "STLD-TX402-002",
+      "Epic Key": "STLD-EX402",
+      "Summary": "Implement real 402 interception flow (proxy mode)",
+      "Description": "Gateway supports 'proxy mode': forwards upstream request, detects HTTP 402 Payment Required, parses header, creates Settld gate/agreement, returns structured 402 to client including agreementHash/gateId, and later completes verify->release/refund.",
+      "Owner": "Platform",
+      "Estimate": "4d",
+      "Priority": "Highest",
+      "Sprint": "S24",
+      "Dependencies": "STLD-TX402-001",
+      "Labels": "x402,proxy,api",
+      "Acceptance Criteria": "Given an upstream demo server that emits 402, the gateway produces deterministic Settld artifacts and can finalize settlement without manual DB edits."
+    },
+    {
+      "Ticket Key": "STLD-TX402-003",
+      "Epic Key": "STLD-EX402",
+      "Summary": "Publish 10-minute x402 quickstart (receipt-first)",
+      "Description": "Write a quickstart that ends with: agent calls API -> 402 -> escrow -> verify -> receipt. Include copy/paste commands and expected JSON fields (gateId, decisionPolicyHash, receiptHash if applicable).",
+      "Owner": "Platform",
+      "Estimate": "1d",
+      "Priority": "Highest",
+      "Sprint": "S24",
+      "Dependencies": "STLD-TX402-001",
+      "Labels": "docs,dx,x402",
+      "Acceptance Criteria": "An external dev can complete the quickstart in under 10 minutes on a fresh machine and see a stable receipt output."
+    },
+    {
+      "Ticket Key": "STLD-TX402-004",
+      "Epic Key": "STLD-EX402",
+      "Summary": "Add gateway smoke test to acceptance suite",
+      "Description": "Extend dockerized acceptance to run the gateway container and validate a full x402 flow against a local upstream 402 emitter.",
+      "Owner": "QA",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "S24",
+      "Dependencies": "STLD-TX402-001,STLD-TX402-002",
+      "Labels": "acceptance,dx,x402",
+      "Acceptance Criteria": "npm run acceptance:full-stack includes the gateway test and stays green (no flakes across 5 runs)."
+    },
+    {
+      "Ticket Key": "STLD-TX402-005",
+      "Epic Key": "STLD-EX402",
+      "Summary": "Add MCP tools for x402 gate create/verify",
+      "Description": "Expose gateway-backed flow via MCP so agents can use x402 gating without direct HTTP glue: create gate, verify, fetch status.",
+      "Owner": "Kernel",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "S24",
+      "Dependencies": "",
+      "Labels": "mcp,x402,agent",
+      "Acceptance Criteria": "MCP probe can run x402 create->verify->get and return stable JSON outputs with idempotency."
+    },
+    {
+      "Ticket Key": "STLD-TPILOT-001",
+      "Epic Key": "STLD-EPILOT",
+      "Summary": "Define pilot package + success scorecard",
+      "Description": "Write a pilot offer with scope, timeline, and success metrics (activation + outcomes).",
+      "Owner": "GTM",
+      "Estimate": "1d",
+      "Priority": "Highest",
+      "Sprint": "S25",
+      "Dependencies": "STLD-TX402-003",
+      "Labels": "gtm,pilot",
+      "Acceptance Criteria": "Scorecard includes baseline + target for: integration time, settlements/day, auto-resolve %, dispute rate, time-to-settle."
+    },
+    {
+      "Ticket Key": "STLD-TPILOT-002",
+      "Epic Key": "STLD-EPILOT",
+      "Summary": "Pilot invoicing via exports (no billing infra)",
+      "Description": "During pilots, do not build billing enforcement. Provide an export that supports manual invoicing: settlement counts, dispute counts, and totals by period.",
+      "Owner": "Platform",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "S25",
+      "Dependencies": "STLD-TPILOT-003",
+      "Labels": "pricing,pro,invoice,export",
+      "Acceptance Criteria": "Export supports: period start/end, settlementCount, disputeCount, totalAmountCents; can be used to generate a manual invoice without DB access."
+    },
+    {
+      "Ticket Key": "STLD-TPILOT-003",
+      "Epic Key": "STLD-EPILOT",
+      "Summary": "Receipts export surface (webhook + CSV)",
+      "Description": "Provide an export of settlement receipts/decisions suitable for finance teams: webhook delivery + basic CSV export endpoint.",
+      "Owner": "Platform",
+      "Estimate": "4d",
+      "Priority": "High",
+      "Sprint": "S25",
+      "Dependencies": "",
+      "Labels": "receipts,export,webhook",
+      "Acceptance Criteria": "Given a time range, export returns stable rows with runId, payer, payee, amount, decision hash/policy hash, dispute status."
+    },
+    {
+      "Ticket Key": "STLD-TPILOT-004",
+      "Epic Key": "STLD-EPILOT",
+      "Summary": "Pilot onboarding runbook (1 afternoon install)",
+      "Description": "Document an install path for a design partner: keys, gateway deploy, sandbox vs prod, and rollback.",
+      "Owner": "GTM + Platform",
+      "Estimate": "1d",
+      "Priority": "High",
+      "Sprint": "S25",
+      "Dependencies": "STLD-TX402-001",
+      "Labels": "runbook,pilot,ops",
+      "Acceptance Criteria": "Runbook includes exact commands and a 'known-good' verification flow that can be run as a health check."
+    },
+    {
+      "Ticket Key": "STLD-TDELEG-001",
+      "Epic Key": "STLD-EDELEG",
+      "Summary": "Add delegation MCP tool (create + list)",
+      "Description": "Expose agreement delegation creation/listing via MCP so agent orchestrators can build multi-hop graphs programmatically.",
+      "Owner": "Kernel",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "S26",
+      "Dependencies": "",
+      "Labels": "mcp,delegation,composition",
+      "Acceptance Criteria": "MCP tool can create a delegation and list by agreementHash; outputs validate against schema and include delegationHash."
+    },
+    {
+      "Ticket Key": "STLD-TBILL-001",
+      "Epic Key": "STLD-EDELEG",
+      "Summary": "Add settlement usage metering (minimal, export-first)",
+      "Description": "After pilots, implement minimal metering primitives: count settlements/disputes/webhook deliveries by tenant+period. No aggressive enforcement in v1; focus on accurate reporting for Pro/Enterprise.",
+      "Owner": "Platform",
+      "Estimate": "3d",
+      "Priority": "High",
+      "Sprint": "S26",
+      "Dependencies": "",
+      "Labels": "billing,metering,pro",
+      "Acceptance Criteria": "Usage report is deterministic across runs and matches receipt exports for the same time window."
+    },
+    {
+      "Ticket Key": "STLD-TDELEG-002",
+      "Epic Key": "STLD-EDELEG",
+      "Summary": "Implement executable cascade settlement plan (idempotent ops)",
+      "Description": "Given a cascade plan from cascadeSettlementCheck/refundUnwindCheck, implement a safe executor that applies holds/releases/refunds in a deterministic, idempotent manner.",
+      "Owner": "Kernel",
+      "Estimate": "5d",
+      "Priority": "Highest",
+      "Sprint": "S26",
+      "Dependencies": "",
+      "Labels": "delegation,cascade,escrow",
+      "Acceptance Criteria": "3-hop scenario: child fails -> refunds unwind to root; ledger invariant holds; duplicate execution is a no-op."
+    },
+    {
+      "Ticket Key": "STLD-TDELEG-003",
+      "Epic Key": "STLD-EDELEG",
+      "Summary": "Build compositional demo script (3-hop subcontract)",
+      "Description": "Ship a runnable demo (script + fixtures) that creates A->B->C delegations, runs C, and shows deterministic settlement/unwind with receipts and reputation events.",
+      "Owner": "Kernel",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "S26",
+      "Dependencies": "STLD-TDELEG-002",
+      "Labels": "demo,composition,delegation",
+      "Acceptance Criteria": "One command prints: delegation lineage, evidence refs, decision hashes, final payouts/refunds, and passes in CI."
+    }
+  ],
+  "sprint_gates": [
+    {
+      "Sprint": "S24",
+      "Artifact": "artifacts/x402/gateway-smoke.json",
+      "Gate Command": "PATH=\"/mnt/c/Program Files/Docker/Docker/resources/bin:$PATH\" npm run acceptance:full-stack",
+      "Runbook": "planning/gtm/x402-wedge-pilot-plan.md"
+    },
+    {
+      "Sprint": "S25",
+      "Artifact": "artifacts/gtm/pilot-scorecard.json",
+      "Gate Command": "node scripts/ci/run-self-serve-launch-gate.mjs",
+      "Runbook": "planning/gtm/x402-wedge-pilot-plan.md"
+    },
+    {
+      "Sprint": "S26",
+      "Artifact": "artifacts/demo/delegation-3hop.json",
+      "Gate Command": "npm test",
+      "Runbook": "planning/gtm/x402-wedge-pilot-plan.md"
+    }
+  ]
+}

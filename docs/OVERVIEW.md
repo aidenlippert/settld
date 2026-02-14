@@ -1,190 +1,157 @@
-# Settld overview
+# Settld Overview
 
-Settld (as shipped in this repo) is **two products** that deliberately share the same “truth engine”:
+## What Settld is
 
-1. **Settld Protocol (open)**: a cryptographically verifiable artifact protocol (bundles + manifests + attestations + receipts) that can be verified offline by someone who does not trust the producer.
-2. **Settld Verify Cloud (commercial)**: a hosted workflow controller (“Magic Link”) that runs the same verifier server-side and turns verifiable artifacts into approvals, inbox views, exports, and automation hooks.
+Settld is the **settlement kernel for the autonomous economy**. It is the trust, verification, and financial finality layer that sits between any two agents (or any agent and any business) doing paid work.
 
-The core design principle is: the hosted product must never be “the only judge.” Everything it shows should be reproducible offline using the open verifier + explicit trust anchors.
+Concretely, Settld ships as **two products** that share the same truth engine:
 
-## What Settld solves
+1. **Settld Protocol (open)**: A cryptographically verifiable artifact protocol — bundles, manifests, attestations, receipts — that can be verified offline by someone who does not trust the producer.
+2. **Settld Cloud (commercial)**: A hosted settlement controller ("Magic Link") that runs the same verifier server-side and turns verifiable artifacts into settlement decisions, buyer approvals, dispute workflows, and automation hooks.
 
-Delegated autonomous work (agents, automation services, and human-assisted workflows) produces disputes because evidence is messy and non-portable:
+The core design principle: the hosted product must never be "the only judge." Everything it shows should be reproducible offline using the open verifier + explicit trust anchors.
 
-- “Prove the workflow actually completed under agreed terms.”
-- “We’re withholding payment until evidence and settlement terms are clear.”
-- “SLA breach—show deterministic evidence and evaluation outputs.”
+## Why Settld exists
 
-Settld makes the invoice and its evidence a self-contained, verifiable bundle:
+The autonomous economy is assembling across three layers:
 
-- Evidence artifacts are committed by hashes (integrity).
-- Pricing terms can be buyer-approved by signature (authorization over terms).
-- Invoice math is recomputable and deterministic (no “trust me” totals).
-- A verifier can later prove pass/fail under explicit policy (strict vs compat).
-- Verify Cloud makes this usable by buyers without requiring installs.
+| Layer | What exists | Examples |
+|-------|------------|----------|
+| **Communication** | Agents can discover and talk to each other | A2A (Google/LF), MCP (Anthropic), OpenAI function calling |
+| **Payment plumbing** | Agents can hold funds and send money | x402 (Coinbase/Cloudflare), Agentic Wallets, Stripe Connect |
+| **Execution** | Agents can do work | LangChain, AutoGen, CrewAI, custom agents, tool APIs |
 
-## The end-to-end artifact story (protocol truth)
+**What's missing: the trust layer between "work happened" and "money should move."**
 
-A producer emits a bundle directory tree (or a zip of that tree).
+- Who **proves** the work was done correctly?
+- Who **decides** the payout amount, deterministically?
+- What happens when the work **fails** or is **disputed**?
+- How do **reputation signals** accumulate?
+- How do **humans** maintain control over agent spending?
 
-The bundle includes:
+Settld fills this gap. It is to the autonomous economy what **SSL/HTTPS was to the internet** — the trust layer that makes commerce possible.
 
-- `manifest.json`: commits to a list of file paths + hashes, excluding `verify/**` (no circular hashing).
-- `attestation/bundle_head_attestation.json`: binds to the manifest hash.
-- Optional `verify/verification_report.json`: a signed receipt that is not listed in the manifest but is cryptographically bound (by hashes) to the manifest and head attestation.
+## The settlement kernel
 
-A verifier later:
+The kernel governs the lifecycle of any economic agreement:
 
-- recomputes file hashes,
-- recomputes manifest hash using canonical JSON rules,
-- validates signatures,
-- enforces governance and trust anchors,
-- returns deterministic machine output with stable warning/error codes.
+```
+agreement → hold → evidence → verification → decision → receipt
+                                                    ↓
+                                              dispute → verdict → adjustment
+```
 
-## Protocol truth sources (what “counts”)
+Every step is:
+- **Deterministic**: same inputs → same outputs, always.
+- **Verifiable**: cryptographically signed, hash-chained, offline-checkable.
+- **Auditable**: append-only event log with stable error/warning codes.
+
+## What Settld solves (with examples)
+
+### 1. Proof of completion
+> Agent B says it completed the data analysis. Settld requires a signed evidence bundle with deterministic hash-chain integrity. The buyer can verify offline that the work output matches the agreed terms.
+
+### 2. Deterministic settlement
+> Agent B's evidence is evaluated against the agreement's SLA definition. The same evidence + same policy always produces the same payout. No "trust me" totals.
+
+### 3. Disputes and refunds
+> Agent A disputes Agent B's work quality. A signed dispute envelope opens an arbitration case. Evidence is attached. An arbiter renders a verdict. Holdback is adjusted deterministically.
+
+### 4. Compositional (multi-hop) settlement
+> Agent A hires B, B hires C, C hires D. D fails. Refunds cascade back through the chain: D→C→B→A, each with deterministic pro-rata adjustments.
+
+### 5. Reputation
+> After 100 settlements, Agent B has an append-only track record: 97% completion rate, 2% dispute rate, median settlement in 3 seconds. Any counterparty can query this.
+
+### 6. Governance
+> A company sets policy: "My agents can spend up to $500/transaction, max 3 delegation hops, only counterparties with >90% completion rate." Settld enforces this autonomously.
+
+## Protocol truth sources
 
 When docs disagree, the contract is:
 
 1. `docs/spec/` (human spec)
 2. `docs/spec/schemas/` (JSON Schemas)
 3. `test/fixtures/` (fixture corpus) + `conformance/v1/` (language-agnostic oracle)
-4. the reference verifier implementations (Node + Python), as constrained by conformance
+4. The reference verifier implementations (Node + Python), as constrained by conformance
 
 ## Bundle kinds implemented
 
-These are “directory-level protocols” with distinct manifest rules and verification logic:
-
-- Proof bundles
-  - JobProofBundle.v1
-  - MonthProofBundle.v1
-- Finance pack
-  - FinancePackBundle.v1
-- Invoice bundle (work → terms → metering → claim)
-  - InvoiceBundle.v1 embeds JobProof under `payload/job_proof_bundle/**`
-- ClosePack (pre-dispute “wedge pack”)
-  - ClosePack.v1 embeds an InvoiceBundle and adds deterministic recomputable indexing/evaluation surfaces for self-serve dispute resolution (evidence index + optional SLA/acceptance evaluation surfaces).
+- **Proof bundles**: JobProofBundle.v1, MonthProofBundle.v1
+- **Finance pack**: FinancePackBundle.v1
+- **Invoice bundle**: InvoiceBundle.v1 (work → terms → metering → claim)
+- **ClosePack**: ClosePack.v1 (pre-dispute wedge pack with embedded InvoiceBundle + evaluation surfaces)
 
 ## Toolchain CLIs
 
-- `settld-produce`: deterministic bundle production (JobProof/MonthProof/FinancePack/InvoiceBundle/ClosePack).
-- `settld-verify`: bundle verification (strict/compat), emits deterministic JSON output.
-- `settld-release`: release authenticity verification for distribution artifacts.
-- `settld-trust`: bootstrap trust materials for local testing/dev flows.
+- `settld-produce`: deterministic bundle production
+- `settld-verify`: bundle verification (strict/compat), deterministic JSON output
+- `settld-release`: release authenticity verification
+- `settld-trust`: bootstrap trust materials
 
-## Verify Cloud (Magic Link)
+## Settld Cloud (Magic Link)
 
-Verify Cloud is a hosted controller that accepts bundle zip uploads and produces:
+Hosted settlement controller:
 
-- View-only buyer report page (Green/Red/Amber with stable codes)
-- Downloads:
-  - original bundle zip
-  - hosted verify JSON output
-  - producer receipt (if present in bundle)
-  - PDF summary (compat surface)
-  - audit packet zip (monthly)
-- Workflow features:
-  - inbox listing/filtering for buyers
-  - vendor-scoped ingest keys (upload-only, vendor-stamped)
-  - tenant settings (mode defaults, policies, retention, quotas, webhook config)
-  - quotas + usage metering + billing invoice export
-  - approvals/holds with OTP gating and audit trail
-  - signed webhooks (or record-mode delivery in restricted environments)
+- Bundle zip upload → verification → buyer report (green/red/amber)
+- Downloads: bundle, verify output, receipt, PDF summary, audit packet
+- Workflow: inbox, approvals/holds (OTP gated), webhooks (signed)
+- Tenant management: settings, policies, quotas, usage metering, billing
+- Self-serve billing: Free / Builder ($99/mo) / Growth ($599/mo) / Enterprise
 
-Security posture for hosted ingestion is part of the product contract:
+## Protocol integrations
 
-- safe zip extraction is centralized and shared by CLI + hosted ingestion
-- budgets enforced during unzip and hashing
-- hostile zip features are rejected (zip-slip, symlinks, duplicates, path attacks, bombs/ratios)
+| Protocol | Status | How Settld integrates |
+|----------|--------|-----------------------|
+| **MCP** | ✅ Shipped (stdio) | Settld tools (create agreement, submit evidence, settle, dispute) exposed as MCP tools |
+| **A2A** | 🔜 Planned | Settlement capabilities advertised via Agent Cards; agents discover Settld |
+| **x402** | 🔜 Planned | HTTP 402 flows route through Settld for verification before on-chain settlement |
+| **REST API** | ✅ Shipped | Direct HTTP API for all settlement operations |
+| **Webhooks** | ✅ Shipped | Signed webhook delivery for settlement events |
 
-## Quick “show me” commands
+## Quick commands
 
-Protocol and conformance:
+```sh
+# Start the API
+PROXY_OPS_TOKEN=tok_ops npm run dev:api
 
-- `npm test`
-- `node scripts/fixtures/generate-bundle-fixtures.mjs`
-- `node conformance/v1/run.mjs --node-bin packages/artifact-verify/bin/settld-verify.js`
+# Full local dev stack
+./bin/settld.js dev up
 
-Local verify examples:
+# Run tests
+npm test
 
-- `node packages/artifact-verify/bin/settld-verify.js --about --format json`
-- `node packages/artifact-verify/bin/settld-verify.js --strict --format json --invoice-bundle <dir>`
-- `node packages/artifact-verify/bin/settld-verify.js --strict --format json --close-pack <dir>`
+# Run conformance
+./bin/settld.js conformance kernel --ops-token tok_ops
 
-Run Verify Cloud locally:
+# Start MCP server
+npm run mcp:server
 
-- `MAGIC_LINK_API_KEY=dev_key MAGIC_LINK_DATA_DIR=/tmp/settld-magic-link MAGIC_LINK_PORT=8787 node services/magic-link/src/server.js`
+# Start Verify Cloud
+npm run dev:magic-link
+```
 
-Upload a bundle zip:
+## Reading paths
 
-- `node packages/magic-link-cli/bin/settld-magic-link.js upload <path-to-zip> --url http://localhost:8787 --mode auto --tenant <tenant>`
-
-## Gotchas that surprise new engineers
-
-- Trust anchors are out-of-band by design (no trust loops).
-- `verify/**` is excluded from manifests; receipts are validated by binding + signature, not by inclusion.
-- Codes are the API, not logs (warnings and errors are stable identifiers).
-- Canonical JSON is a hard contract; numeric semantics drift breaks cross-language parity.
-- Safe zip ingestion is centralized so CLI + hosted don’t drift on security posture.
-- When docs lag code, trust spec + conformance + fixtures.
-
-## Reading paths (10 files each)
-
-### A) New engineer (2–3 hours to become dangerous)
-
-Goal: understand the “truth engine,” then the hosted controller.
-
-1. `docs/spec/README.md`
-2. `docs/spec/INVARIANTS.md`
-3. `docs/spec/CANONICAL_JSON.md`
-4. `docs/spec/STRICTNESS.md`
-5. `docs/spec/VerifyCliOutput.v1.md`
-6. `conformance/v1/README.md`
-7. `packages/artifact-verify/bin/settld-verify.js`
-8. `packages/artifact-verify/src/invoice-bundle.js`
-9. `packages/artifact-verify/src/safe-unzip.js`
-10. `services/magic-link/README.md`
-
-### B) Auditor / partner security reviewer
-
-Goal: can we independently verify, and is ingestion safe?
-
-1. `docs/spec/README.md`
-2. `docs/spec/CRYPTOGRAPHY.md`
-3. `docs/spec/TRUST_ANCHORS.md`
-4. `docs/spec/BundleHeadAttestation.v1.md`
-5. `docs/spec/VerificationReport.v1.md`
-6. `docs/spec/WARNINGS.md`
-7. `docs/spec/ERRORS.md`
-8. `conformance/v1/README.md`
-9. `packages/artifact-verify/src/safe-unzip.js`
-10. `test/zip-security.test.js`
-
-### C) Buyer (AP / finance ops) viewpoint
-
-Goal: what does this change in our invoice workflow?
-
-1. `docs/pilot-kit/README.md`
-2. `docs/pilot-kit/buyer-email.txt`
-3. `docs/pilot-kit/buyer-one-pager.md`
+### A) New engineer (2–3 hours)
+1. `docs/spec/README.md` → `docs/spec/INVARIANTS.md` → `docs/spec/CANONICAL_JSON.md`
+2. `docs/spec/STRICTNESS.md` → `conformance/v1/README.md`
+3. `packages/artifact-verify/bin/settld-verify.js` → `packages/artifact-verify/src/invoice-bundle.js`
 4. `services/magic-link/README.md`
-5. `docs/spec/InvoiceClaim.v1.md`
-6. `docs/spec/PricingMatrix.v1.md`
-7. `docs/spec/MeteringReport.v1.md`
-8. `docs/spec/VerifyCliOutput.v1.md`
-9. `docs/spec/WARNINGS.md` (top-level meanings)
-10. `docs/spec/STRICTNESS.md` (strict vs compat posture)
 
-### D) Vendor CTO / operator engineering
+### B) Agent developer 
+1. `docs/QUICKSTART_SDK.md` → `docs/QUICKSTART_SDK_PYTHON.md`
+2. `scripts/mcp/settld-mcp-server.mjs`
+3. `docs/spec/SettlementKernel.v1.md`
+4. `docs/spec/SettlementDecisionRecord.v2.md`
 
-Goal: how do I generate bundles and integrate?
+### C) Buyer / finance ops
+1. `docs/pilot-kit/buyer-one-pager.md` → `docs/pilot-kit/procurement-one-pager.md`
+2. `services/magic-link/README.md`
+3. `docs/spec/InvoiceClaim.v1.md` → `docs/spec/PricingMatrix.v1.md`
 
-1. `docs/QUICKSTART_PRODUCE.md`
-2. `docs/QUICKSTART_VERIFY.md`
-3. `docs/spec/InvoiceBundleManifest.v1.md`
-4. `docs/spec/InvoiceClaim.v1.md`
-5. `docs/spec/PricingMatrix.v1.md`
-6. `docs/spec/MeteringReport.v1.md`
-7. `packages/artifact-produce/bin/settld-produce.js`
-8. `src/core/invoice-bundle.js`
-9. `packages/magic-link-cli/bin/settld-magic-link.js`
-10. `docs/pilot-kit/README.md`
+### D) Security reviewer
+1. `docs/spec/CRYPTOGRAPHY.md` → `docs/spec/TRUST_ANCHORS.md`
+2. `docs/spec/BundleHeadAttestation.v1.md` → `docs/spec/VerificationReport.v1.md`
+3. `docs/THREAT_MODEL.md`
+4. `packages/artifact-verify/src/safe-unzip.js` → `test/zip-security.test.js`

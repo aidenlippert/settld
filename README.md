@@ -1,15 +1,17 @@
 # Settld
 
-Settld is the closure layer for delegated autonomous work.
+Settld is the **settlement kernel for the autonomous economy** — the trust, verification, and financial finality layer that sits between any two agents (or any agent and any business) doing paid work.
 
-The core mental model in this repo:
+Agents can talk (A2A, MCP). Agents can pay (x402, wallets, Stripe). **Settld is the layer that proves the work, decides the payout, resolves the dispute, and tracks the reputation.**
 
-- **Jobs are state machines**: a job moves through explicit states (booked → executing → completed/aborted → settled).
-- **Everything else is events**: every transition and operational action emits an event that can be replayed.
-- **Trust is a black box**: telemetry/evidence are append-only, hash-chained, and (optionally) signed.
-- **Money is a ledger**: every settlement is double-entry and must always balance.
+The core mental model:
 
-This repository is a runnable Node.js prototype (API + agent simulator) and a set of product/architecture docs.
+- **Agreements are state machines**: an agreement moves through explicit states (created → held → evidenced → settled → disputed → adjusted).
+- **Everything is events**: every transition emits a signed, hash-chained event that can be replayed and verified offline.
+- **Trust is cryptographic**: evidence bundles are append-only, hash-chained, and signed. Any counterparty can verify without trusting Settld.
+- **Money is a ledger**: every settlement is double-entry and must always balance to zero.
+
+This repository contains a runnable Node.js settlement kernel (API + services + verification toolchain) and a comprehensive set of product/architecture/protocol docs.
 
 ## Bundle verification (CI / audit evidence)
 
@@ -21,6 +23,7 @@ This repository is a runnable Node.js prototype (API + agent simulator) and a se
 - Producer bootstrap: `docs/QUICKSTART_PRODUCE.md` (trust → produce → strict verify)
 - SDK quickstart (first verified run): `docs/QUICKSTART_SDK.md`
 - SDK quickstart (Python): `docs/QUICKSTART_SDK_PYTHON.md`
+- x402 gateway quickstart (receipt from 402 flows): `docs/QUICKSTART_X402_GATEWAY.md`
 - Integrations (GitHub Actions templates): `docs/integrations/README.md`
 - Protocol contract (schemas/specs): `docs/spec/README.md`
 - Conformance pack (portable oracle): `conformance/v1/README.md`
