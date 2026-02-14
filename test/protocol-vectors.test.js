@@ -20,6 +20,7 @@ import { buildMarketplaceOffer, buildMarketplaceAcceptance } from "../src/core/m
 import { buildToolManifestV1 } from "../src/core/tool-manifest.js";
 import { buildReputationEventV1 } from "../src/core/reputation-event.js";
 import { buildDisputeOpenEnvelopeV1 } from "../src/core/dispute-open-envelope.js";
+import { buildAgreementDelegationV1 } from "../src/core/agreement-delegation.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -661,6 +662,22 @@ async function buildVectorsV1() {
   });
   const disputeOpenEnvelopeCanonical = canonicalJsonStringify(disputeOpenEnvelope);
 
+  const agreementDelegation = buildAgreementDelegationV1({
+    delegationId: "dlg_det_00000001",
+    tenantId,
+    parentAgreementHash: sha256Hex("agreement_delegation_parent"),
+    childAgreementHash: sha256Hex("agreement_delegation_child"),
+    delegatorAgentId: "agt_delegator_det",
+    delegateeAgentId: "agt_delegatee_det",
+    budgetCapCents: 2500,
+    currency: "USD",
+    delegationDepth: 1,
+    maxDelegationDepth: 3,
+    ancestorChain: [sha256Hex("agreement_delegation_parent")],
+    createdAt
+  });
+  const agreementDelegationCanonical = canonicalJsonStringify(agreementDelegation);
+
   return {
     schemaVersion: "ProtocolVectors.v1",
     generatedAt,
@@ -814,6 +831,16 @@ async function buildVectorsV1() {
       caseId: disputeOpenEnvelope.caseId,
       canonicalJson: disputeOpenEnvelopeCanonical,
       sha256: sha256Hex(disputeOpenEnvelopeCanonical)
+    },
+    agreementDelegation: {
+      schemaVersion: agreementDelegation.schemaVersion,
+      delegationId: agreementDelegation.delegationId,
+      parentAgreementHash: agreementDelegation.parentAgreementHash,
+      childAgreementHash: agreementDelegation.childAgreementHash,
+      delegationDepth: agreementDelegation.delegationDepth,
+      maxDelegationDepth: agreementDelegation.maxDelegationDepth,
+      canonicalJson: agreementDelegationCanonical,
+      sha256: sha256Hex(agreementDelegationCanonical)
     }
   };
 }

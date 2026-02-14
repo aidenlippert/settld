@@ -411,6 +411,34 @@ export function applyTxRecord(store, record) {
       continue;
     }
 
+    if (kind === "AGREEMENT_DELEGATION_UPSERT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const delegation = op.delegation ?? null;
+      if (!delegation || typeof delegation !== "object" || Array.isArray(delegation)) {
+        throw new TypeError("AGREEMENT_DELEGATION_UPSERT requires delegation");
+      }
+      const delegationId = delegation.delegationId ?? op.delegationId ?? null;
+      if (!delegationId) throw new TypeError("AGREEMENT_DELEGATION_UPSERT requires delegation.delegationId");
+      if (!(store.agreementDelegations instanceof Map)) store.agreementDelegations = new Map();
+      const key = makeScopedKey({ tenantId, id: String(delegationId) });
+      store.agreementDelegations.set(key, { ...delegation, tenantId, delegationId: String(delegationId) });
+      continue;
+    }
+
+    if (kind === "X402_GATE_UPSERT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const gate = op.gate ?? null;
+      if (!gate || typeof gate !== "object" || Array.isArray(gate)) {
+        throw new TypeError("X402_GATE_UPSERT requires gate");
+      }
+      const gateId = gate.gateId ?? gate.id ?? op.gateId ?? null;
+      if (!gateId) throw new TypeError("X402_GATE_UPSERT requires gate.gateId");
+      if (!(store.x402Gates instanceof Map)) store.x402Gates = new Map();
+      const key = makeScopedKey({ tenantId, id: String(gateId) });
+      store.x402Gates.set(key, { ...gate, tenantId, gateId: String(gateId) });
+      continue;
+    }
+
     if (kind === "TOOL_CALL_HOLD_UPSERT") {
       const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
       const hold = op.hold ?? null;

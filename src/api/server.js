@@ -60,6 +60,9 @@ async function runAutotickOnce() {
     if (typeof api.tickDeliveries === "function") {
       await api.tickDeliveries({ maxMessages: autotickMaxMessages });
     }
+    if (typeof api.tickX402Holdbacks === "function") {
+      await api.tickX402Holdbacks({ maxMessages: autotickMaxMessages });
+    }
     if (typeof api.tickBillingStripeSync === "function") {
       await api.tickBillingStripeSync({ maxRows: autotickMaxMessages });
     }

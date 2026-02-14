@@ -26,6 +26,7 @@
     "scripts/init",
     "src",
     "services/finance-sink",
+    "services/x402-gateway",
     "services/receiver"
   ],
   "bin": {
@@ -38,11 +39,13 @@
     "dev:receiver": "node services/receiver/src/server.js",
     "dev:finance-sink": "node services/finance-sink/src/server.js",
     "dev:magic-link": "node services/magic-link/src/server.js",
+    "dev:x402-gateway": "node services/x402-gateway/src/server.js",
     "start:prod": "NODE_ENV=production node src/api/server.js",
     "start:maintenance": "NODE_ENV=production node src/api/maintenance.js",
     "start:receiver": "NODE_ENV=production node services/receiver/src/server.js",
     "start:finance-sink": "NODE_ENV=production node services/finance-sink/src/server.js",
     "start:magic-link": "NODE_ENV=production node services/magic-link/src/server.js",
+    "start:x402-gateway": "NODE_ENV=production node services/x402-gateway/src/server.js",
     "agent:sim": "node src/agent/agent-sim.js",
     "chaos": "node scripts/chaos.js",
     "load:ingest": "k6 run scripts/load/ingest-burst.k6.js",

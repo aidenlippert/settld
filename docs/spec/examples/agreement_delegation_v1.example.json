@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "AgreementDelegation.v1",
+  "delegationId": "dlg_example_0001",
+  "tenantId": "tenant_example",
+  "parentAgreementHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "childAgreementHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "delegatorAgentId": "agt_delegator",
+  "delegateeAgentId": "agt_delegatee",
+  "budgetCapCents": 5000,
+  "currency": "USD",
+  "delegationDepth": 1,
+  "maxDelegationDepth": 3,
+  "ancestorChain": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "createdAt": "2026-02-01T00:00:00.000Z",
+  "delegationHash": "13354b2dedb94b67957d3fd6db4ca85db31fa53a1b278b525e4361e8b1db44c7",
+  "status": "active",
+  "revision": 0,
+  "updatedAt": "2026-02-01T00:00:00.000Z"
+}

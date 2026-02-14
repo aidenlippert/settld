@@ -147,6 +147,100 @@ async function main() {
 
   const headersBase = { "x-proxy-tenant-id": TENANT_ID, authorization: bearer, "x-settld-protocol": PROTOCOL };
 
+  // Primitive checks: A2A discovery, agreement delegation CRUD, x402 verification gate.
+  {
+    const agentCard = await httpJson({ baseUrl: API_BASE_URL, method: "GET", path: "/.well-known/agent.json" });
+    assert.equal(agentCard.status, 200, agentCard.text);
+    assert.equal(typeof agentCard.json?.name, "string");
+    assert.equal(typeof agentCard.json?.url, "string");
+    assert.ok(Array.isArray(agentCard.json?.skills), "agent card skills must be an array");
+
+    const parentAgreementHash = "a".repeat(64);
+    const childAgreementHash = "b".repeat(64);
+
+    const createDelegation = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "POST",
+      path: `/agreements/${parentAgreementHash}/delegations`,
+      headers: { ...headersBase, "x-idempotency-key": `dlg_create_${Date.now()}` },
+      body: {
+        childAgreementHash,
+        delegatorAgentId: "agt_acceptance_delegator",
+        delegateeAgentId: "agt_acceptance_delegatee",
+        budgetCapCents: 1234,
+        currency: "USD",
+        ancestorChain: [parentAgreementHash],
+        delegationDepth: 1,
+        maxDelegationDepth: 3
+      }
+    });
+    assert.equal(createDelegation.status, 201, createDelegation.text);
+    const delegationId = String(createDelegation.json?.delegation?.delegationId ?? "");
+    assert.ok(delegationId, "delegationId missing from create response");
+
+    const listDelegations = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "GET",
+      path: `/agreements/${parentAgreementHash}/delegations`,
+      headers: headersBase
+    });
+    assert.equal(listDelegations.status, 200, listDelegations.text);
+    assert.ok(Array.isArray(listDelegations.json?.delegations), "delegations list missing");
+    assert.ok(
+      listDelegations.json.delegations.some((d) => String(d?.delegationId ?? "") === delegationId),
+      "created delegation missing from list"
+    );
+
+    const getDelegation = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "GET",
+      path: `/delegations/${delegationId}`,
+      headers: headersBase
+    });
+    assert.equal(getDelegation.status, 200, getDelegation.text);
+    assert.equal(String(getDelegation.json?.delegation?.delegationId ?? ""), delegationId);
+    assert.equal(String(getDelegation.json?.delegation?.parentAgreementHash ?? ""), parentAgreementHash);
+    assert.equal(String(getDelegation.json?.delegation?.childAgreementHash ?? ""), childAgreementHash);
+
+    const gateCreate = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "POST",
+      path: "/x402/gate/create",
+      headers: { ...headersBase, "x-idempotency-key": `x402_create_${Date.now()}` },
+      body: {
+        payerAgentId: "agt_acceptance_x402_payer",
+        payeeAgentId: "agt_acceptance_x402_payee",
+        amountCents: 500,
+        currency: "USD",
+        autoFundPayerCents: 5000,
+        disputeWindowDays: 7
+      }
+    });
+    assert.equal(gateCreate.status, 201, gateCreate.text);
+    const gateId = String(gateCreate.json?.gate?.gateId ?? "");
+    assert.ok(gateId, "gateId missing from x402 create response");
+
+    const gateVerify = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "POST",
+      path: "/x402/gate/verify",
+      headers: { ...headersBase, "x-idempotency-key": `x402_verify_${Date.now()}` },
+      body: { gateId, verificationStatus: "green", runStatus: "completed", evidenceRefs: ["acceptance:evidence#1"] }
+    });
+    assert.equal(gateVerify.status, 200, gateVerify.text);
+    assert.equal(String(gateVerify.json?.gate?.status ?? ""), "resolved");
+    assert.notEqual(String(gateVerify.json?.settlement?.status ?? "").toLowerCase(), "locked");
+
+    const gateGet = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "GET",
+      path: `/x402/gate/${gateId}`,
+      headers: headersBase
+    });
+    assert.equal(gateGet.status, 200, gateGet.text);
+    assert.equal(String(gateGet.json?.gate?.gateId ?? ""), gateId);
+  }
+
   // Robot setup
   const { publicKeyPem: robotPublicKeyPem, privateKeyPem: robotPrivateKeyPem } = createEd25519Keypair();
   const robotKeyId = keyIdFromPublicKeyPem(robotPublicKeyPem);
