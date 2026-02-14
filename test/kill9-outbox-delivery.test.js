@@ -421,124 +421,143 @@ async function createSettledJob({ baseUrl, robotId, robotKeyId, robotPrivateKeyP
 (databaseUrl ? test : test.skip)("kill9: webhook delivery resend is safe under crash after send", async () => {
   const schema = makeSchema();
 
-  const receiver = await createWebhookReceiver();
-  const destinations = {
-    tenant_default: [
-      {
-        destinationId: "d1",
-        url: receiver.url,
-        secret: "sek",
-        artifactTypes: ["WorkCertificate.v1"]
+  let receiver = null;
+  let pool = null;
+  let server1 = null;
+  let server2 = null;
+  let server3 = null;
+
+  try {
+    receiver = await createWebhookReceiver();
+    const destinations = {
+      tenant_default: [
+        {
+          destinationId: "d1",
+          url: receiver.url,
+          secret: "sek",
+          artifactTypes: ["WorkCertificate.v1"]
+        }
+      ]
+    };
+
+    const { publicKeyPem: robotPublicKeyPem, privateKeyPem: robotPrivateKeyPem } = createEd25519Keypair();
+    const robotKeyId = keyIdFromPublicKeyPem(robotPublicKeyPem);
+    const robotId = `rob_${schema}`;
+
+    pool = await createPgPool({ databaseUrl, schema });
+    let jobId = null;
+
+    const port1 = await getFreePort();
+    server1 = startApiServer({
+      databaseUrl,
+      schema,
+      port: port1,
+      env: {
+        NODE_ENV: "test"
       }
-    ]
-  };
-
-  const { publicKeyPem: robotPublicKeyPem, privateKeyPem: robotPrivateKeyPem } = createEd25519Keypair();
-  const robotKeyId = keyIdFromPublicKeyPem(robotPublicKeyPem);
-  const robotId = `rob_${schema}`;
-
-  const pool = await createPgPool({ databaseUrl, schema });
-  let jobId = null;
-
-  const port1 = await getFreePort();
-  const server1 = startApiServer({
-    databaseUrl,
-    schema,
-    port: port1,
-    env: {
-      NODE_ENV: "test"
-    }
-  });
-  try {
-    await waitForHealth({ baseUrl: server1.baseUrl, timeoutMs: 10_000 });
-
-    await registerRobot({
-      baseUrl: server1.baseUrl,
-      robotId,
-      publicKeyPem: robotPublicKeyPem,
-      availability: [{ startAt: "2026-01-01T00:00:00.000Z", endAt: "2026-03-01T00:00:00.000Z" }]
     });
+    try {
+      await waitForHealth({ baseUrl: server1.baseUrl, timeoutMs: 10_000 });
 
-    ({ jobId } = await createSettledJob({
-      baseUrl: server1.baseUrl,
-      robotId,
-      robotKeyId,
-      robotPrivateKeyPem
-    }));
-  } finally {
-    await server1.stop();
-  }
+      await registerRobot({
+        baseUrl: server1.baseUrl,
+        robotId,
+        publicKeyPem: robotPublicKeyPem,
+        availability: [{ startAt: "2026-01-01T00:00:00.000Z", endAt: "2026-03-01T00:00:00.000Z" }]
+      });
 
-  const port2 = await getFreePort();
-  const server2 = startApiServer({
-    databaseUrl,
-    schema,
-    port: port2,
-    env: {
-      NODE_ENV: "test",
-      PROXY_ENABLE_FAILPOINTS: "1",
-      PROXY_FAILPOINTS: "delivery.webhook.after_post_before_mark",
-      PROXY_AUTOTICK: "1",
-      PROXY_AUTOTICK_INTERVAL_MS: "25",
-      PROXY_RECLAIM_AFTER_SECONDS: "1",
-      PROXY_EXPORT_DESTINATIONS: JSON.stringify(destinations)
+      ({ jobId } = await createSettledJob({
+        baseUrl: server1.baseUrl,
+        robotId,
+        robotKeyId,
+        robotPrivateKeyPem
+      }));
+    } finally {
+      await server1.stop();
+      server1 = null;
     }
-  });
 
-  try {
-    await waitForHealth({ baseUrl: server2.baseUrl, timeoutMs: 10_000 });
-    const exit = await server2.waitForExit({ timeoutMs: 10_000 });
-    assert.equal(exit.signal, "SIGKILL");
-  } finally {
-    await server2.stop().catch(() => {});
-  }
-
-  const port3 = await getFreePort();
-  const server3 = startApiServer({
-    databaseUrl,
-    schema,
-    port: port3,
-    env: {
-      NODE_ENV: "test",
-      PROXY_AUTOTICK: "1",
-      PROXY_AUTOTICK_INTERVAL_MS: "25",
-      PROXY_RECLAIM_AFTER_SECONDS: "1",
-      PROXY_EXPORT_DESTINATIONS: JSON.stringify(destinations)
-    }
-  });
-
-  try {
-    await waitForHealth({ baseUrl: server3.baseUrl, timeoutMs: 10_000 });
-
-    const dedupeKey = await waitUntil(() => {
-      for (const [k, calls] of receiver.bodiesByDedupeKey.entries()) {
-        if (k && Array.isArray(calls) && calls.length >= 2) return k;
+    const port2 = await getFreePort();
+    server2 = startApiServer({
+      databaseUrl,
+      schema,
+      port: port2,
+      env: {
+        NODE_ENV: "test",
+        PROXY_ENABLE_FAILPOINTS: "1",
+        PROXY_FAILPOINTS: "delivery.webhook.after_post_before_mark",
+        PROXY_AUTOTICK: "1",
+        PROXY_AUTOTICK_INTERVAL_MS: "25",
+        PROXY_RECLAIM_AFTER_SECONDS: "1",
+        PROXY_EXPORT_DESTINATIONS: JSON.stringify(destinations)
       }
-      return null;
     });
 
-    const bodies = receiver.bodiesByDedupeKey.get(dedupeKey) ?? [];
-    assert.ok(bodies.length >= 2);
-    for (const b of bodies) assert.equal(b, bodies[0]);
+    try {
+      await waitForHealth({ baseUrl: server2.baseUrl, timeoutMs: 10_000 });
+      // CI can be slow to process outbox -> delivery -> failpoint, so keep this generous.
+      const exit = await server2.waitForExit({ timeoutMs: 30_000 });
+      assert.equal(exit.signal, "SIGKILL");
+    } finally {
+      await server2.stop().catch(() => {});
+      server2 = null;
+    }
 
-    await waitUntil(async () => {
-      const r = await pool.query("SELECT state FROM deliveries WHERE tenant_id = $1 AND dedupe_key = $2 LIMIT 1", ["tenant_default", dedupeKey]);
-      return r.rows.length && String(r.rows[0].state) === "delivered";
+    const port3 = await getFreePort();
+    server3 = startApiServer({
+      databaseUrl,
+      schema,
+      port: port3,
+      env: {
+        NODE_ENV: "test",
+        PROXY_AUTOTICK: "1",
+        PROXY_AUTOTICK_INTERVAL_MS: "25",
+        PROXY_RECLAIM_AFTER_SECONDS: "1",
+        PROXY_EXPORT_DESTINATIONS: JSON.stringify(destinations)
+      }
     });
 
-    const count = await pool.query("SELECT COUNT(*)::int AS c FROM deliveries WHERE tenant_id = $1 AND dedupe_key = $2", ["tenant_default", dedupeKey]);
-    assert.equal(Number(count.rows[0].c), 1);
+    try {
+      await waitForHealth({ baseUrl: server3.baseUrl, timeoutMs: 10_000 });
 
-    const deliveryRows = await pool.query("SELECT state, attempts FROM deliveries WHERE tenant_id = $1 AND dedupe_key = $2 LIMIT 1", [
-      "tenant_default",
-      dedupeKey
-    ]);
-    assert.equal(String(deliveryRows.rows[0].state), "delivered");
-    assert.ok(Number(deliveryRows.rows[0].attempts) >= 2);
+      const dedupeKey = await waitUntil(() => {
+        for (const [k, calls] of receiver.bodiesByDedupeKey.entries()) {
+          if (k && Array.isArray(calls) && calls.length >= 2) return k;
+        }
+        return null;
+      });
+
+      const bodies = receiver.bodiesByDedupeKey.get(dedupeKey) ?? [];
+      assert.ok(bodies.length >= 2);
+      for (const b of bodies) assert.equal(b, bodies[0]);
+
+      await waitUntil(async () => {
+        const r = await pool.query("SELECT state FROM deliveries WHERE tenant_id = $1 AND dedupe_key = $2 LIMIT 1", ["tenant_default", dedupeKey]);
+        return r.rows.length && String(r.rows[0].state) === "delivered";
+      });
+
+      const count = await pool.query("SELECT COUNT(*)::int AS c FROM deliveries WHERE tenant_id = $1 AND dedupe_key = $2", [
+        "tenant_default",
+        dedupeKey
+      ]);
+      assert.equal(Number(count.rows[0].c), 1);
+
+      const deliveryRows = await pool.query("SELECT state, attempts FROM deliveries WHERE tenant_id = $1 AND dedupe_key = $2 LIMIT 1", [
+        "tenant_default",
+        dedupeKey
+      ]);
+      assert.equal(String(deliveryRows.rows[0].state), "delivered");
+      assert.ok(Number(deliveryRows.rows[0].attempts) >= 2);
+    } finally {
+      await server3.stop();
+      server3 = null;
+    }
   } finally {
-    await server3.stop();
-    await receiver.close();
-    await pool.end();
-    await dropSchema({ databaseUrl, schema });
+    await server3?.stop?.().catch(() => {});
+    await server2?.stop?.().catch(() => {});
+    await server1?.stop?.().catch(() => {});
+    await receiver?.close?.().catch(() => {});
+    await pool?.end?.().catch(() => {});
+    await dropSchema({ databaseUrl, schema }).catch(() => {});
   }
 });

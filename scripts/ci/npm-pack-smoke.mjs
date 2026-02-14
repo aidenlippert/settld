@@ -5,8 +5,9 @@ import path from "node:path";
 
 function sh(cmd, args, { cwd, env } = {}) {
   const isWin = process.platform === "win32";
-  const resolvedCmd = isWin && cmd === "npm" ? "npm.cmd" : cmd;
-  const res = spawnSync(resolvedCmd, args, { cwd, env, encoding: "utf8" });
+  const resolvedCmd = cmd;
+  // On Windows runners, invoking npm via a shell is more reliable than trying to exec a .cmd shim directly.
+  const res = spawnSync(resolvedCmd, args, { cwd, env, encoding: "utf8", shell: isWin && cmd === "npm" });
   if (res.status !== 0) {
     const err = (res.stderr || res.stdout || res.error?.message || "").trim();
     throw new Error(`${resolvedCmd} ${args.join(" ")} failed (exit ${res.status})${err ? `: ${err}` : ""}`);

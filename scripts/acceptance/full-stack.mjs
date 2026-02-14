@@ -14,7 +14,8 @@ const API_BASE_URL = process.env.ACCEPTANCE_API_BASE_URL ?? "http://127.0.0.1:30
 const RECEIVER_BASE_URL = process.env.ACCEPTANCE_RECEIVER_BASE_URL ?? "http://127.0.0.1:4000";
 
 const TENANT_ID = process.env.ACCEPTANCE_TENANT_ID ?? "tenant_default";
-const OPS_TOKEN = process.env.ACCEPTANCE_OPS_TOKEN ?? "dev";
+// docker-compose.yml configures tok_ops by default via PROXY_OPS_TOKENS.
+const OPS_TOKEN = process.env.ACCEPTANCE_OPS_TOKEN ?? "tok_ops";
 const PROTOCOL = process.env.ACCEPTANCE_PROTOCOL ?? "1.0";
 
 const MINIO_ENDPOINT = process.env.ACCEPTANCE_MINIO_ENDPOINT ?? "http://127.0.0.1:9000";
