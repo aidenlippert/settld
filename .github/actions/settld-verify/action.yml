@@ -50,7 +50,9 @@ runs:
         rm -rf "$OUT"
         mkdir -p "$OUT"
 
-        PKG_DIR="${{ github.action_path }}/../../packages/artifact-verify"
+        # github.action_path resolves to .../.github/actions/settld-verify
+        # We need to reach repo-root /packages/artifact-verify.
+        PKG_DIR="${{ github.action_path }}/../../../packages/artifact-verify"
         if [[ ! -f "${PKG_DIR}/package.json" ]]; then
           echo "expected package.json at ${PKG_DIR}/package.json" >&2
           exit 2
@@ -144,4 +146,3 @@ runs:
           echo "settld-verify failed (exit $CODE). See $OUT_JSON." >&2
           exit "$CODE"
         fi
-
