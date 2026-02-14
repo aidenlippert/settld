@@ -81,7 +81,7 @@ runs:
             echo "trust_file not found: $TRUST_FILE" >&2
             exit 2
           fi
-          node -e '
+          TRUST_FILE="$TRUST_FILE" node -e '
             import fs from "node:fs";
             const p = process.env.TRUST_FILE;
             const t = JSON.parse(fs.readFileSync(p, "utf8"));
