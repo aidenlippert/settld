@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 function sh(cmd, args, { cwd, env } = {}) {
-  const res = spawnSync(cmd, args, { cwd, env, encoding: "utf8" });
+  const isWin = process.platform === "win32";
+  const resolvedCmd = isWin && cmd === "npm" ? "npm.cmd" : cmd;
+  const res = spawnSync(resolvedCmd, args, { cwd, env, encoding: "utf8" });
   if (res.status !== 0) {
-    const err = (res.stderr || res.stdout || "").trim();
-    throw new Error(`${cmd} ${args.join(" ")} failed (exit ${res.status})${err ? `: ${err}` : ""}`);
+    const err = (res.stderr || res.stdout || res.error?.message || "").trim();
+    throw new Error(`${resolvedCmd} ${args.join(" ")} failed (exit ${res.status})${err ? `: ${err}` : ""}`);
   }
   return res.stdout;
 }
