@@ -15,9 +15,14 @@ function sh(cmd, args, { cwd, env } = {}) {
   return res.stdout;
 }
 
-function npmExec({ cwd, env, args }) {
-  // Use npm exec so this works on Windows without needing to execute a .cmd shim directly.
-  return sh("npm", ["exec", "--silent", "--", ...args], { cwd, env });
+function nodeCli({ cliJs, cwd, env, args }) {
+  if (typeof cliJs !== "string" || cliJs.trim() === "") throw new TypeError("cliJs is required");
+  const res = spawnSync(process.execPath, [cliJs, ...args], { cwd, env, encoding: "utf8" });
+  if (res.status !== 0) {
+    const err = (res.stderr || res.stdout || res.error?.message || "").trim();
+    throw new Error(`node ${cliJs} ${args.join(" ")} failed (exit ${res.status})${err ? `: ${err}` : ""}`);
+  }
+  return res.stdout;
 }
 
 async function main() {
@@ -52,25 +57,30 @@ async function main() {
     sh("npm", ["init", "-y"], { cwd: installDir, env: npmEnv });
     sh("npm", ["install", "--silent", verifyTarball, produceTarball], { cwd: installDir, env: npmEnv });
 
-    const ver = npmExec({ cwd: installDir, env: npmEnv, args: ["settld-verify", "--version"] }).trim();
+    const verifyCliJs = path.join(installDir, "node_modules", "settld-artifact-verify", "bin", "settld-verify.js");
+    const produceCliJs = path.join(installDir, "node_modules", "settld-artifact-produce", "bin", "settld-produce.js");
+    const trustCliJs = path.join(installDir, "node_modules", "settld-artifact-produce", "bin", "settld-trust.js");
+
+    const ver = nodeCli({ cliJs: verifyCliJs, cwd: installDir, env: npmEnv, args: ["--version"] }).trim();
     if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-.]+)?$/.test(ver)) {
       throw new Error(`unexpected --version output: ${JSON.stringify(ver)}`);
     }
-    const prodVer = npmExec({ cwd: installDir, env: npmEnv, args: ["settld-produce", "--version"] }).trim();
+    const prodVer = nodeCli({ cliJs: produceCliJs, cwd: installDir, env: npmEnv, args: ["--version"] }).trim();
     if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-.]+)?$/.test(prodVer)) {
       throw new Error(`unexpected settld-produce --version output: ${JSON.stringify(prodVer)}`);
     }
-    const trustVer = npmExec({ cwd: installDir, env: npmEnv, args: ["settld-trust", "--version"] }).trim();
+    const trustVer = nodeCli({ cliJs: trustCliJs, cwd: installDir, env: npmEnv, args: ["--version"] }).trim();
     if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-.]+)?$/.test(trustVer)) {
       throw new Error(`unexpected settld-trust --version output: ${JSON.stringify(trustVer)}`);
     }
 
     // Producer bootstrap: init trust + produce bundles + strict verify them using the installed packages.
     const trustOutDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-trust-init-"));
-    const trustInitRaw = npmExec({
+    const trustInitRaw = nodeCli({
+      cliJs: trustCliJs,
       cwd: installDir,
       env: npmEnv,
-      args: ["settld-trust", "init", "--format", "json", "--out", trustOutDir, "--force"]
+      args: ["init", "--format", "json", "--out", trustOutDir, "--force"]
     });
     const trustInit = JSON.parse(trustInitRaw);
     if (trustInit?.schemaVersion !== "TrustInitOutput.v1") throw new Error("settld-trust init returned unexpected JSON");
@@ -86,19 +96,21 @@ async function main() {
     const monthBundle = path.join(tmpOut, "monthproof");
     const financeBundle = path.join(tmpOut, "financepack");
 
-    const prodJob = npmExec({
+    const prodJob = nodeCli({
+      cliJs: produceCliJs,
       cwd: installDir,
       env: npmEnv,
-      args: ["settld-produce", "jobproof", "--format", "json", "--deterministic", "--force", "--out", jobBundle, "--keys", trustInit.keypairsPath]
+      args: ["jobproof", "--format", "json", "--deterministic", "--force", "--out", jobBundle, "--keys", trustInit.keypairsPath]
     });
     const prodJobJson = JSON.parse(prodJob);
     if (prodJobJson?.schemaVersion !== "ProduceCliOutput.v1") throw new Error("settld-produce jobproof did not return ProduceCliOutput.v1");
     if (prodJobJson?.ok !== true) throw new Error(`settld-produce jobproof failed: ${JSON.stringify(prodJobJson)}`);
 
-    const verifyJob = npmExec({
+    const verifyJob = nodeCli({
+      cliJs: verifyCliJs,
       cwd: installDir,
       env: producedEnv,
-      args: ["settld-verify", "--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", jobBundle]
+      args: ["--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", jobBundle]
     });
     const verifyJobJson = JSON.parse(verifyJob);
     if (verifyJobJson?.ok !== true) throw new Error("installed settld-verify failed produced jobproof bundle verification");
@@ -115,11 +127,11 @@ async function main() {
     const signerArgsJson = JSON.stringify([signerDevJs, "--stdio", "--keys", trustInit.keypairsPath]);
 
     const remoteTrustDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-trust-remote-"));
-    const remoteTrustRaw = npmExec({
+    const remoteTrustRaw = nodeCli({
+      cliJs: trustCliJs,
       cwd: installDir,
       env: npmEnv,
       args: [
-        "settld-trust",
         "init",
         "--mode",
         "remote-only",
@@ -145,11 +157,11 @@ async function main() {
     };
 
     const jobBundleRemote = path.join(tmpOut, "jobproof-remote");
-    const prodJobRemote = npmExec({
+    const prodJobRemote = nodeCli({
+      cliJs: produceCliJs,
       cwd: installDir,
       env: npmEnv,
       args: [
-        "settld-produce",
         "jobproof",
         "--format",
         "json",
@@ -172,10 +184,11 @@ async function main() {
     const prodJobRemoteJson = JSON.parse(prodJobRemote);
     if (prodJobRemoteJson?.ok !== true) throw new Error("settld-produce jobproof remote signer failed");
 
-    const verifyJobRemote = npmExec({
+    const verifyJobRemote = nodeCli({
+      cliJs: verifyCliJs,
       cwd: installDir,
       env: remoteEnv,
-      args: ["settld-verify", "--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", jobBundleRemote]
+      args: ["--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", jobBundleRemote]
     });
     const verifyJobRemoteJson = JSON.parse(verifyJobRemote);
     if (verifyJobRemoteJson?.ok !== true) throw new Error("installed settld-verify failed remote-signed jobproof verification");
@@ -221,11 +234,11 @@ async function main() {
     );
 
     const jobBundlePlugin = path.join(tmpOut, "jobproof-plugin");
-    const prodJobPlugin = npmExec({
+    const prodJobPlugin = nodeCli({
+      cliJs: produceCliJs,
       cwd: installDir,
       env: npmEnv,
       args: [
-        "settld-produce",
         "jobproof",
         "--format",
         "json",
@@ -248,19 +261,20 @@ async function main() {
     const prodJobPluginJson = JSON.parse(prodJobPlugin);
     if (prodJobPluginJson?.ok !== true) throw new Error("settld-produce jobproof plugin signer failed");
 
-    const verifyJobPlugin = npmExec({
+    const verifyJobPlugin = nodeCli({
+      cliJs: verifyCliJs,
       cwd: installDir,
       env: producedEnv,
-      args: ["settld-verify", "--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", jobBundlePlugin]
+      args: ["--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", jobBundlePlugin]
     });
     const verifyJobPluginJson = JSON.parse(verifyJobPlugin);
     if (verifyJobPluginJson?.ok !== true) throw new Error("installed settld-verify failed plugin-signed jobproof verification");
 
-    const prodMonth = npmExec({
+    const prodMonth = nodeCli({
+      cliJs: produceCliJs,
       cwd: installDir,
       env: npmEnv,
       args: [
-        "settld-produce",
         "monthproof",
         "--format",
         "json",
@@ -281,19 +295,20 @@ async function main() {
     const prodMonthJson = JSON.parse(prodMonth);
     if (prodMonthJson?.ok !== true) throw new Error("settld-produce monthproof failed");
 
-    const verifyMonth = npmExec({
+    const verifyMonth = nodeCli({
+      cliJs: verifyCliJs,
       cwd: installDir,
       env: producedEnv,
-      args: ["settld-verify", "--format", "json", "--strict", "--hash-concurrency", "4", "--month-proof", monthBundle]
+      args: ["--format", "json", "--strict", "--hash-concurrency", "4", "--month-proof", monthBundle]
     });
     const verifyMonthJson = JSON.parse(verifyMonth);
     if (verifyMonthJson?.ok !== true) throw new Error("installed settld-verify failed produced monthproof bundle verification");
 
-    const prodFin = npmExec({
+    const prodFin = nodeCli({
+      cliJs: produceCliJs,
       cwd: installDir,
       env: npmEnv,
       args: [
-        "settld-produce",
         "financepack",
         "--format",
         "json",
@@ -316,10 +331,11 @@ async function main() {
     const prodFinJson = JSON.parse(prodFin);
     if (prodFinJson?.ok !== true) throw new Error("settld-produce financepack failed");
 
-    const verifyFin = npmExec({
+    const verifyFin = nodeCli({
+      cliJs: verifyCliJs,
       cwd: installDir,
       env: producedEnv,
-      args: ["settld-verify", "--format", "json", "--strict", "--hash-concurrency", "4", "--finance-pack", financeBundle]
+      args: ["--format", "json", "--strict", "--hash-concurrency", "4", "--finance-pack", financeBundle]
     });
     const verifyFinJson = JSON.parse(verifyFin);
     if (verifyFinJson?.ok !== true) throw new Error("installed settld-verify failed produced financepack bundle verification");
@@ -335,10 +351,11 @@ async function main() {
     };
 
     const fixtureDir = path.resolve(repoRoot, "test", "fixtures", "bundles", "v1", "jobproof", "strict-pass");
-    const verifyOut = npmExec({
+    const verifyOut = nodeCli({
+      cliJs: verifyCliJs,
       cwd: installDir,
       env: fixtureEnv,
-      args: ["settld-verify", "--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", fixtureDir]
+      args: ["--format", "json", "--strict", "--hash-concurrency", "4", "--job-proof", fixtureDir]
     });
     const parsed = JSON.parse(verifyOut);
     if (!parsed || typeof parsed !== "object") throw new Error("verify output was not JSON object");
