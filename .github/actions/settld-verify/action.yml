@@ -82,7 +82,10 @@ runs:
             exit 2
           fi
           # NOTE: $GITHUB_ENV is applied after the step completes; we need these env vars now.
-          read -r GOV_JSON TIME_JSON < <(
+          {
+            IFS= read -r GOV_JSON
+            IFS= read -r TIME_JSON || true
+          } < <(
             TRUST_FILE="$TRUST_FILE" node -e '
               import fs from "node:fs";
               const p = process.env.TRUST_FILE;
