@@ -264,6 +264,12 @@ async function handleProxy(req, res) {
       outHeaders["x-settld-settlement-status"] = String(gateVerify?.settlement?.status ?? "");
       outHeaders["x-settld-released-amount-cents"] = String(gateVerify?.settlement?.releasedAmountCents ?? "");
       outHeaders["x-settld-refunded-amount-cents"] = String(gateVerify?.settlement?.refundedAmountCents ?? "");
+      if (gateVerify?.gate?.decision?.verificationStatus) {
+        outHeaders["x-settld-verification-status"] = String(gateVerify.gate.decision.verificationStatus);
+      }
+      if (Array.isArray(gateVerify?.gate?.decision?.reasonCodes) && gateVerify.gate.decision.reasonCodes.length > 0) {
+        outHeaders["x-settld-verification-codes"] = gateVerify.gate.decision.reasonCodes.join(",");
+      }
       if (gateVerify?.gate?.holdback?.status) outHeaders["x-settld-holdback-status"] = String(gateVerify.gate.holdback.status);
       if (gateVerify?.gate?.holdback?.amountCents !== undefined) outHeaders["x-settld-holdback-amount-cents"] = String(gateVerify.gate.holdback.amountCents);
 
@@ -372,9 +378,16 @@ async function handleProxy(req, res) {
 
     const outHeaders = Object.fromEntries(upstreamRes.headers.entries());
     outHeaders["x-settld-gate-id"] = gateId;
+    outHeaders["x-settld-response-sha256"] = respHash;
     outHeaders["x-settld-settlement-status"] = String(gateVerify?.settlement?.status ?? "");
     outHeaders["x-settld-released-amount-cents"] = String(gateVerify?.settlement?.releasedAmountCents ?? "");
     outHeaders["x-settld-refunded-amount-cents"] = String(gateVerify?.settlement?.refundedAmountCents ?? "");
+    if (gateVerify?.gate?.decision?.verificationStatus) {
+      outHeaders["x-settld-verification-status"] = String(gateVerify.gate.decision.verificationStatus);
+    }
+    if (Array.isArray(gateVerify?.gate?.decision?.reasonCodes) && gateVerify.gate.decision.reasonCodes.length > 0) {
+      outHeaders["x-settld-verification-codes"] = gateVerify.gate.decision.reasonCodes.join(",");
+    }
     if (gateVerify?.gate?.holdback?.status) outHeaders["x-settld-holdback-status"] = String(gateVerify.gate.holdback.status);
     if (gateVerify?.gate?.holdback?.amountCents !== undefined) outHeaders["x-settld-holdback-amount-cents"] = String(gateVerify.gate.holdback.amountCents);
 
@@ -416,6 +429,12 @@ async function handleProxy(req, res) {
       outHeaders["x-settld-settlement-status"] = String(gateVerify?.settlement?.status ?? "");
       outHeaders["x-settld-released-amount-cents"] = String(gateVerify?.settlement?.releasedAmountCents ?? "");
       outHeaders["x-settld-refunded-amount-cents"] = String(gateVerify?.settlement?.refundedAmountCents ?? "");
+      if (gateVerify?.gate?.decision?.verificationStatus) {
+        outHeaders["x-settld-verification-status"] = String(gateVerify.gate.decision.verificationStatus);
+      }
+      if (Array.isArray(gateVerify?.gate?.decision?.reasonCodes) && gateVerify.gate.decision.reasonCodes.length > 0) {
+        outHeaders["x-settld-verification-codes"] = gateVerify.gate.decision.reasonCodes.join(",");
+      }
       if (gateVerify?.gate?.holdback?.status) outHeaders["x-settld-holdback-status"] = String(gateVerify.gate.holdback.status);
       if (gateVerify?.gate?.holdback?.amountCents !== undefined) outHeaders["x-settld-holdback-amount-cents"] = String(gateVerify.gate.holdback.amountCents);
     }

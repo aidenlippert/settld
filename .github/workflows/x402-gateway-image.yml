@@ -62,3 +62,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+
+      - name: Verify image is publicly pullable
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io || true
+          docker pull "${IMAGE_REPOSITORY}:latest"
