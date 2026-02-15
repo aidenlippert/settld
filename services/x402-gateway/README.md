@@ -12,9 +12,10 @@ Required:
 
 Optional:
 
-- `HOLDBACK_BPS` (default `1000`)
-- `DISPUTE_WINDOW_MS` (default `86400000`)
+- `HOLDBACK_BPS` (default `0`)
+- `DISPUTE_WINDOW_MS` (default `3600000`)
 - `X402_AUTOFUND` (default `false`) (local demo only; do not use in production)
+- `X402_PROVIDER_PUBLIC_KEY_PEM` (optional; if set, the gateway requires a provider signature on responses and will not release funds without it)
 - `PORT` (default `8402`)
 
 Notes:

@@ -184,11 +184,13 @@ async function runSmokeTest({ gatewayUrl, holdbackBps, disputeWindowMs }) {
   if (!Number.isSafeInteger(refundedAmountCents) || refundedAmountCents !== expectedRefundedCents) {
     throw new Error(`refunded cents mismatch: got=${refundedAmountCents} expected=${expectedRefundedCents}`);
   }
-  if (holdbackStatus !== expectedHoldbackStatus) {
-    throw new Error(`holdback status mismatch: got=${holdbackStatus} expected=${expectedHoldbackStatus}`);
-  }
-  if (!Number.isSafeInteger(holdbackAmountCents) || holdbackAmountCents !== expectedHoldbackCents) {
-    throw new Error(`holdback cents mismatch: got=${holdbackAmountCents} expected=${expectedHoldbackCents}`);
+  if (expectedHoldbackCents > 0) {
+    if (holdbackStatus !== expectedHoldbackStatus) {
+      throw new Error(`holdback status mismatch: got=${holdbackStatus} expected=${expectedHoldbackStatus}`);
+    }
+    if (!Number.isSafeInteger(holdbackAmountCents) || holdbackAmountCents !== expectedHoldbackCents) {
+      throw new Error(`holdback cents mismatch: got=${holdbackAmountCents} expected=${expectedHoldbackCents}`);
+    }
   }
 
   return { gateId, amountCents };
@@ -202,9 +204,9 @@ async function main() {
   const opsToken = String(process.env.SETTLD_QUICKSTART_OPS_TOKEN ?? "tok_ops").trim() || "tok_ops";
   const tenantId = String(process.env.SETTLD_TENANT_ID ?? "tenant_default").trim() || "tenant_default";
 
-  const holdbackBps = readNonNegativeIntEnv("HOLDBACK_BPS", 1000);
+  const holdbackBps = readNonNegativeIntEnv("HOLDBACK_BPS", 0);
   if (holdbackBps > 10_000) throw new Error("HOLDBACK_BPS must be within 0..10000");
-  const disputeWindowMs = readNonNegativeIntEnv("DISPUTE_WINDOW_MS", 86_400_000);
+  const disputeWindowMs = readNonNegativeIntEnv("DISPUTE_WINDOW_MS", 3_600_000);
   const autoFund = readBoolEnv("X402_AUTOFUND", true);
 
   const keepAlive = readBoolEnv("SETTLD_QUICKSTART_KEEP_ALIVE", true);
@@ -260,6 +262,14 @@ async function main() {
   procs.push(upstream);
   await waitForJson(new URL("/healthz", upstreamUrl).toString(), { name: "upstream /healthz", proc: upstream });
 
+  // Provider signature key (for correctness-verification demo).
+  const providerKeyRes = await fetch(new URL("/settld/provider-key", upstreamUrl));
+  const providerKey = providerKeyRes.ok ? await providerKeyRes.json() : null;
+  const providerPublicKeyPem = typeof providerKey?.publicKeyPem === "string" ? providerKey.publicKeyPem : null;
+  if (!providerPublicKeyPem) {
+    throw new Error("upstream did not expose a provider public key at /settld/provider-key");
+  }
+
   // 4) Gateway
   const gateway = spawnProc({
     name: "gateway",
@@ -273,6 +283,7 @@ async function main() {
       HOLDBACK_BPS: String(holdbackBps),
       DISPUTE_WINDOW_MS: String(disputeWindowMs),
       X402_AUTOFUND: autoFund ? "1" : "0",
+      X402_PROVIDER_PUBLIC_KEY_PEM: providerPublicKeyPem,
       PORT: String(gatewayPort)
     }
   });

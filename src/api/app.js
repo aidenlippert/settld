@@ -7,6 +7,7 @@ import { appendChainedEvent, createChainedEvent, verifyChainedEvents } from "../
 import { keyIdFromPublicKeyPem, sha256Hex, signHashHexEd25519, verifyHashHexEd25519 } from "../core/crypto.js";
 import { listKnownEventTypes, requiredSignerKindForEventType, SIGNER_KIND } from "../core/event-policy.js";
 import { canonicalJsonStringify, normalizeForCanonicalJson } from "../core/canonical-json.js";
+import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "../core/tool-provider-signature.js";
 import { reduceJob } from "../core/job-reducer.js";
 import { ledgerEntriesForJobEvent } from "../core/ledger-postings.js";
 import { makeIdempotencyEndpoint, makeIdempotencyStoreKey, normalizePrincipalId } from "../core/idempotency.js";
@@ -29000,8 +29001,67 @@ export function createApi({
             }
           }
 
-          const verificationStatus = body?.verificationStatus ?? "amber";
-          const runStatus = body?.runStatus ?? "completed";
+          const evidenceRefs = Array.isArray(body?.evidenceRefs) ? body.evidenceRefs.map((v) => String(v ?? "").trim()).filter(Boolean) : [];
+
+          let verificationStatus = body?.verificationStatus ?? "amber";
+          let runStatus = body?.runStatus ?? "completed";
+          const extraReasonCodes = new Set();
+          if (Array.isArray(body?.verificationCodes)) {
+            for (const c of body.verificationCodes) {
+              const code = typeof c === "string" ? c.trim() : "";
+              if (code) extraReasonCodes.add(code);
+            }
+          }
+
+          // Optional: enforce provider signature correctness when the caller declares this verification source.
+          const verificationSourceRaw =
+            body?.verificationMethod && typeof body.verificationMethod === "object" && !Array.isArray(body.verificationMethod)
+              ? body.verificationMethod.source
+              : null;
+          const verificationSource = typeof verificationSourceRaw === "string" ? verificationSourceRaw.trim() : null;
+          if (verificationSource === "provider_signature_v1") {
+            const ps = body?.providerSignature ?? null;
+            const publicKeyPem = typeof ps?.publicKeyPem === "string" && ps.publicKeyPem.trim() !== "" ? ps.publicKeyPem : null;
+            if (!ps || typeof ps !== "object" || Array.isArray(ps) || !publicKeyPem) {
+              extraReasonCodes.add("X402_PROVIDER_SIGNATURE_MISSING");
+              verificationStatus = "red";
+              runStatus = "failed";
+            } else {
+              // Ensure the signature binds to the response hash we claim.
+              const responseHash = typeof ps.responseHash === "string" ? ps.responseHash.trim().toLowerCase() : null;
+              const hasResponseRef = responseHash ? evidenceRefs.includes(`http:response_sha256:${responseHash}`) : false;
+              if (responseHash && !hasResponseRef) {
+                extraReasonCodes.add("X402_PROVIDER_RESPONSE_HASH_MISMATCH");
+                verificationStatus = "red";
+                runStatus = "failed";
+              } else {
+                const sig = { ...ps };
+                delete sig.publicKeyPem;
+                // Fill payloadHash if absent so verification doesn't depend on caller precomputing it.
+                if (typeof sig.payloadHash !== "string" || sig.payloadHash.trim() === "") {
+                  try {
+                    sig.payloadHash = computeToolProviderSignaturePayloadHashV1({
+                      responseHash: sig.responseHash,
+                      nonce: sig.nonce,
+                      signedAt: sig.signedAt
+                    });
+                  } catch {}
+                }
+                let ok = false;
+                try {
+                  ok = verifyToolProviderSignatureV1({ signature: sig, publicKeyPem });
+                } catch {
+                  ok = false;
+                }
+                if (!ok) {
+                  extraReasonCodes.add("X402_PROVIDER_SIGNATURE_INVALID");
+                  verificationStatus = "red";
+                  runStatus = "failed";
+                }
+              }
+            }
+          }
+
           let policyDecision;
           try {
             policyDecision = evaluateSettlementPolicy({
@@ -29070,20 +29130,31 @@ export function createApi({
 	            throw err;
 	          }
 
-	          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
-	          const immediateReleaseRatePct =
-	            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
-	          const decisionTrace = {
-	            schemaVersion: "X402GateDecisionTrace.v1",
-	            verificationStatus: String(policyDecision.verificationStatus ?? ""),
-	            runStatus: String(policyDecision.runStatus ?? ""),
-	            shouldAutoResolve: policyDecision.shouldAutoResolve === true,
-	            reasonCodes: Array.isArray(policyDecision.reasonCodes) ? policyDecision.reasonCodes : [],
-	            policyReleaseRatePct: policyDecision.releaseRatePct,
-	            policyReleasedAmountCents: releaseAmountCents,
-	            policyRefundedAmountCents: refundAmountCents,
-	            holdbackBps: normalizedHoldbackBps,
-	            holdbackAmountCents,
+		          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
+		          const immediateReleaseRatePct =
+		            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
+		          const reasonCodes = (() => {
+		            const out = [];
+		            const push = (v) => {
+		              const s = typeof v === "string" ? v.trim() : "";
+		              if (s) out.push(s);
+		            };
+		            if (Array.isArray(policyDecision.reasonCodes)) for (const c of policyDecision.reasonCodes) push(c);
+		            for (const c of extraReasonCodes) push(c);
+		            // Deterministic ordering for receipts/logs.
+		            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
+		          })();
+		          const decisionTrace = {
+		            schemaVersion: "X402GateDecisionTrace.v1",
+		            verificationStatus: String(policyDecision.verificationStatus ?? ""),
+		            runStatus: String(policyDecision.runStatus ?? ""),
+		            shouldAutoResolve: policyDecision.shouldAutoResolve === true,
+		            reasonCodes,
+		            policyReleaseRatePct: policyDecision.releaseRatePct,
+		            policyReleasedAmountCents: releaseAmountCents,
+		            policyRefundedAmountCents: refundAmountCents,
+		            holdbackBps: normalizedHoldbackBps,
+		            holdbackAmountCents,
 	            holdbackReleaseEligibleAt,
 	            immediateReleasedAmountCents: immediateReleaseAmountCents,
 	            immediateRefundedAmountCents: immediateRefundAmountCents,
@@ -29098,14 +29169,14 @@ export function createApi({
 	            releasedAmountCents: immediateReleaseAmountCents,
 	            refundedAmountCents: immediateRefundAmountCents,
 	            releaseRatePct: immediateReleaseRatePct,
-	            decisionStatus: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED : AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_REVIEW_REQUIRED,
-	            decisionMode: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC : AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
-	            decisionPolicyHash: policyHashUsed,
-	            decisionReason: policyDecision.reasonCodes?.[0] ?? null,
-	            decisionTrace,
-	            resolutionEventId: createId("x402res"),
-	            at
-	          });
+		            decisionStatus: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED : AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_REVIEW_REQUIRED,
+		            decisionMode: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC : AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+		            decisionPolicyHash: policyHashUsed,
+		            decisionReason: reasonCodes[0] ?? null,
+		            decisionTrace,
+		            resolutionEventId: createId("x402res"),
+		            at
+		          });
 
 	          let holdbackSettlement = null;
 	          let holdbackSettlementResolved = null;
@@ -29188,22 +29259,22 @@ export function createApi({
 	              ...gate,
 	              status: "resolved",
 	              resolvedAt: at,
-	              decision: {
-	                policyHashUsed,
-	                verificationStatus: policyDecision.verificationStatus,
-	                runStatus: policyDecision.runStatus,
-	                policyReleaseRatePct: policyDecision.releaseRatePct,
+		              decision: {
+		                policyHashUsed,
+		                verificationStatus: policyDecision.verificationStatus,
+		                runStatus: policyDecision.runStatus,
+		                policyReleaseRatePct: policyDecision.releaseRatePct,
 	                policyReleasedAmountCents: releaseAmountCents,
 	                policyRefundedAmountCents: refundAmountCents,
 	                holdbackBps: normalizedHoldbackBps,
 	                holdbackAmountCents,
 	                holdbackRunId,
 	                holdbackReleaseEligibleAt,
-	                releaseRatePct: immediateReleaseRatePct,
-	                releasedAmountCents: immediateReleaseAmountCents,
-	                refundedAmountCents: immediateRefundAmountCents,
-	                reasonCodes: policyDecision.reasonCodes ?? []
-	              },
+		                releaseRatePct: immediateReleaseRatePct,
+		                releasedAmountCents: immediateReleaseAmountCents,
+		                refundedAmountCents: immediateRefundAmountCents,
+		                reasonCodes
+		              },
 	              holdback:
 	                holdbackAmountCents > 0
 	                  ? {
@@ -29216,9 +29287,10 @@ export function createApi({
 	                      releasedAt: holdbackSettlementResolved ? at : null
 	                    }
 	                  : null,
-	              evidenceRefs: Array.isArray(body?.evidenceRefs) ? body.evidenceRefs.map((v) => String(v ?? "").trim()).filter(Boolean) : [],
-	              updatedAt: at
-	            },
+		              evidenceRefs,
+		              providerSignature: body?.providerSignature ?? null,
+		              updatedAt: at
+		            },
 	            { path: "$" }
 	          );
 

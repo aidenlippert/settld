@@ -96,6 +96,24 @@ In another terminal:
 curl -fsS http://127.0.0.1:9402/healthz
 ```
 
+## 3.5) Provider signature key (demo)
+
+This quickstart uses provider-signed responses as a minimal correctness check:
+
+- the upstream mock signs a response hash with Ed25519
+- the gateway verifies the signature before releasing funds
+
+Export the upstream mock's dev-only public key:
+
+```bash
+export X402_PROVIDER_PUBLIC_KEY_PEM="$(cat <<'EOF'
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA7zJ+oQLAO6F4Xewe7yJB1mv5TxsLo5bGZI7ZJPuFB6s=
+-----END PUBLIC KEY-----
+EOF
+)"
+```
+
 ## 4) Start the x402 gateway (thin proxy)
 
 ### Option A: run from source (fastest)
@@ -104,9 +122,10 @@ curl -fsS http://127.0.0.1:9402/healthz
 SETTLD_API_URL="http://127.0.0.1:3000" \
 SETTLD_API_KEY="$SETTLD_API_KEY" \
 UPSTREAM_URL="http://127.0.0.1:9402" \
-HOLDBACK_BPS=1000 \
-DISPUTE_WINDOW_MS=86400000 \
+HOLDBACK_BPS=0 \
+DISPUTE_WINDOW_MS=3600000 \
 X402_AUTOFUND=1 \
+X402_PROVIDER_PUBLIC_KEY_PEM="$X402_PROVIDER_PUBLIC_KEY_PEM" \
 PORT=8402 \
 npm run dev:x402-gateway
 ```
@@ -147,9 +166,10 @@ docker run --rm -p 8402:8402 \
   -e SETTLD_API_URL="http://host.docker.internal:3000" \
   -e SETTLD_API_KEY="$SETTLD_API_KEY" \
   -e UPSTREAM_URL="http://host.docker.internal:9402" \
-  -e HOLDBACK_BPS=1000 \
-  -e DISPUTE_WINDOW_MS=86400000 \
+  -e HOLDBACK_BPS=0 \
+  -e DISPUTE_WINDOW_MS=3600000 \
   -e X402_AUTOFUND=1 \
+  -e X402_PROVIDER_PUBLIC_KEY_PEM="$X402_PROVIDER_PUBLIC_KEY_PEM" \
   -e PORT=8402 \
   ghcr.io/aidenlippert/settld/x402-gateway:latest
 ```
@@ -162,9 +182,10 @@ docker run --rm -p 8402:8402 \
   -e SETTLD_API_URL="http://host.docker.internal:3000" \
   -e SETTLD_API_KEY="$SETTLD_API_KEY" \
   -e UPSTREAM_URL="http://host.docker.internal:9402" \
-  -e HOLDBACK_BPS=1000 \
-  -e DISPUTE_WINDOW_MS=86400000 \
+  -e HOLDBACK_BPS=0 \
+  -e DISPUTE_WINDOW_MS=3600000 \
   -e X402_AUTOFUND=1 \
+  -e X402_PROVIDER_PUBLIC_KEY_PEM="$X402_PROVIDER_PUBLIC_KEY_PEM" \
   -e PORT=8402 \
   ghcr.io/aidenlippert/settld/x402-gateway:latest
 ```
@@ -176,9 +197,10 @@ docker run --rm --network host \
   -e SETTLD_API_URL="http://127.0.0.1:3000" \
   -e SETTLD_API_KEY="$SETTLD_API_KEY" \
   -e UPSTREAM_URL="http://127.0.0.1:9402" \
-  -e HOLDBACK_BPS=1000 \
-  -e DISPUTE_WINDOW_MS=86400000 \
+  -e HOLDBACK_BPS=0 \
+  -e DISPUTE_WINDOW_MS=3600000 \
   -e X402_AUTOFUND=1 \
+  -e X402_PROVIDER_PUBLIC_KEY_PEM="$X402_PROVIDER_PUBLIC_KEY_PEM" \
   -e PORT=8402 \
   ghcr.io/aidenlippert/settld/x402-gateway:latest
 ```
@@ -193,13 +215,10 @@ curl -fsS http://127.0.0.1:8402/healthz
 
 ### 5.0 One-shot smoke test (copy/paste; fails fast)
 
-This asserts the expected HTTP status codes and (with the default upstream + gateway config in this doc) checks that the released/refunded/holdback cents are consistent.
+This asserts the expected HTTP status codes and (with the default upstream + gateway config in this doc) checks that the released/refunded cents are consistent.
 
 ```bash
 set -euo pipefail
-
-HOLDBACK_BPS=1000
-DISPUTE_WINDOW_MS=86400000
 
 h402="$(curl -sS -D - -o /dev/null http://127.0.0.1:8402/resource)"
 echo "$h402" | grep -qE '^HTTP/.* 402 '
@@ -216,26 +235,16 @@ echo "$h200" | grep -qE '^HTTP/.* 200 '
 settlement_status="$(echo "$h200" | awk 'tolower($1) == "x-settld-settlement-status:" {print $2}' | tr -d '\r' | head -n 1)"
 released_cents="$(echo "$h200" | awk 'tolower($1) == "x-settld-released-amount-cents:" {print $2}' | tr -d '\r' | head -n 1)"
 refunded_cents="$(echo "$h200" | awk 'tolower($1) == "x-settld-refunded-amount-cents:" {print $2}' | tr -d '\r' | head -n 1)"
-holdback_status="$(echo "$h200" | awk 'tolower($1) == "x-settld-holdback-status:" {print $2}' | tr -d '\r' | head -n 1)"
-holdback_cents="$(echo "$h200" | awk 'tolower($1) == "x-settld-holdback-amount-cents:" {print $2}' | tr -d '\r' | head -n 1)"
-
-expected_holdback_cents="$(( amount_cents * HOLDBACK_BPS / 10000 ))"
-expected_released_cents="$(( amount_cents - expected_holdback_cents ))"
-expected_refunded_cents="$expected_holdback_cents"
-expected_holdback_status="$([ "$DISPUTE_WINDOW_MS" -gt 0 ] && echo held || echo released)"
-
 test "$settlement_status" = "released"
-test "$released_cents" = "$expected_released_cents"
-test "$refunded_cents" = "$expected_refunded_cents"
-test "$holdback_status" = "$expected_holdback_status"
-test "$holdback_cents" = "$expected_holdback_cents"
+test "$released_cents" = "$amount_cents"
+test "$refunded_cents" = "0"
 
 echo "OK"
 ```
 
 Notes:
 
-- With `HOLDBACK_BPS>0`, `x-settld-refunded-amount-cents` includes the holdback amount (the holdback is represented as a follow-on settlement; the primary settlement is resolved as release+refund==amount).
+- If you set `HOLDBACK_BPS>0`, the gateway may emit `x-settld-holdback-*` headers (a follow-on settlement).
 
 ### 5.1 First request (expect 402 + x-settld-gate-id)
 

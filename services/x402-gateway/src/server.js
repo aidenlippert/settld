@@ -4,6 +4,9 @@ import { URL } from "node:url";
 import { Readable } from "node:stream";
 
 import { parseX402PaymentRequired } from "../../../src/core/x402-gate.js";
+import { canonicalJsonStringify } from "../../../src/core/canonical-json.js";
+import { keyIdFromPublicKeyPem } from "../../../src/core/crypto.js";
+import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "../../../src/core/tool-provider-signature.js";
 
 function readRequiredEnv(name) {
   const raw = process.env[name];
@@ -87,10 +90,12 @@ const SETTLD_API_URL = new URL(readRequiredEnv("SETTLD_API_URL"));
 const SETTLD_API_KEY = readRequiredEnv("SETTLD_API_KEY");
 const UPSTREAM_URL = new URL(readRequiredEnv("UPSTREAM_URL"));
 const PORT = readOptionalIntEnv("PORT", 8402);
-const HOLDBACK_BPS = readOptionalIntEnv("HOLDBACK_BPS", 1000);
-const DISPUTE_WINDOW_MS = readOptionalIntEnv("DISPUTE_WINDOW_MS", 86_400_000);
+const HOLDBACK_BPS = readOptionalIntEnv("HOLDBACK_BPS", 0);
+const DISPUTE_WINDOW_MS = readOptionalIntEnv("DISPUTE_WINDOW_MS", 3_600_000);
 const X402_AUTOFUND = readOptionalBoolEnv("X402_AUTOFUND", false);
 const BIND_HOST = readOptionalStringEnv("BIND_HOST", null);
+const X402_PROVIDER_PUBLIC_KEY_PEM = readOptionalStringEnv("X402_PROVIDER_PUBLIC_KEY_PEM", null);
+const X402_PROVIDER_KEY_ID = X402_PROVIDER_PUBLIC_KEY_PEM ? keyIdFromPublicKeyPem(X402_PROVIDER_PUBLIC_KEY_PEM) : null;
 
 if (HOLDBACK_BPS < 0 || HOLDBACK_BPS > 10_000) throw new Error("HOLDBACK_BPS must be within 0..10000");
 if (DISPUTE_WINDOW_MS < 0) throw new Error("DISPUTE_WINDOW_MS must be >= 0");
@@ -232,7 +237,67 @@ async function handleProxy(req, res) {
     res.end(`gateway: response too large to verify (>${2 * 1024 * 1024} bytes)`);
     return;
   }
-  const respHash = sha256Hex(capture.buf);
+  const contentType = String(upstreamRes.headers.get("content-type") ?? "");
+  const respHash = (() => {
+    // If upstream returns JSON, hash canonical JSON instead of raw bytes to avoid whitespace/ordering drift.
+    if (contentType.toLowerCase().includes("application/json")) {
+      try {
+        const parsed = JSON.parse(capture.buf.toString("utf8"));
+        return sha256Hex(canonicalJsonStringify(parsed));
+      } catch {}
+    }
+    return sha256Hex(capture.buf);
+  })();
+
+  const providerReasonCodes = [];
+  let providerSignature = null;
+  if (X402_PROVIDER_PUBLIC_KEY_PEM) {
+    const keyId = upstreamRes.headers.get("x-settld-provider-key-id");
+    const signedAt = upstreamRes.headers.get("x-settld-provider-signed-at");
+    const nonce = upstreamRes.headers.get("x-settld-provider-nonce");
+    const signedResponseHash = upstreamRes.headers.get("x-settld-provider-response-sha256");
+    const signatureBase64 = upstreamRes.headers.get("x-settld-provider-signature");
+
+    if (!keyId || !signedAt || !nonce || !signedResponseHash || !signatureBase64) {
+      providerReasonCodes.push("X402_PROVIDER_SIGNATURE_MISSING");
+    } else if (X402_PROVIDER_KEY_ID && String(keyId).trim() !== X402_PROVIDER_KEY_ID) {
+      providerReasonCodes.push("X402_PROVIDER_KEY_ID_MISMATCH");
+    } else if (String(signedResponseHash).trim().toLowerCase() !== respHash) {
+      providerReasonCodes.push("X402_PROVIDER_RESPONSE_HASH_MISMATCH");
+    } else {
+      const payloadHash = computeToolProviderSignaturePayloadHashV1({ responseHash: respHash, nonce, signedAt });
+      providerSignature = {
+        schemaVersion: "ToolProviderSignature.v1",
+        algorithm: "ed25519",
+        keyId: String(keyId).trim(),
+        signedAt: String(signedAt).trim(),
+        nonce: String(nonce).trim(),
+        responseHash: respHash,
+        payloadHash,
+        signatureBase64: String(signatureBase64).trim()
+      };
+      let ok = false;
+      try {
+        ok = verifyToolProviderSignatureV1({ signature: providerSignature, publicKeyPem: X402_PROVIDER_PUBLIC_KEY_PEM });
+      } catch {
+        ok = false;
+      }
+      if (!ok) providerReasonCodes.push("X402_PROVIDER_SIGNATURE_INVALID");
+    }
+  }
+
+  // Deterministic default: release 100% on PASS; refund 100% on FAIL.
+  const policy = {
+    mode: "automatic",
+    rules: {
+      autoReleaseOnGreen: true,
+      greenReleaseRatePct: 100,
+      autoReleaseOnAmber: false,
+      amberReleaseRatePct: 0,
+      autoReleaseOnRed: true,
+      redReleaseRatePct: 0
+    }
+  };
 
   const gateVerify = await settldJson("/x402/gate/verify", {
     tenantId,
@@ -240,9 +305,30 @@ async function handleProxy(req, res) {
     idempotencyKey: stableIdemKey("x402_verify", `${gateId}\n${respHash}`),
     body: {
       gateId,
-      verificationStatus: upstreamRes.ok ? "green" : "red",
+      verificationStatus:
+        upstreamRes.ok && (!X402_PROVIDER_PUBLIC_KEY_PEM || providerReasonCodes.length === 0) ? "green" : "red",
       runStatus: upstreamRes.ok ? "completed" : "failed",
-      evidenceRefs: [`http:response_sha256:${respHash}`, `http:status:${upstreamRes.status}`]
+      policy,
+      verificationMethod: {
+        mode: X402_PROVIDER_PUBLIC_KEY_PEM ? "attested" : "deterministic",
+        source: X402_PROVIDER_PUBLIC_KEY_PEM ? "provider_signature_v1" : "http_status_v1",
+        attestor: providerSignature?.keyId ?? null
+      },
+      ...(providerSignature ? { providerSignature: { ...providerSignature, publicKeyPem: X402_PROVIDER_PUBLIC_KEY_PEM } } : {}),
+      verificationCodes: providerReasonCodes,
+      evidenceRefs: [
+        `http:response_sha256:${respHash}`,
+        `http:status:${upstreamRes.status}`,
+        ...(providerSignature
+          ? [
+              `provider:key_id:${providerSignature.keyId}`,
+              `provider:signed_at:${providerSignature.signedAt}`,
+              `provider:nonce:${providerSignature.nonce}`,
+              `provider:payload_sha256:${providerSignature.payloadHash}`,
+              `provider:sig_b64:${providerSignature.signatureBase64}`
+            ]
+          : [])
+      ]
     }
   });
 
