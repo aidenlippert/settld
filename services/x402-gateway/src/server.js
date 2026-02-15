@@ -28,6 +28,12 @@ function readOptionalBoolEnv(name, fallback) {
   throw new Error(`${name} must be a boolean (1/0/true/false)`);
 }
 
+function readOptionalStringEnv(name, fallback = null) {
+  const raw = process.env[name];
+  if (raw === null || raw === undefined || String(raw).trim() === "") return fallback;
+  return String(raw).trim();
+}
+
 function sanitizeIdSegment(text, { maxLen = 96 } = {}) {
   const raw = String(text ?? "").trim();
   const safe = raw.replaceAll(/[^A-Za-z0-9:_-]/g, "_").slice(0, maxLen);
@@ -84,6 +90,7 @@ const PORT = readOptionalIntEnv("PORT", 8402);
 const HOLDBACK_BPS = readOptionalIntEnv("HOLDBACK_BPS", 1000);
 const DISPUTE_WINDOW_MS = readOptionalIntEnv("DISPUTE_WINDOW_MS", 86_400_000);
 const X402_AUTOFUND = readOptionalBoolEnv("X402_AUTOFUND", false);
+const BIND_HOST = readOptionalStringEnv("BIND_HOST", null);
 
 if (HOLDBACK_BPS < 0 || HOLDBACK_BPS > 10_000) throw new Error("HOLDBACK_BPS must be within 0..10000");
 if (DISPUTE_WINDOW_MS < 0) throw new Error("DISPUTE_WINDOW_MS must be >= 0");
@@ -259,12 +266,13 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+const listenCb = () => {
   // eslint-disable-next-line no-console
   console.log(
     JSON.stringify({
       ok: true,
       service: "x402-gateway",
+      ...(BIND_HOST ? { host: BIND_HOST } : {}),
       port: PORT,
       upstreamUrl: UPSTREAM_URL.toString(),
       settldApiUrl: SETTLD_API_URL.toString(),
@@ -272,4 +280,6 @@ server.listen(PORT, () => {
       disputeWindowMs: DISPUTE_WINDOW_MS
     })
   );
-});
+};
+if (BIND_HOST) server.listen(PORT, BIND_HOST, listenCb);
+else server.listen(PORT, listenCb);

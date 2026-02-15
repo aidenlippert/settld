@@ -2894,6 +2894,88 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     }
   };
 
+  store.sumWalletPolicySpendCentsForDay = async function sumWalletPolicySpendCentsForDay({
+    tenantId = DEFAULT_TENANT_ID,
+    agentId,
+    dayStartIso,
+    dayEndIso
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(agentId, "agentId");
+    assertNonEmptyString(dayStartIso, "dayStartIso");
+    assertNonEmptyString(dayEndIso, "dayEndIso");
+    const startMs = Date.parse(dayStartIso);
+    const endMs = Date.parse(dayEndIso);
+    if (!Number.isFinite(startMs)) throw new TypeError("dayStartIso must be an ISO date string");
+    if (!Number.isFinite(endMs)) throw new TypeError("dayEndIso must be an ISO date string");
+    if (!(endMs > startMs)) throw new TypeError("dayEndIso must be after dayStartIso");
+
+    let runSum = 0;
+    try {
+      const res = await pool.query(
+        `
+          SELECT COALESCE(SUM(amount_cents), 0)::bigint AS c
+          FROM agent_run_settlements
+          WHERE tenant_id = $1
+            AND payer_agent_id = $2
+            AND locked_at >= $3
+            AND locked_at < $4
+        `,
+        [tenantId, String(agentId), String(dayStartIso), String(dayEndIso)]
+      );
+      const n = Number(res.rows[0]?.c ?? 0);
+      runSum = Number.isSafeInteger(n) && n >= 0 ? n : 0;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      for (const row of store.agentRunSettlements.values()) {
+        if (!row || typeof row !== "object") continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+        const lockedAt = row.lockedAt ?? null;
+        const lockedMs = typeof lockedAt === "string" ? Date.parse(lockedAt) : NaN;
+        if (!Number.isFinite(lockedMs)) continue;
+        if (lockedMs < startMs || lockedMs >= endMs) continue;
+        const amountCents = Number(row.amountCents ?? 0);
+        if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+        runSum += amountCents;
+      }
+    }
+
+    let holdSum = 0;
+    try {
+      const res = await pool.query(
+        `
+          SELECT COALESCE(SUM((snapshot_json->>'heldAmountCents')::bigint), 0)::bigint AS c
+          FROM snapshots
+          WHERE tenant_id = $1
+            AND aggregate_type = 'tool_call_hold'
+            AND snapshot_json->>'payerAgentId' = $2
+            AND (snapshot_json->>'createdAt')::timestamptz >= $3::timestamptz
+            AND (snapshot_json->>'createdAt')::timestamptz < $4::timestamptz
+        `,
+        [tenantId, String(agentId), String(dayStartIso), String(dayEndIso)]
+      );
+      const n = Number(res.rows[0]?.c ?? 0);
+      holdSum = Number.isSafeInteger(n) && n >= 0 ? n : 0;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      for (const row of store.toolCallHolds.values()) {
+        if (!row || typeof row !== "object") continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+        const createdAt = row.createdAt ?? null;
+        const createdMs = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+        if (!Number.isFinite(createdMs)) continue;
+        if (createdMs < startMs || createdMs >= endMs) continue;
+        const heldAmountCents = Number(row.heldAmountCents ?? 0);
+        if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) continue;
+        holdSum += heldAmountCents;
+      }
+    }
+
+    return runSum + holdSum;
+  };
+
   function arbitrationCaseSnapshotRowToRecord(row) {
     const arbitrationCase = row?.snapshot_json ?? null;
     if (!arbitrationCase || typeof arbitrationCase !== "object" || Array.isArray(arbitrationCase)) return null;

@@ -784,6 +784,55 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.agentRunSettlements.get(makeScopedKey({ tenantId, id: String(runId) })) ?? null;
   };
 
+  store.sumWalletPolicySpendCentsForDay = async function sumWalletPolicySpendCentsForDay({
+    tenantId = DEFAULT_TENANT_ID,
+    agentId,
+    dayStartIso,
+    dayEndIso
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof agentId !== "string" || agentId.trim() === "") throw new TypeError("agentId is required");
+    if (typeof dayStartIso !== "string" || dayStartIso.trim() === "" || !Number.isFinite(Date.parse(dayStartIso))) {
+      throw new TypeError("dayStartIso must be an ISO date string");
+    }
+    if (typeof dayEndIso !== "string" || dayEndIso.trim() === "" || !Number.isFinite(Date.parse(dayEndIso))) {
+      throw new TypeError("dayEndIso must be an ISO date string");
+    }
+    const startMs = Date.parse(dayStartIso);
+    const endMs = Date.parse(dayEndIso);
+    if (!(endMs > startMs)) throw new TypeError("dayEndIso must be after dayStartIso");
+
+    let total = 0;
+
+    // Agent run settlements lock escrow for the full settlement amount.
+    for (const row of store.agentRunSettlements.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+      const lockedAt = row.lockedAt ?? null;
+      const lockedMs = typeof lockedAt === "string" ? Date.parse(lockedAt) : NaN;
+      if (!Number.isFinite(lockedMs) || lockedMs < startMs || lockedMs >= endMs) continue;
+      const amountCents = Number(row.amountCents ?? 0);
+      if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+      total += amountCents;
+    }
+
+    // Tool-call holds lock escrow for the holdback amount only.
+    for (const row of store.toolCallHolds.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+      const createdAt = row.createdAt ?? null;
+      const createdMs = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+      if (!Number.isFinite(createdMs) || createdMs < startMs || createdMs >= endMs) continue;
+      const heldAmountCents = Number(row.heldAmountCents ?? 0);
+      if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) continue;
+      total += heldAmountCents;
+    }
+
+    return total;
+  };
+
   store.getArbitrationCase = async function getArbitrationCase({ tenantId = DEFAULT_TENANT_ID, caseId } = {}) {
     tenantId = normalizeTenantId(tenantId);
     if (typeof caseId !== "string" || caseId.trim() === "") throw new TypeError("caseId is required");

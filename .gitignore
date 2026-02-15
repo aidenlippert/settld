@@ -37,5 +37,10 @@ demo/**/output/
 *.tmp
 *.swp
 
+# Debug bundles
+settld-debug-*.tar.gz
+settld-debug-*.zip
+settld-debug-*.sha256
+
 # Local signing / ops keys
 keys/

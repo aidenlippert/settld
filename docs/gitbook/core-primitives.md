@@ -4,30 +4,30 @@ Settld security and settlement correctness come from signed, hash-bound artifact
 
 ## Canonical transaction chain
 
-Kernel v0 paid capability flow:
+Kernel v0 paid capability flow (as implemented in this repo):
 
 1. `ToolManifest`
-2. `AuthorityGrant`
-3. `ToolCallAgreement`
-4. `FundingHold`
-5. `ToolCallEvidence`
-6. `SettlementDecisionRecord`
-7. `SettlementReceipt`
-8. Dispute branch (when needed):
+2. `ToolCallAgreement`
+3. `FundingHold`
+4. `ToolCallEvidence`
+5. `SettlementDecisionRecord`
+6. `SettlementReceipt`
+7. Dispute branch (when needed):
    - `DisputeOpenEnvelope`
    - `ArbitrationCase`
    - `ArbitrationVerdict`
    - `SettlementAdjustment`
+
+Reality notes:
+
+- `AuthorityGrant` is **not shipped** in this repo (no code, no schema, no spec). Current authorization is enforced by API auth/scope and by policy gates (for example `AgentIdentity.walletPolicy`) depending on the workflow surface.
+- `ToolCallAgreement.v1` and `ToolCallEvidence.v1` are frozen protocol objects under `docs/spec/` (normative spec + JSON schemas + conformance vectors).
 
 ## Primitive purpose
 
 ### ToolManifest
 
 Capability identity, interface details, verifier hints. Prevents silent identity swaps.
-
-### AuthorityGrant
-
-Constrains spend/scope/time. Prevents unauthorized settlement operations.
 
 ### ToolCallAgreement
 
@@ -82,3 +82,4 @@ It does not mean all policy semantics are universal truth. It means outcomes are
 - `docs/spec/SettlementDecisionRecord.v2.md`
 - `docs/spec/DisputeOpenEnvelope.v1.md`
 - `docs/spec/ClosePack.v1.md`
+- `docs/KERNEL_V0.md`

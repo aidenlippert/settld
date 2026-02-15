@@ -1,5 +1,8 @@
 # Sprint S23–S34 Plan
 
+> [!CAUTION]
+> **Deprecated as of 2026-02-14.** This is an aspirational roadmap. The current execution plan is **signal-driven** and lives at: `planning/sprints/post-hn-signal-driven.md`.
+
 > **Baseline**: February 12, 2026 · **Sprint length**: 2 weeks · **Horizon**: 12 sprints (24 weeks, ending ~July 2026)
 
 > [!IMPORTANT]

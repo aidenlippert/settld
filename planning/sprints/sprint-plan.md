@@ -177,6 +177,6 @@ For current status, use `planning/STATUS.md` and the evidence trackers it links.
 
 ## Immediate next execution steps
 
-1. Run S1 kickoff against `planning/jira/backlog.json` tickets `STLD-T101` to `STLD-T107` and `STLD-T131` to `STLD-T148`.
+1. Run S1 kickoff against the archived export `planning/jira/backlog.2026-02-14.pre-post-hn.json` tickets `STLD-T101` to `STLD-T107` and `STLD-T131` to `STLD-T148`.
 2. Establish weekly operating review: Product, Reliability, Revenue dashboards.
 3. Set release readiness checkpoint at end of S2 and S3 to protect S4 launch confidence.

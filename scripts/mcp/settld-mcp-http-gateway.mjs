@@ -148,7 +148,11 @@ function main() {
     }
   });
 
-  server.listen(port, "0.0.0.0", () => {
+  // Default to loopback to avoid exposing the spike gateway on the LAN by accident.
+  // Override with MCP_HTTP_HOST=0.0.0.0 if you intentionally want a non-loopback bind.
+  const host = String(process.env.MCP_HTTP_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
+
+  server.listen(port, host, () => {
     const addr = server.address();
     const effectivePort = addr && typeof addr === "object" ? addr.port : port;
     process.stderr.write(`[mcp-http] listening on :${effectivePort} (POST /rpc)\n`);

@@ -40,6 +40,7 @@
     "dev:finance-sink": "node services/finance-sink/src/server.js",
     "dev:magic-link": "node services/magic-link/src/server.js",
     "dev:x402-gateway": "node services/x402-gateway/src/server.js",
+    "quickstart:x402": "node scripts/quickstart/x402.mjs",
     "start:prod": "NODE_ENV=production node src/api/server.js",
     "start:maintenance": "NODE_ENV=production node src/api/maintenance.js",
     "start:receiver": "NODE_ENV=production node services/receiver/src/server.js",

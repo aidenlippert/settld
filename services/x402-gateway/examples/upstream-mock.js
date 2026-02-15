@@ -3,6 +3,8 @@ import { URL } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 9402);
 if (!Number.isSafeInteger(PORT) || PORT <= 0) throw new Error("PORT must be a positive integer");
+const BIND_HOST =
+  typeof process.env.BIND_HOST === "string" && process.env.BIND_HOST.trim() !== "" ? process.env.BIND_HOST.trim() : null;
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -41,8 +43,14 @@ const server = http.createServer((req, res) => {
   );
 });
 
-server.listen(PORT, () => {
+if (BIND_HOST) {
+  server.listen(PORT, BIND_HOST, () => {
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify({ ok: true, service: "x402-upstream-mock", host: BIND_HOST, port: PORT }));
+  });
+} else {
+  server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(JSON.stringify({ ok: true, service: "x402-upstream-mock", port: PORT }));
-});
-
+  });
+}

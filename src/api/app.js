@@ -14660,7 +14660,16 @@ export function createApi({
     if (!Number.isFinite(t)) throw new TypeError(`${name} must be an ISO date string`);
   }
 
-  function assertSettlementWithinWalletPolicy({ agentIdentity, amountCents }) {
+  function computeUtcDayBoundsIso(atIso) {
+    const ms = Date.parse(atIso);
+    if (!Number.isFinite(ms)) throw new TypeError("at must be an ISO date string");
+    const d = new Date(ms);
+    const startMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
+    const endMs = startMs + 86_400_000;
+    return { dayStartIso: new Date(startMs).toISOString(), dayEndIso: new Date(endMs).toISOString() };
+  }
+
+  async function assertSettlementWithinWalletPolicy({ tenantId, agentIdentity, amountCents, at = null }) {
     if (!agentIdentity || typeof agentIdentity !== "object") return;
     const walletPolicy = agentIdentity.walletPolicy;
     if (!walletPolicy || typeof walletPolicy !== "object" || Array.isArray(walletPolicy)) return;
@@ -14677,6 +14686,55 @@ export function createApi({
       const err = new Error("amount requires out-of-band approval");
       err.code = "WALLET_POLICY_APPROVAL_REQUIRED";
       throw err;
+    }
+
+    const maxDaily = Number(walletPolicy.maxDailyCents);
+    if (Number.isSafeInteger(maxDaily) && maxDaily >= 0) {
+      const atIso = at ?? nowIso();
+      const { dayStartIso, dayEndIso } = computeUtcDayBoundsIso(atIso);
+      const agentId = typeof agentIdentity.agentId === "string" && agentIdentity.agentId.trim() !== "" ? agentIdentity.agentId.trim() : null;
+      if (agentId) {
+        let spentCents = 0;
+        if (typeof store.sumWalletPolicySpendCentsForDay === "function") {
+          spentCents = await store.sumWalletPolicySpendCentsForDay({ tenantId, agentId, dayStartIso, dayEndIso });
+        } else {
+          const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+          const startMs = Date.parse(dayStartIso);
+          const endMs = Date.parse(dayEndIso);
+          if (store.agentRunSettlements instanceof Map) {
+            for (const row of store.agentRunSettlements.values()) {
+              if (!row || typeof row !== "object") continue;
+              if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+              if (String(row.payerAgentId ?? "") !== agentId) continue;
+              const lockedAt = row.lockedAt ?? null;
+              const lockedMs = typeof lockedAt === "string" ? Date.parse(lockedAt) : NaN;
+              if (!Number.isFinite(lockedMs) || lockedMs < startMs || lockedMs >= endMs) continue;
+              const n = Number(row.amountCents ?? 0);
+              if (!Number.isSafeInteger(n) || n <= 0) continue;
+              spentCents += n;
+            }
+          }
+          if (store.toolCallHolds instanceof Map) {
+            for (const row of store.toolCallHolds.values()) {
+              if (!row || typeof row !== "object") continue;
+              if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+              if (String(row.payerAgentId ?? "") !== agentId) continue;
+              const createdAt = row.createdAt ?? null;
+              const createdMs = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+              if (!Number.isFinite(createdMs) || createdMs < startMs || createdMs >= endMs) continue;
+              const n = Number(row.heldAmountCents ?? 0);
+              if (!Number.isSafeInteger(n) || n <= 0) continue;
+              spentCents += n;
+            }
+          }
+        }
+        if (!Number.isSafeInteger(spentCents) || spentCents < 0) spentCents = 0;
+        if (spentCents + amountCents > maxDaily) {
+          const err = new Error("amount exceeds wallet maxDailyCents");
+          err.code = "WALLET_POLICY_MAX_DAILY";
+          throw err;
+        }
+      }
     }
   }
 
@@ -17273,14 +17331,28 @@ export function createApi({
           const challengeWindowMs = Number(body?.challengeWindowMs ?? 0);
           if (!Number.isSafeInteger(challengeWindowMs) || challengeWindowMs < 0 || challengeWindowMs > 365 * 24 * 60 * 60_000) {
             return sendError(res, 400, "challengeWindowMs must be an integer within 0..31536000000", null, { code: "SCHEMA_INVALID" });
-          }
-
-          const heldAmountCents = Math.min(amountCents, Math.floor((amountCents * holdbackBps) / 10_000));
-          let payerWalletExisting = null;
-          try {
-            payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
-          } catch (err) {
-            return sendError(res, 400, "invalid payer wallet query", { message: err?.message });
+	          }
+	
+	          const heldAmountCents = Math.min(amountCents, Math.floor((amountCents * holdbackBps) / 10_000));
+	          if (heldAmountCents > 0) {
+	            try {
+	              const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+	              if (payerIdentity) {
+	                await assertSettlementWithinWalletPolicy({ tenantId, agentIdentity: payerIdentity, amountCents: heldAmountCents, at: nowAt });
+	              }
+	            } catch (err) {
+	              if (err?.code?.startsWith?.("WALLET_POLICY_")) {
+	                return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	              }
+	              // Non-policy errors should still surface as request errors.
+	              return sendError(res, 400, "invalid payer agent identity", { message: err?.message });
+	            }
+	          }
+	          let payerWalletExisting = null;
+	          try {
+	            payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
+	          } catch (err) {
+	            return sendError(res, 400, "invalid payer wallet query", { message: err?.message });
           }
           let payerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
           try {
@@ -28217,12 +28289,17 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid payerAgentId", { message: err?.message });
           }
-          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
-          try {
-            assertSettlementWithinWalletPolicy({ agentIdentity: payerIdentity, amountCents: settlementRequest.amountCents });
-          } catch (err) {
-            return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
-          }
+	          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
+	          try {
+	            await assertSettlementWithinWalletPolicy({
+	              tenantId,
+	              agentIdentity: payerIdentity,
+	              amountCents: settlementRequest.amountCents,
+	              at: acceptedAt
+	            });
+	          } catch (err) {
+	            return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	          }
 
           const runId = body?.runId && String(body.runId).trim() !== "" ? String(body.runId).trim() : `run_${rfqId}_${bidId}`;
           if (typeof runId !== "string" || runId.trim() === "") return sendError(res, 400, "runId must be a non-empty string");
@@ -28741,6 +28818,13 @@ export function createApi({
             return parsed.ok ? parsed : null;
           })();
 
+          let agreementHash = null;
+          try {
+            agreementHash = normalizeSha256HashInput(body?.agreementHash, "agreementHash", { allowNull: true });
+          } catch (err) {
+            return sendError(res, 400, "invalid agreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
           const existingGate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
           if (existingGate && !idemStoreKey) return sendError(res, 409, "gate already exists", null, { code: "ALREADY_EXISTS" });
 
@@ -28755,14 +28839,25 @@ export function createApi({
             return sendError(res, 400, "autoFundPayerCents must be a non-negative safe integer", null, { code: "SCHEMA_INVALID" });
           }
 
-          let payerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
-          let payeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
-          if (!payerWalletExisting && autoFundPayerCents > 0) payerWallet = creditAgentWallet({ wallet: payerWallet, amountCents: autoFundPayerCents, at: nowAt });
-          try {
-            payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents, at: nowAt });
-          } catch (err) {
-            if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
-              return sendError(res, 409, "insufficient wallet balance", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+	          let payerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
+	          let payeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
+	          if (!payerWalletExisting && autoFundPayerCents > 0) payerWallet = creditAgentWallet({ wallet: payerWallet, amountCents: autoFundPayerCents, at: nowAt });
+	          try {
+	            const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+	            if (payerIdentity) {
+	              await assertSettlementWithinWalletPolicy({ tenantId, agentIdentity: payerIdentity, amountCents, at: nowAt });
+	            }
+	          } catch (err) {
+	            if (err?.code?.startsWith?.("WALLET_POLICY_")) {
+	              return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	            }
+	            return sendError(res, 400, "invalid payer agent identity", { message: err?.message });
+	          }
+	          try {
+	            payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents, at: nowAt });
+	          } catch (err) {
+	            if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
+	              return sendError(res, 409, "insufficient wallet balance", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
             }
             throw err;
           }
@@ -28786,6 +28881,7 @@ export function createApi({
               runId,
               payerAgentId,
               payeeAgentId,
+              ...(agreementHash ? { agreementHash } : {}),
               terms,
               upstream,
               status: "held",
@@ -28845,6 +28941,63 @@ export function createApi({
 
           if (String(settlement.status ?? "").toLowerCase() !== "locked") {
             return sendJson(res, 200, { ok: true, gate, settlement, alreadyResolved: true });
+          }
+
+          // Optional: if this gate is bound to an agreementHash, enforce that the delegation graph
+          // is acyclic before allowing funds to be released/refunded.
+          const gateAgreementHashRaw = gate?.agreementHash ?? null;
+          if (gateAgreementHashRaw) {
+            let gateAgreementHash = null;
+            try {
+              gateAgreementHash = normalizeSha256HashInput(gateAgreementHashRaw, "gate.agreementHash", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 409, "invalid gate agreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+
+            let delegations = [];
+            try {
+              const collected = [];
+              const seen = new Set();
+              let cursor = gateAgreementHash;
+              for (let i = 0; i < 256; i += 1) {
+                if (seen.has(cursor)) break;
+                seen.add(cursor);
+
+                const rows = typeof store.listAgreementDelegations === "function"
+                  ? await store.listAgreementDelegations({ tenantId, childAgreementHash: cursor, status: null, limit: 1000, offset: 0 })
+                  : [];
+                const list = Array.isArray(rows) ? rows : [];
+                for (const row of list) collected.push(row);
+                if (list.length !== 1) break;
+
+                const parent = list[0]?.parentAgreementHash;
+                if (typeof parent !== "string" || parent.trim() === "") break;
+                cursor = parent.trim().toLowerCase();
+              }
+              delegations = collected;
+            } catch (err) {
+              return sendError(res, 500, "failed to load agreement delegations", { message: err?.message }, { code: "STORE_READ_FAILED" });
+            }
+
+            try {
+              cascadeSettlementCheck({ delegations, fromChildHash: gateAgreementHash });
+            } catch (err) {
+              const stableCode =
+                typeof err?.code === "string" && err.code.trim() !== "" ? err.code : "CASCADE_SETTLEMENT_CHECK_FAILED";
+              return sendError(
+                res,
+                409,
+                "cascade settlement check failed",
+                {
+                  message: err?.message ?? String(err ?? ""),
+                  code: err?.code ?? null,
+                  agreementHash: gateAgreementHash,
+                  childAgreementHash: err?.childAgreementHash ?? null,
+                  cycleAgreementHash: err?.agreementHash ?? null
+                },
+                { code: stableCode }
+              );
+            }
           }
 
           const verificationStatus = body?.verificationStatus ?? "amber";
@@ -33269,13 +33422,18 @@ export function createApi({
               } else if (store.agentIdentities instanceof Map) {
                 payerIdentity = store.agentIdentities.get(makeScopedKey({ tenantId, id: settlementRequest.payerAgentId })) ?? null;
               }
-              if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
-
-              try {
-                assertSettlementWithinWalletPolicy({ agentIdentity: payerIdentity, amountCents: settlementRequest.amountCents });
-              } catch (err) {
-                return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
-              }
+	              if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
+	
+	              try {
+	                await assertSettlementWithinWalletPolicy({
+	                  tenantId,
+	                  agentIdentity: payerIdentity,
+	                  amountCents: settlementRequest.amountCents,
+	                  at: nowAt
+	                });
+	              } catch (err) {
+	                return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	              }
 
               let payerWallet = null;
               try {

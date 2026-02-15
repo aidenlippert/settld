@@ -23,11 +23,21 @@ const { handle } = api;
 
 const port = cfg.api.port;
 const server = http.createServer(handle);
-server.listen(port, () => {
-  const storeDesc =
-    cfg.store.mode === "pg" ? "(postgres)" : cfg.store.persistenceDir ? `(dataDir=${cfg.store.persistenceDir})` : "(in-memory)";
-  logger.info("api listening", { port, storeMode: cfg.store.mode, storeDesc });
-});
+const bindHostRaw = typeof process !== "undefined" ? (process.env.PROXY_BIND_HOST ?? process.env.BIND_HOST ?? "") : "";
+const bindHost = typeof bindHostRaw === "string" && bindHostRaw.trim() !== "" ? bindHostRaw.trim() : null;
+if (bindHost) {
+  server.listen(port, bindHost, () => {
+    const storeDesc =
+      cfg.store.mode === "pg" ? "(postgres)" : cfg.store.persistenceDir ? `(dataDir=${cfg.store.persistenceDir})` : "(in-memory)";
+    logger.info("api listening", { port, host: bindHost, storeMode: cfg.store.mode, storeDesc });
+  });
+} else {
+  server.listen(port, () => {
+    const storeDesc =
+      cfg.store.mode === "pg" ? "(postgres)" : cfg.store.persistenceDir ? `(dataDir=${cfg.store.persistenceDir})` : "(in-memory)";
+    logger.info("api listening", { port, storeMode: cfg.store.mode, storeDesc });
+  });
+}
 
 const autotickIntervalMs = cfg.api.autotick.intervalMs;
 const autotickMaxMessages = cfg.api.autotick.maxMessages;

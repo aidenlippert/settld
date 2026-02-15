@@ -715,10 +715,10 @@ export type ToolCallAgreementV1 = {
   manifestHash: string;
   callId: string;
   inputHash: string;
-  acceptanceCriteria?: Record<string, unknown> | null;
-  settlementTerms?: Record<string, unknown> | null;
-  payerAgentId?: string | null;
-  payeeAgentId?: string | null;
+  acceptanceCriteria: Record<string, unknown> | null;
+  settlementTerms: Record<string, unknown> | null;
+  payerAgentId: string | null;
+  payeeAgentId: string | null;
   createdAt: string;
   agreementHash: string;
 };
@@ -729,8 +729,8 @@ export type ToolCallEvidenceV1 = {
   callId: string;
   inputHash: string;
   outputHash: string;
-  outputRef?: string | null;
-  metrics?: Record<string, unknown> | null;
+  outputRef: string | null;
+  metrics: Record<string, unknown> | null;
   startedAt: string;
   completedAt: string;
   createdAt: string;

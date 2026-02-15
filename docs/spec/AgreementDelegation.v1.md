@@ -73,6 +73,15 @@ Budget-capping is compositional:
 
 - The caller/system that creates a child delegation MUST ensure `budgetCapCents` is <= the parent agreement's **remaining** budget at creation time.
 
+## Deterministic pre-check failure codes
+
+Some API workflows may bind settlement to a delegation graph and run deterministic pre-checks before a release/refund decision.
+
+When those checks fail, implementations SHOULD return a stable `code` that is suitable for programmatic handling:
+
+- `AGREEMENT_DELEGATION_CYCLE` — A cycle was detected in the parent-chain for the bound agreement.
+- `AGREEMENT_DELEGATION_MULTIPLE_PARENTS` — Multiple parents were found for the same `childAgreementHash` (graph is not a function).
+
 ## Lifecycle semantics
 
 `AgreementDelegation.v1` is intended to be created as `status=active` and later resolved:
@@ -81,4 +90,3 @@ Budget-capping is compositional:
 - `status=revoked`: delegation authority is revoked (for example emergency revoke).
 
 Status transitions mutate only lifecycle fields and MUST NOT change `delegationHash`.
-

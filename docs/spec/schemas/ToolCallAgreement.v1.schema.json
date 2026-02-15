@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/ToolCallAgreement.v1.schema.json",
+  "title": "ToolCallAgreement.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "toolId",
+    "manifestHash",
+    "callId",
+    "inputHash",
+    "acceptanceCriteria",
+    "settlementTerms",
+    "payerAgentId",
+    "payeeAgentId",
+    "createdAt",
+    "agreementHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ToolCallAgreement.v1" },
+    "toolId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "manifestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "callId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "inputHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "acceptanceCriteria": { "type": ["object", "null"] },
+    "settlementTerms": { "type": ["object", "null"] },
+    "payerAgentId": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+    "payeeAgentId": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
+
