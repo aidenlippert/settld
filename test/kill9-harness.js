@@ -84,7 +84,13 @@ export function startApiServer({
 
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  async function waitForExit({ timeoutMs = 10_000 } = {}) {
+  const defaultExitTimeoutMs = (() => {
+    const raw = process.env.KILL9_EXIT_TIMEOUT_MS;
+    if (raw && Number.isFinite(Number(raw)) && Number(raw) > 0) return Number(raw);
+    return process.env.CI ? 60_000 : 10_000;
+  })();
+
+  async function waitForExit({ timeoutMs = defaultExitTimeoutMs } = {}) {
     if (child.exitCode !== null || child.signalCode !== null) {
       return { code: child.exitCode, signal: child.signalCode };
     }

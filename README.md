@@ -1,6 +1,44 @@
 # Settld
 
-Settld is the closure layer for delegated autonomous work.
+Settld is verify-before-release receipts for delegated autonomous work: **verify what happened**, retain **audit-ready evidence**, and **settle** outcomes deterministically.
+
+Wedge (current): an x402-style gateway that turns `HTTP 402` into `hold -> verify -> release/refund`, with deterministic receipts. Default posture is strict: **hold 100% until PASS**; **refund on FAIL**. Optionally require an **Ed25519 provider signature** over the upstream response hash.
+
+What you get in this repo:
+
+- `settld` CLI for bundle verification + a conformance pack (CI / audit evidence)
+- Runnable Node.js prototype (API + agent simulator)
+- Protocol + product docs (schemas/specs, trust anchors, warning codes, etc.)
+
+## 10-minute Demo: Verified Receipt (x402 Verify-Before-Release)
+
+Prereqs: Node.js 20+.
+
+```sh
+npm ci && npm run quickstart:x402
+```
+
+By default the script keeps services running until you press Ctrl+C.
+
+If you already ran `npm ci` in this repo, you can skip it:
+
+```sh
+npm run quickstart:x402
+```
+
+To run once and exit (CI-friendly):
+
+```sh
+npm ci && SETTLD_QUICKSTART_KEEP_ALIVE=0 npm run quickstart:x402
+```
+
+Success: prints `OK`, a `gateId=...`, and a `gateStateUrl=...`.
+
+Next: `docs/QUICKSTART_X402_GATEWAY.md`
+
+If you tried and failed:
+
+- Run `./scripts/collect-debug.sh` and open a GitHub issue using the "Quickstart failure" template: https://github.com/aidenlippert/settld/issues/new?template=quickstart-failure.yml
 
 The core mental model in this repo:
 
@@ -8,8 +46,6 @@ The core mental model in this repo:
 - **Everything else is events**: every transition and operational action emits an event that can be replayed.
 - **Trust is a black box**: telemetry/evidence are append-only, hash-chained, and (optionally) signed.
 - **Money is a ledger**: every settlement is double-entry and must always balance.
-
-This repository is a runnable Node.js prototype (API + agent simulator) and a set of product/architecture docs.
 
 ## Bundle verification (CI / audit evidence)
 
@@ -21,6 +57,7 @@ This repository is a runnable Node.js prototype (API + agent simulator) and a se
 - Producer bootstrap: `docs/QUICKSTART_PRODUCE.md` (trust → produce → strict verify)
 - SDK quickstart (first verified run): `docs/QUICKSTART_SDK.md`
 - SDK quickstart (Python): `docs/QUICKSTART_SDK_PYTHON.md`
+- x402 gateway quickstart (verify-before-release wedge): `docs/QUICKSTART_X402_GATEWAY.md`
 - Integrations (GitHub Actions templates): `docs/integrations/README.md`
 - Protocol contract (schemas/specs): `docs/spec/README.md`
 - Conformance pack (portable oracle): `conformance/v1/README.md`

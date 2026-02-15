@@ -18,8 +18,11 @@ import { buildInteractionDirectionMatrixV1 } from "../src/core/interaction-direc
 import { buildSettlementDecisionRecordV1, buildSettlementDecisionRecordV2, buildSettlementReceipt } from "../src/core/settlement-kernel.js";
 import { buildMarketplaceOffer, buildMarketplaceAcceptance } from "../src/core/marketplace-kernel.js";
 import { buildToolManifestV1 } from "../src/core/tool-manifest.js";
+import { buildToolCallAgreementV1 } from "../src/core/tool-call-agreement.js";
+import { buildToolCallEvidenceV1 } from "../src/core/tool-call-evidence.js";
 import { buildReputationEventV1 } from "../src/core/reputation-event.js";
 import { buildDisputeOpenEnvelopeV1 } from "../src/core/dispute-open-envelope.js";
+import { buildAgreementDelegationV1 } from "../src/core/agreement-delegation.js";
 
 function bytes(text) {
   return new TextEncoder().encode(text);
@@ -322,6 +325,45 @@ async function buildVectorsV1() {
     updatedAt: generatedAt
   };
   const agentIdentityCanonical = canonicalJsonStringify(agentIdentity);
+
+  const toolCallInput = { text: "hello" };
+  const toolCallAgreement = buildToolCallAgreementV1({
+    toolId: "cap_vectors_demo",
+    manifestHash: toolManifestHash,
+    callId: "call_vectors_0001",
+    input: toolCallInput,
+    acceptanceCriteria: null,
+    settlementTerms: { amountCents: 10000, currency: "USD" },
+    payerAgentId: "agt_vectors_payer_0001",
+    payeeAgentId: agentIdentity.agentId,
+    createdAt: "2026-02-01T00:00:10.000Z"
+  });
+  const toolCallAgreementCanonical = canonicalJsonStringify(toolCallAgreement);
+  const toolCallAgreementCore = { ...toolCallAgreement };
+  delete toolCallAgreementCore.agreementHash;
+  const toolCallAgreementCoreCanonical = canonicalJsonStringify(toolCallAgreementCore);
+  const toolCallInputCanonical = canonicalJsonStringify(toolCallInput);
+
+  const toolCallOutput = { upper: "HELLO", length: 5 };
+  const toolCallEvidence = buildToolCallEvidenceV1({
+    agreementHash: toolCallAgreement.agreementHash,
+    callId: toolCallAgreement.callId,
+    inputHash: toolCallAgreement.inputHash,
+    output: toolCallOutput,
+    outputRef: "evidence://tool_call_vectors_0001/output.json",
+    metrics: { latencyMs: 123 },
+    startedAt: "2026-02-01T00:00:11.000Z",
+    completedAt: "2026-02-01T00:00:12.000Z",
+    createdAt: "2026-02-01T00:00:12.000Z",
+    signerKeyId: keyId,
+    signerPrivateKeyPem: privateKeyPem
+  });
+  const toolCallEvidenceCanonical = canonicalJsonStringify(toolCallEvidence);
+  const toolCallEvidenceCore = { ...toolCallEvidence };
+  delete toolCallEvidenceCore.evidenceHash;
+  delete toolCallEvidenceCore.signature;
+  const toolCallEvidenceCoreCanonical = canonicalJsonStringify(toolCallEvidenceCore);
+  const toolCallOutputCanonical = canonicalJsonStringify(toolCallOutput);
 
   const agentRun = {
     schemaVersion: "AgentRun.v1",
@@ -661,6 +703,22 @@ async function buildVectorsV1() {
   });
   const disputeOpenEnvelopeCanonical = canonicalJsonStringify(disputeOpenEnvelope);
 
+  const agreementDelegation = buildAgreementDelegationV1({
+    delegationId: "dlg_det_00000001",
+    tenantId,
+    parentAgreementHash: sha256Hex("agreement_delegation_parent"),
+    childAgreementHash: sha256Hex("agreement_delegation_child"),
+    delegatorAgentId: "agt_delegator_det",
+    delegateeAgentId: "agt_delegatee_det",
+    budgetCapCents: 2500,
+    currency: "USD",
+    delegationDepth: 1,
+    maxDelegationDepth: 3,
+    ancestorChain: [sha256Hex("agreement_delegation_parent")],
+    createdAt
+  });
+  const agreementDelegationCanonical = canonicalJsonStringify(agreementDelegation);
+
   return {
     schemaVersion: "ProtocolVectors.v1",
     generatedAt,
@@ -680,6 +738,31 @@ async function buildVectorsV1() {
       inputSchemaSha256: sha256Hex(toolManifestInputSchemaCanonical),
       outputSchemaCanonicalJson: toolManifestOutputSchemaCanonical,
       outputSchemaSha256: sha256Hex(toolManifestOutputSchemaCanonical)
+    },
+    toolCallAgreement: {
+      schemaVersion: toolCallAgreement.schemaVersion,
+      agreementHash: toolCallAgreement.agreementHash,
+      inputHash: toolCallAgreement.inputHash,
+      canonicalJson: toolCallAgreementCanonical,
+      sha256: sha256Hex(toolCallAgreementCanonical),
+      coreCanonicalJson: toolCallAgreementCoreCanonical,
+      coreSha256: sha256Hex(toolCallAgreementCoreCanonical),
+      inputCanonicalJson: toolCallInputCanonical,
+      inputSha256: sha256Hex(toolCallInputCanonical)
+    },
+    toolCallEvidence: {
+      schemaVersion: toolCallEvidence.schemaVersion,
+      agreementHash: toolCallEvidence.agreementHash,
+      evidenceHash: toolCallEvidence.evidenceHash,
+      outputHash: toolCallEvidence.outputHash,
+      canonicalJson: toolCallEvidenceCanonical,
+      sha256: sha256Hex(toolCallEvidenceCanonical),
+      coreCanonicalJson: toolCallEvidenceCoreCanonical,
+      coreSha256: sha256Hex(toolCallEvidenceCoreCanonical),
+      outputCanonicalJson: toolCallOutputCanonical,
+      outputSha256: sha256Hex(toolCallOutputCanonical),
+      signatureKeyId: toolCallEvidence.signature?.signerKeyId ?? null,
+      signature: toolCallEvidence.signature?.signature ?? null
     },
     jobProof: {
       manifestHash: jobBundle.manifestHash,
@@ -814,6 +897,16 @@ async function buildVectorsV1() {
       caseId: disputeOpenEnvelope.caseId,
       canonicalJson: disputeOpenEnvelopeCanonical,
       sha256: sha256Hex(disputeOpenEnvelopeCanonical)
+    },
+    agreementDelegation: {
+      schemaVersion: agreementDelegation.schemaVersion,
+      delegationId: agreementDelegation.delegationId,
+      parentAgreementHash: agreementDelegation.parentAgreementHash,
+      childAgreementHash: agreementDelegation.childAgreementHash,
+      delegationDepth: agreementDelegation.delegationDepth,
+      maxDelegationDepth: agreementDelegation.maxDelegationDepth,
+      canonicalJson: agreementDelegationCanonical,
+      sha256: sha256Hex(agreementDelegationCanonical)
     }
   };
 }

@@ -222,6 +222,8 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     agentRunEvents: new Map(), // `${tenantId}\n${runId}` -> AgentEvent.v1[]
     agentRunSettlements: new Map(), // `${tenantId}\n${runId}` -> AgentRunSettlement.v1
     arbitrationCases: new Map(), // `${tenantId}\n${caseId}` -> ArbitrationCase.v1 snapshot
+    agreementDelegations: new Map(), // `${tenantId}\n${delegationId}` -> AgreementDelegation.v1
+    x402Gates: new Map(), // `${tenantId}\n${gateId}` -> X402 gate record (internal API surface)
     toolCallHolds: new Map(), // `${tenantId}\n${holdHash}` -> FundingHold.v1 snapshot
     settlementAdjustments: new Map(), // `${tenantId}\n${adjustmentId}` -> SettlementAdjustment.v1 snapshot
     moneyRailOperations: new Map(), // `${tenantId}\n${providerId}\n${operationId}` -> MoneyRailOperation.v1
@@ -782,10 +784,130 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.agentRunSettlements.get(makeScopedKey({ tenantId, id: String(runId) })) ?? null;
   };
 
+  store.sumWalletPolicySpendCentsForDay = async function sumWalletPolicySpendCentsForDay({
+    tenantId = DEFAULT_TENANT_ID,
+    agentId,
+    dayStartIso,
+    dayEndIso
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof agentId !== "string" || agentId.trim() === "") throw new TypeError("agentId is required");
+    if (typeof dayStartIso !== "string" || dayStartIso.trim() === "" || !Number.isFinite(Date.parse(dayStartIso))) {
+      throw new TypeError("dayStartIso must be an ISO date string");
+    }
+    if (typeof dayEndIso !== "string" || dayEndIso.trim() === "" || !Number.isFinite(Date.parse(dayEndIso))) {
+      throw new TypeError("dayEndIso must be an ISO date string");
+    }
+    const startMs = Date.parse(dayStartIso);
+    const endMs = Date.parse(dayEndIso);
+    if (!(endMs > startMs)) throw new TypeError("dayEndIso must be after dayStartIso");
+
+    let total = 0;
+
+    // Agent run settlements lock escrow for the full settlement amount.
+    for (const row of store.agentRunSettlements.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+      const lockedAt = row.lockedAt ?? null;
+      const lockedMs = typeof lockedAt === "string" ? Date.parse(lockedAt) : NaN;
+      if (!Number.isFinite(lockedMs) || lockedMs < startMs || lockedMs >= endMs) continue;
+      const amountCents = Number(row.amountCents ?? 0);
+      if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+      total += amountCents;
+    }
+
+    // Tool-call holds lock escrow for the holdback amount only.
+    for (const row of store.toolCallHolds.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+      const createdAt = row.createdAt ?? null;
+      const createdMs = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+      if (!Number.isFinite(createdMs) || createdMs < startMs || createdMs >= endMs) continue;
+      const heldAmountCents = Number(row.heldAmountCents ?? 0);
+      if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) continue;
+      total += heldAmountCents;
+    }
+
+    return total;
+  };
+
   store.getArbitrationCase = async function getArbitrationCase({ tenantId = DEFAULT_TENANT_ID, caseId } = {}) {
     tenantId = normalizeTenantId(tenantId);
     if (typeof caseId !== "string" || caseId.trim() === "") throw new TypeError("caseId is required");
     return store.arbitrationCases.get(makeScopedKey({ tenantId, id: String(caseId) })) ?? null;
+  };
+
+  store.getAgreementDelegation = async function getAgreementDelegation({ tenantId = DEFAULT_TENANT_ID, delegationId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof delegationId !== "string" || delegationId.trim() === "") throw new TypeError("delegationId is required");
+    return store.agreementDelegations.get(makeScopedKey({ tenantId, id: String(delegationId) })) ?? null;
+  };
+
+  store.putAgreementDelegation = async function putAgreementDelegation({ tenantId = DEFAULT_TENANT_ID, delegation, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!delegation || typeof delegation !== "object" || Array.isArray(delegation)) throw new TypeError("delegation is required");
+    const delegationId = delegation.delegationId ?? null;
+    if (typeof delegationId !== "string" || delegationId.trim() === "") throw new TypeError("delegation.delegationId is required");
+    const key = makeScopedKey({ tenantId, id: String(delegationId) });
+    const at = delegation.updatedAt ?? new Date().toISOString();
+    await store.commitTx({ at, ops: [{ kind: "AGREEMENT_DELEGATION_UPSERT", tenantId, delegationId, delegation: { ...delegation, tenantId, delegationId } }], audit });
+    return store.agreementDelegations.get(key) ?? null;
+  };
+
+  store.listAgreementDelegations = async function listAgreementDelegations({
+    tenantId = DEFAULT_TENANT_ID,
+    parentAgreementHash = null,
+    childAgreementHash = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (parentAgreementHash !== null && (typeof parentAgreementHash !== "string" || parentAgreementHash.trim() === "")) {
+      throw new TypeError("parentAgreementHash must be null or a non-empty string");
+    }
+    if (childAgreementHash !== null && (typeof childAgreementHash !== "string" || childAgreementHash.trim() === "")) {
+      throw new TypeError("childAgreementHash must be null or a non-empty string");
+    }
+    if (status !== null && (typeof status !== "string" || status.trim() === "")) throw new TypeError("status must be null or a non-empty string");
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const statusFilter = status ? String(status).trim().toLowerCase() : null;
+    const parentFilter = parentAgreementHash ? String(parentAgreementHash).trim().toLowerCase() : null;
+    const childFilter = childAgreementHash ? String(childAgreementHash).trim().toLowerCase() : null;
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const out = [];
+    for (const row of store.agreementDelegations.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (parentFilter && String(row.parentAgreementHash ?? "").toLowerCase() !== parentFilter) continue;
+      if (childFilter && String(row.childAgreementHash ?? "").toLowerCase() !== childFilter) continue;
+      if (statusFilter !== null && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => String(left.delegationId ?? "").localeCompare(String(right.delegationId ?? "")));
+    return out.slice(safeOffset, safeOffset + safeLimit);
+  };
+
+  store.getX402Gate = async function getX402Gate({ tenantId = DEFAULT_TENANT_ID, gateId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof gateId !== "string" || gateId.trim() === "") throw new TypeError("gateId is required");
+    return store.x402Gates.get(makeScopedKey({ tenantId, id: String(gateId) })) ?? null;
+  };
+
+  store.putX402Gate = async function putX402Gate({ tenantId = DEFAULT_TENANT_ID, gate, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!gate || typeof gate !== "object" || Array.isArray(gate)) throw new TypeError("gate is required");
+    const gateId = gate.gateId ?? gate.id ?? null;
+    if (typeof gateId !== "string" || gateId.trim() === "") throw new TypeError("gate.gateId is required");
+    const key = makeScopedKey({ tenantId, id: String(gateId) });
+    const at = gate.updatedAt ?? gate.createdAt ?? new Date().toISOString();
+    await store.commitTx({ at, ops: [{ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: { ...gate, tenantId, gateId: String(gateId) } }], audit });
+    return store.x402Gates.get(key) ?? null;
   };
 
   store.listArbitrationCases = async function listArbitrationCases({

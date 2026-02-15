@@ -57,4 +57,6 @@ When `AgentIdentity.v1` is signed or hashed by higher-level protocols:
 - `maxDailyCents`
 - `requireApprovalAboveCents`
 
-These are policy hints in v1 and do not perform settlement by themselves.
+These fields are optional and non-normative in v1. Implementations MAY enforce them when creating holds/settlements (for example, rejecting a settlement when `amountCents > maxPerTransactionCents` or when an out-of-band approval gate is required above `requireApprovalAboveCents`).
+
+Implementation note (this repo): the Settld API enforces `maxPerTransactionCents`, `maxDailyCents`, and `requireApprovalAboveCents` on settlement/hold creation paths that lock escrow from an agent wallet.

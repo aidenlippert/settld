@@ -385,6 +385,165 @@
           }
         }
       },
+      "ToolCallAgreementV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "toolId",
+          "manifestHash",
+          "callId",
+          "inputHash",
+          "acceptanceCriteria",
+          "settlementTerms",
+          "payerAgentId",
+          "payeeAgentId",
+          "createdAt",
+          "agreementHash"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "ToolCallAgreement.v1"
+            ]
+          },
+          "toolId": {
+            "type": "string"
+          },
+          "manifestHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "callId": {
+            "type": "string"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "acceptanceCriteria": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "settlementTerms": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "payerAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "payeeAgentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agreementHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "ToolCallEvidenceV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "agreementHash",
+          "callId",
+          "inputHash",
+          "outputHash",
+          "outputRef",
+          "metrics",
+          "startedAt",
+          "completedAt",
+          "createdAt",
+          "evidenceHash"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "ToolCallEvidence.v1"
+            ]
+          },
+          "agreementHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "callId": {
+            "type": "string"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "outputHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "outputRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "metrics": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidenceHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": false,
+            "required": [
+              "algorithm",
+              "signerKeyId",
+              "evidenceHash",
+              "signature"
+            ],
+            "properties": {
+              "algorithm": {
+                "type": "string",
+                "enum": [
+                  "ed25519"
+                ]
+              },
+              "signerKeyId": {
+                "type": "string"
+              },
+              "evidenceHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "signature": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "AgentRunV1": {
         "type": "object",
         "additionalProperties": false,

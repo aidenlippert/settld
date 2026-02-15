@@ -7,6 +7,10 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 ## [Unreleased]
 
 ### Added
+- Agreement delegation primitive: `AgreementDelegation.v1` protocol spec + schema + vectors, and core builder/validator to support parent->child agreement linking in multi-hop agent chains.
+- A2A discovery surface: `GET /.well-known/agent.json` publishes a Settld settlement Agent Card for A2A-compatible agent discovery.
+- x402 verify-before-release wedge: `/x402/gate/*` API endpoints plus the in-repo thin proxy service `services/x402-gateway/` for converting upstream `HTTP 402` into `hold -> verify -> release/refund` settlement flows.
+- GitHub Actions publish workflow for the x402 gateway image (`ghcr.io/aidenlippert/settld/x402-gateway:latest`).
 - Self-serve onboarding email sequence automation for Magic Link tenants (`welcome`, `sample_verified_nudge`, `first_settlement_completed`) with idempotent state + outbox/smtp delivery modes (`services/magic-link/src/onboarding-email-sequence.js`).
 - Self-serve referral instrumentation and benchmark reporting: onboarding events now accept `referral_link_shared` / `referral_signup`, onboarding metrics expose referral conversion fields, and CI can build `artifacts/launch/self-serve-benchmark-report.json` via `scripts/ci/build-self-serve-benchmark-report.mjs`.
 - Producer bootstrap tooling: `settld-trust` (trust/key init) and `settld-produce` (jobproof/monthproof/financepack bundle generation) in `packages/artifact-produce/`.

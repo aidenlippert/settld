@@ -7,6 +7,7 @@ import { appendChainedEvent, createChainedEvent, verifyChainedEvents } from "../
 import { keyIdFromPublicKeyPem, sha256Hex, signHashHexEd25519, verifyHashHexEd25519 } from "../core/crypto.js";
 import { listKnownEventTypes, requiredSignerKindForEventType, SIGNER_KIND } from "../core/event-policy.js";
 import { canonicalJsonStringify, normalizeForCanonicalJson } from "../core/canonical-json.js";
+import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "../core/tool-provider-signature.js";
 import { reduceJob } from "../core/job-reducer.js";
 import { ledgerEntriesForJobEvent } from "../core/ledger-postings.js";
 import { makeIdempotencyEndpoint, makeIdempotencyStoreKey, normalizePrincipalId } from "../core/idempotency.js";
@@ -101,9 +102,19 @@ import {
 import { buildFundingHoldV1, FUNDING_HOLD_STATUS, resolveFundingHoldV1, validateFundingHoldV1 } from "../core/funding-hold.js";
 import { buildSettlementAdjustmentV1, SETTLEMENT_ADJUSTMENT_KIND, validateSettlementAdjustmentV1 } from "../core/settlement-adjustment.js";
 import {
+  AGREEMENT_DELEGATION_SCHEMA_VERSION,
+  buildAgreementDelegationV1,
+  cascadeSettlementCheck,
+  refundUnwindCheck,
+  resolveAgreementDelegationV1,
+  validateAgreementDelegationV1
+} from "../core/agreement-delegation.js";
+import {
   DISPUTE_OPEN_ENVELOPE_SCHEMA_VERSION,
   validateDisputeOpenEnvelopeV1
 } from "../core/dispute-open-envelope.js";
+import { buildSettldAgentCard } from "../core/agent-card.js";
+import { buildX402SettlementTerms, parseX402PaymentRequired } from "../core/x402-gate.js";
 import {
   REPUTATION_EVENT_KIND,
   REPUTATION_EVENT_SCHEMA_VERSION,
@@ -14650,7 +14661,16 @@ export function createApi({
     if (!Number.isFinite(t)) throw new TypeError(`${name} must be an ISO date string`);
   }
 
-  function assertSettlementWithinWalletPolicy({ agentIdentity, amountCents }) {
+  function computeUtcDayBoundsIso(atIso) {
+    const ms = Date.parse(atIso);
+    if (!Number.isFinite(ms)) throw new TypeError("at must be an ISO date string");
+    const d = new Date(ms);
+    const startMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
+    const endMs = startMs + 86_400_000;
+    return { dayStartIso: new Date(startMs).toISOString(), dayEndIso: new Date(endMs).toISOString() };
+  }
+
+  async function assertSettlementWithinWalletPolicy({ tenantId, agentIdentity, amountCents, at = null }) {
     if (!agentIdentity || typeof agentIdentity !== "object") return;
     const walletPolicy = agentIdentity.walletPolicy;
     if (!walletPolicy || typeof walletPolicy !== "object" || Array.isArray(walletPolicy)) return;
@@ -14667,6 +14687,55 @@ export function createApi({
       const err = new Error("amount requires out-of-band approval");
       err.code = "WALLET_POLICY_APPROVAL_REQUIRED";
       throw err;
+    }
+
+    const maxDaily = Number(walletPolicy.maxDailyCents);
+    if (Number.isSafeInteger(maxDaily) && maxDaily >= 0) {
+      const atIso = at ?? nowIso();
+      const { dayStartIso, dayEndIso } = computeUtcDayBoundsIso(atIso);
+      const agentId = typeof agentIdentity.agentId === "string" && agentIdentity.agentId.trim() !== "" ? agentIdentity.agentId.trim() : null;
+      if (agentId) {
+        let spentCents = 0;
+        if (typeof store.sumWalletPolicySpendCentsForDay === "function") {
+          spentCents = await store.sumWalletPolicySpendCentsForDay({ tenantId, agentId, dayStartIso, dayEndIso });
+        } else {
+          const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+          const startMs = Date.parse(dayStartIso);
+          const endMs = Date.parse(dayEndIso);
+          if (store.agentRunSettlements instanceof Map) {
+            for (const row of store.agentRunSettlements.values()) {
+              if (!row || typeof row !== "object") continue;
+              if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+              if (String(row.payerAgentId ?? "") !== agentId) continue;
+              const lockedAt = row.lockedAt ?? null;
+              const lockedMs = typeof lockedAt === "string" ? Date.parse(lockedAt) : NaN;
+              if (!Number.isFinite(lockedMs) || lockedMs < startMs || lockedMs >= endMs) continue;
+              const n = Number(row.amountCents ?? 0);
+              if (!Number.isSafeInteger(n) || n <= 0) continue;
+              spentCents += n;
+            }
+          }
+          if (store.toolCallHolds instanceof Map) {
+            for (const row of store.toolCallHolds.values()) {
+              if (!row || typeof row !== "object") continue;
+              if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+              if (String(row.payerAgentId ?? "") !== agentId) continue;
+              const createdAt = row.createdAt ?? null;
+              const createdMs = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+              if (!Number.isFinite(createdMs) || createdMs < startMs || createdMs >= endMs) continue;
+              const n = Number(row.heldAmountCents ?? 0);
+              if (!Number.isSafeInteger(n) || n <= 0) continue;
+              spentCents += n;
+            }
+          }
+        }
+        if (!Number.isSafeInteger(spentCents) || spentCents < 0) spentCents = 0;
+        if (spentCents + amountCents > maxDaily) {
+          const err = new Error("amount exceeds wallet maxDailyCents");
+          err.code = "WALLET_POLICY_MAX_DAILY";
+          throw err;
+        }
+      }
     }
   }
 
@@ -16289,6 +16358,7 @@ export function createApi({
           (req.method === "GET" && path === "/health") ||
           (req.method === "GET" && path === "/healthz") ||
           (req.method === "GET" && path === "/capabilities") ||
+          (req.method === "GET" && path === "/.well-known/agent.json") ||
           (req.method === "GET" && path === "/openapi.json") ||
           (req.method === "POST" && path === "/ingest/proxy") ||
           (req.method === "POST" && path === "/exports/ack");
@@ -16472,6 +16542,13 @@ export function createApi({
 
         if (req.method === "GET" && path === "/openapi.json") {
           return sendJson(res, 200, buildOpenApiSpec());
+        }
+
+        if (req.method === "GET" && path === "/.well-known/agent.json") {
+          const baseUrl = deriveRequestBaseUrl(req) ?? "https://settld.local";
+          const version = typeof process !== "undefined" ? (process.env.SETTLD_VERSION ?? null) : null;
+          const card = buildSettldAgentCard({ baseUrl, version });
+          return sendJson(res, 200, card);
         }
 
 	      if (req.method === "GET" && path === "/healthz") {
@@ -17255,14 +17332,28 @@ export function createApi({
           const challengeWindowMs = Number(body?.challengeWindowMs ?? 0);
           if (!Number.isSafeInteger(challengeWindowMs) || challengeWindowMs < 0 || challengeWindowMs > 365 * 24 * 60 * 60_000) {
             return sendError(res, 400, "challengeWindowMs must be an integer within 0..31536000000", null, { code: "SCHEMA_INVALID" });
-          }
-
-          const heldAmountCents = Math.min(amountCents, Math.floor((amountCents * holdbackBps) / 10_000));
-          let payerWalletExisting = null;
-          try {
-            payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
-          } catch (err) {
-            return sendError(res, 400, "invalid payer wallet query", { message: err?.message });
+	          }
+	
+	          const heldAmountCents = Math.min(amountCents, Math.floor((amountCents * holdbackBps) / 10_000));
+	          if (heldAmountCents > 0) {
+	            try {
+	              const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+	              if (payerIdentity) {
+	                await assertSettlementWithinWalletPolicy({ tenantId, agentIdentity: payerIdentity, amountCents: heldAmountCents, at: nowAt });
+	              }
+	            } catch (err) {
+	              if (err?.code?.startsWith?.("WALLET_POLICY_")) {
+	                return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	              }
+	              // Non-policy errors should still surface as request errors.
+	              return sendError(res, 400, "invalid payer agent identity", { message: err?.message });
+	            }
+	          }
+	          let payerWalletExisting = null;
+	          try {
+	            payerWalletExisting = await getAgentWalletRecord({ tenantId, agentId: payerAgentId });
+	          } catch (err) {
+	            return sendError(res, 400, "invalid payer wallet query", { message: err?.message });
           }
           let payerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
           try {
@@ -28199,12 +28290,17 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid payerAgentId", { message: err?.message });
           }
-          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
-          try {
-            assertSettlementWithinWalletPolicy({ agentIdentity: payerIdentity, amountCents: settlementRequest.amountCents });
-          } catch (err) {
-            return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
-          }
+	          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
+	          try {
+	            await assertSettlementWithinWalletPolicy({
+	              tenantId,
+	              agentIdentity: payerIdentity,
+	              amountCents: settlementRequest.amountCents,
+	              at: acceptedAt
+	            });
+	          } catch (err) {
+	            return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	          }
 
           const runId = body?.runId && String(body.runId).trim() !== "" ? String(body.runId).trim() : `run_${rfqId}_${bidId}`;
           if (typeof runId !== "string" || runId.trim() === "") return sendError(res, 400, "runId must be a non-empty string");
@@ -28532,6 +28628,732 @@ export function createApi({
         } catch (err) {
           return sendError(res, 400, "invalid marketplace search query", { message: err?.message });
         }
+      }
+
+      // Agreement delegations (multi-hop composition primitive).
+      {
+        const parts = path.split("/").filter(Boolean);
+        if (parts[0] === "agreements" && parts[1] && parts[2] === "delegations" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          let parentAgreementHash;
+          try {
+            parentAgreementHash = normalizeSha256HashInput(parts[1], "agreementHash", { allowNull: false });
+          } catch (err) {
+            return sendError(res, 400, "invalid agreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const nowAt = nowIso();
+          const delegationId = typeof body?.delegationId === "string" && body.delegationId.trim() !== "" ? body.delegationId.trim() : createId("dlg");
+          let childAgreementHash;
+          try {
+            childAgreementHash = normalizeSha256HashInput(body?.childAgreementHash, "childAgreementHash", { allowNull: false });
+          } catch (err) {
+            return sendError(res, 400, "invalid childAgreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const delegatorAgentId = typeof body?.delegatorAgentId === "string" && body.delegatorAgentId.trim() !== "" ? body.delegatorAgentId.trim() : null;
+          const delegateeAgentId = typeof body?.delegateeAgentId === "string" && body.delegateeAgentId.trim() !== "" ? body.delegateeAgentId.trim() : null;
+          if (!delegatorAgentId || !delegateeAgentId) {
+            return sendError(res, 400, "delegatorAgentId and delegateeAgentId are required", null, { code: "SCHEMA_INVALID" });
+          }
+          const budgetCapCents = Number(body?.budgetCapCents);
+          if (!Number.isSafeInteger(budgetCapCents) || budgetCapCents <= 0) {
+            return sendError(res, 400, "budgetCapCents must be a positive safe integer", null, { code: "SCHEMA_INVALID" });
+          }
+          const currency = typeof body?.currency === "string" && body.currency.trim() !== "" ? body.currency.trim().toUpperCase() : "USD";
+
+          const ancestorChainInput = body?.ancestorChain ?? null;
+          const ancestorChain = Array.isArray(ancestorChainInput) ? ancestorChainInput : null;
+          const inferredDepth = ancestorChain ? ancestorChain.length : 1;
+          const delegationDepthRaw = body?.delegationDepth ?? inferredDepth;
+          const maxDelegationDepthRaw = body?.maxDelegationDepth ?? delegationDepthRaw;
+          let delegation;
+          try {
+            delegation = buildAgreementDelegationV1({
+              delegationId,
+              tenantId,
+              parentAgreementHash,
+              childAgreementHash,
+              delegatorAgentId,
+              delegateeAgentId,
+              budgetCapCents,
+              currency,
+              delegationDepth: Number(delegationDepthRaw),
+              maxDelegationDepth: Number(maxDelegationDepthRaw),
+              ancestorChain: ancestorChain ?? undefined,
+              createdAt: nowAt
+            });
+            validateAgreementDelegationV1(delegation);
+          } catch (err) {
+            return sendError(res, 400, "invalid agreement delegation", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const ops = [{ kind: "AGREEMENT_DELEGATION_UPSERT", tenantId, delegationId: delegation.delegationId, delegation }];
+          const responseBody = { ok: true, delegation };
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } });
+          }
+
+          await store.commitTx({ at: nowAt, ops });
+          return sendJson(res, 201, responseBody);
+        }
+
+        if (parts[0] === "agreements" && parts[1] && parts[2] === "delegations" && parts.length === 3 && req.method === "GET") {
+          let agreementHash;
+          try {
+            agreementHash = normalizeSha256HashInput(parts[1], "agreementHash", { allowNull: false });
+          } catch (err) {
+            return sendError(res, 400, "invalid agreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const status = url.searchParams.get("status");
+          const limitRaw = url.searchParams.get("limit");
+          const offsetRaw = url.searchParams.get("offset");
+          const limit = limitRaw ? Number(limitRaw) : 200;
+          const offset = offsetRaw ? Number(offsetRaw) : 0;
+          const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(1000, limit) : 200;
+          const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+
+          const parentRows = typeof store.listAgreementDelegations === "function"
+            ? await store.listAgreementDelegations({ tenantId, parentAgreementHash: agreementHash, status, limit: 10_000, offset: 0 })
+            : [];
+          const childRows = typeof store.listAgreementDelegations === "function"
+            ? await store.listAgreementDelegations({ tenantId, childAgreementHash: agreementHash, status, limit: 10_000, offset: 0 })
+            : [];
+          const byId = new Map();
+          for (const row of [...parentRows, ...childRows]) {
+            const id = String(row?.delegationId ?? "");
+            if (!id) continue;
+            if (!byId.has(id)) byId.set(id, row);
+          }
+          const delegations = Array.from(byId.values()).sort((a, b) => String(a.delegationId ?? "").localeCompare(String(b.delegationId ?? "")));
+          const paged = delegations.slice(safeOffset, safeOffset + safeLimit);
+          return sendJson(res, 200, { ok: true, agreementHash, delegations: paged, limit: safeLimit, offset: safeOffset, total: delegations.length });
+        }
+
+	        if (parts[0] === "delegations" && parts[1] && parts.length === 2 && req.method === "GET") {
+	          const delegationId = parts[1];
+	          const delegation = typeof store.getAgreementDelegation === "function" ? await store.getAgreementDelegation({ tenantId, delegationId }) : null;
+	          if (!delegation) return sendError(res, 404, "delegation not found", null, { code: "NOT_FOUND" });
+	          return sendJson(res, 200, { ok: true, delegation });
+	        }
+	      }
+
+	      // x402 verification gate (HTTP middleware surface).
+	      {
+	        const parts = path.split("/").filter(Boolean);
+
+        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "create" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const payerAgentId = typeof body?.payerAgentId === "string" && body.payerAgentId.trim() !== "" ? body.payerAgentId.trim() : null;
+          const payeeAgentId = typeof body?.payeeAgentId === "string" && body.payeeAgentId.trim() !== "" ? body.payeeAgentId.trim() : null;
+          if (!payerAgentId || !payeeAgentId || payerAgentId === payeeAgentId) {
+            return sendError(res, 400, "payerAgentId and payeeAgentId are required and must differ", null, { code: "SCHEMA_INVALID" });
+          }
+
+          const nowAt = nowIso();
+          const gateId = typeof body?.gateId === "string" && body.gateId.trim() !== "" ? body.gateId.trim() : createId("x402gate");
+          const runId = `x402_${gateId}`;
+
+          const amountCents = Number(body?.amountCents);
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+            return sendError(res, 400, "amountCents must be a positive safe integer", null, { code: "SCHEMA_INVALID" });
+          }
+          const currency = typeof body?.currency === "string" && body.currency.trim() !== "" ? body.currency.trim().toUpperCase() : "USD";
+          const disputeWindowDays = body?.disputeWindowDays ?? 0;
+          const disputeWindowMs = body?.disputeWindowMs ?? null;
+          const holdbackBps = body?.holdbackBps ?? 0;
+          let terms;
+          try {
+            terms = buildX402SettlementTerms({
+              amountCents,
+              currency,
+              disputeWindowDays,
+              disputeWindowMs,
+              holdbackBps,
+              evidenceRequirements: body?.evidenceRequirements ?? null,
+              slaPolicy: body?.slaPolicy ?? null
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid settlement terms", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const upstream = (() => {
+            const parsed = parseX402PaymentRequired(body?.paymentRequiredHeader ?? body?.paymentRequired ?? null);
+            return parsed.ok ? parsed : null;
+          })();
+
+	          let agreementHash = null;
+	          try {
+	            agreementHash = normalizeSha256HashInput(body?.agreementHash, "agreementHash", { allowNull: true });
+	          } catch (err) {
+	            return sendError(res, 400, "invalid agreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+	          }
+
+	          let providerKey = null;
+	          const providerPublicKeyPem =
+	            typeof body?.providerPublicKeyPem === "string" && body.providerPublicKeyPem.trim() !== "" ? body.providerPublicKeyPem.trim() : null;
+	          if (providerPublicKeyPem) {
+	            try {
+	              const keyId = keyIdFromPublicKeyPem(providerPublicKeyPem);
+	              providerKey = { algorithm: "ed25519", keyId, publicKeyPem: providerPublicKeyPem };
+	            } catch (err) {
+	              return sendError(res, 400, "invalid providerPublicKeyPem", { message: err?.message }, { code: "SCHEMA_INVALID" });
+	            }
+	          }
+
+          const existingGate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
+          if (existingGate && !idemStoreKey) return sendError(res, 409, "gate already exists", null, { code: "ALREADY_EXISTS" });
+
+          const existingSettlement = typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
+          if (existingSettlement && !idemStoreKey) return sendError(res, 409, "gate run already exists", null, { code: "ALREADY_EXISTS" });
+
+          const payerWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payerAgentId }) : null;
+          const payeeWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payeeAgentId }) : null;
+
+          const autoFundPayerCents = Number(body?.autoFundPayerCents ?? 0);
+          if (!Number.isSafeInteger(autoFundPayerCents) || autoFundPayerCents < 0) {
+            return sendError(res, 400, "autoFundPayerCents must be a non-negative safe integer", null, { code: "SCHEMA_INVALID" });
+          }
+
+	          let payerWallet = ensureAgentWallet({ wallet: payerWalletExisting, tenantId, agentId: payerAgentId, currency, at: nowAt });
+	          let payeeWallet = ensureAgentWallet({ wallet: payeeWalletExisting, tenantId, agentId: payeeAgentId, currency, at: nowAt });
+	          if (!payerWalletExisting && autoFundPayerCents > 0) payerWallet = creditAgentWallet({ wallet: payerWallet, amountCents: autoFundPayerCents, at: nowAt });
+	          try {
+	            const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+	            if (payerIdentity) {
+	              await assertSettlementWithinWalletPolicy({ tenantId, agentIdentity: payerIdentity, amountCents, at: nowAt });
+	            }
+	          } catch (err) {
+	            if (err?.code?.startsWith?.("WALLET_POLICY_")) {
+	              return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	            }
+	            return sendError(res, 400, "invalid payer agent identity", { message: err?.message });
+	          }
+	          try {
+	            payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents, at: nowAt });
+	          } catch (err) {
+	            if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
+	              return sendError(res, 409, "insufficient wallet balance", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+            }
+            throw err;
+          }
+
+          const settlement = createAgentRunSettlement({
+            tenantId,
+            runId,
+            agentId: payeeAgentId,
+            payerAgentId,
+            amountCents,
+            currency,
+            disputeWindowDays: terms.disputeWindowDays,
+            at: nowAt
+          });
+
+          const gate = normalizeForCanonicalJson(
+            {
+              schemaVersion: "X402GateRecord.v1",
+              gateId,
+              tenantId,
+              runId,
+	              payerAgentId,
+	              payeeAgentId,
+	              ...(agreementHash ? { agreementHash } : {}),
+	              ...(providerKey ? { providerKey } : {}),
+	              terms,
+	              upstream,
+	              status: "held",
+	              createdAt: nowAt,
+	              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+
+          const ops = [];
+          if (!payerWalletExisting || payerWalletExisting.revision !== payerWallet.revision) {
+            ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet });
+          }
+          if (!payeeWalletExisting) {
+            ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet });
+          }
+          ops.push({ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement });
+          ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate });
+
+          const responseBody = { ok: true, gate, settlement };
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody } });
+          }
+          await store.commitTx({ at: nowAt, ops });
+          return sendJson(res, 201, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "verify" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const gateId = typeof body?.gateId === "string" && body.gateId.trim() !== "" ? body.gateId.trim() : null;
+          if (!gateId) return sendError(res, 400, "gateId is required", null, { code: "SCHEMA_INVALID" });
+          const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
+          if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
+
+          const runId = String(gate.runId ?? "");
+          const settlement = typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
+          if (!settlement) return sendError(res, 404, "settlement not found for gate", null, { code: "NOT_FOUND" });
+
+          if (String(settlement.status ?? "").toLowerCase() !== "locked") {
+            return sendJson(res, 200, { ok: true, gate, settlement, alreadyResolved: true });
+          }
+
+          // Optional: if this gate is bound to an agreementHash, enforce that the delegation graph
+          // is acyclic before allowing funds to be released/refunded.
+          const gateAgreementHashRaw = gate?.agreementHash ?? null;
+          if (gateAgreementHashRaw) {
+            let gateAgreementHash = null;
+            try {
+              gateAgreementHash = normalizeSha256HashInput(gateAgreementHashRaw, "gate.agreementHash", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 409, "invalid gate agreementHash", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+
+            let delegations = [];
+            try {
+              const collected = [];
+              const seen = new Set();
+              let cursor = gateAgreementHash;
+              for (let i = 0; i < 256; i += 1) {
+                if (seen.has(cursor)) break;
+                seen.add(cursor);
+
+                const rows = typeof store.listAgreementDelegations === "function"
+                  ? await store.listAgreementDelegations({ tenantId, childAgreementHash: cursor, status: null, limit: 1000, offset: 0 })
+                  : [];
+                const list = Array.isArray(rows) ? rows : [];
+                for (const row of list) collected.push(row);
+                if (list.length !== 1) break;
+
+                const parent = list[0]?.parentAgreementHash;
+                if (typeof parent !== "string" || parent.trim() === "") break;
+                cursor = parent.trim().toLowerCase();
+              }
+              delegations = collected;
+            } catch (err) {
+              return sendError(res, 500, "failed to load agreement delegations", { message: err?.message }, { code: "STORE_READ_FAILED" });
+            }
+
+            try {
+              cascadeSettlementCheck({ delegations, fromChildHash: gateAgreementHash });
+            } catch (err) {
+              const stableCode =
+                typeof err?.code === "string" && err.code.trim() !== "" ? err.code : "CASCADE_SETTLEMENT_CHECK_FAILED";
+              return sendError(
+                res,
+                409,
+                "cascade settlement check failed",
+                {
+                  message: err?.message ?? String(err ?? ""),
+                  code: err?.code ?? null,
+                  agreementHash: gateAgreementHash,
+                  childAgreementHash: err?.childAgreementHash ?? null,
+                  cycleAgreementHash: err?.agreementHash ?? null
+                },
+                { code: stableCode }
+              );
+            }
+          }
+
+          const evidenceRefs = Array.isArray(body?.evidenceRefs) ? body.evidenceRefs.map((v) => String(v ?? "").trim()).filter(Boolean) : [];
+
+          let verificationStatus = body?.verificationStatus ?? "amber";
+          let runStatus = body?.runStatus ?? "completed";
+          const extraReasonCodes = new Set();
+          if (Array.isArray(body?.verificationCodes)) {
+            for (const c of body.verificationCodes) {
+              const code = typeof c === "string" ? c.trim() : "";
+              if (code) extraReasonCodes.add(code);
+            }
+          }
+
+          // Optional: enforce provider signature correctness when the caller declares this verification source.
+          const verificationSourceRaw =
+            body?.verificationMethod && typeof body.verificationMethod === "object" && !Array.isArray(body.verificationMethod)
+              ? body.verificationMethod.source
+              : null;
+          const verificationSource = typeof verificationSourceRaw === "string" ? verificationSourceRaw.trim() : null;
+	          if (verificationSource === "provider_signature_v1") {
+	            const ps = body?.providerSignature ?? null;
+	            const pinnedPublicKeyPem =
+	              typeof gate?.providerKey?.publicKeyPem === "string" && gate.providerKey.publicKeyPem.trim() !== ""
+	                ? gate.providerKey.publicKeyPem
+	                : null;
+	            const publicKeyPem = pinnedPublicKeyPem
+	              ? pinnedPublicKeyPem
+	              : typeof ps?.publicKeyPem === "string" && ps.publicKeyPem.trim() !== ""
+	                  ? ps.publicKeyPem
+	                  : null;
+	            if (!ps || typeof ps !== "object" || Array.isArray(ps) || !publicKeyPem) {
+	              extraReasonCodes.add("X402_PROVIDER_SIGNATURE_MISSING");
+	              verificationStatus = "red";
+	              runStatus = "failed";
+            } else {
+              // Ensure the signature binds to the response hash we claim.
+              const responseHash = typeof ps.responseHash === "string" ? ps.responseHash.trim().toLowerCase() : null;
+              const hasResponseRef = responseHash ? evidenceRefs.includes(`http:response_sha256:${responseHash}`) : false;
+              if (responseHash && !hasResponseRef) {
+                extraReasonCodes.add("X402_PROVIDER_RESPONSE_HASH_MISMATCH");
+                verificationStatus = "red";
+                runStatus = "failed";
+              } else {
+                const sig = { ...ps };
+                delete sig.publicKeyPem;
+                // Fill payloadHash if absent so verification doesn't depend on caller precomputing it.
+                if (typeof sig.payloadHash !== "string" || sig.payloadHash.trim() === "") {
+                  try {
+                    sig.payloadHash = computeToolProviderSignaturePayloadHashV1({
+                      responseHash: sig.responseHash,
+                      nonce: sig.nonce,
+                      signedAt: sig.signedAt
+                    });
+                  } catch {}
+                }
+                let ok = false;
+                try {
+                  ok = verifyToolProviderSignatureV1({ signature: sig, publicKeyPem });
+                } catch {
+                  ok = false;
+                }
+                if (!ok) {
+                  extraReasonCodes.add("X402_PROVIDER_SIGNATURE_INVALID");
+                  verificationStatus = "red";
+                  runStatus = "failed";
+                }
+              }
+            }
+          }
+
+          let policyDecision;
+          try {
+            policyDecision = evaluateSettlementPolicy({
+              policy: body?.policy ?? {},
+              verificationMethod: body?.verificationMethod ?? {},
+              verificationStatus,
+              runStatus,
+              amountCents: Number(settlement.amountCents)
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid verification/policy inputs", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const payerAgentId = String(settlement.payerAgentId ?? "");
+          const payeeAgentId = String(settlement.agentId ?? "");
+          const payerWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payerAgentId }) : null;
+          const payeeWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payeeAgentId }) : null;
+          if (!payerWalletExisting || !payeeWalletExisting) return sendError(res, 409, "missing wallets for gate settlement", null, { code: "WALLET_MISSING" });
+
+	          let payerWallet = payerWalletExisting;
+	          let payeeWallet = payeeWalletExisting;
+	          const releaseAmountCents = Number(policyDecision.releaseAmountCents ?? 0);
+	          const refundAmountCents = Number(policyDecision.refundAmountCents ?? 0);
+	          const at = nowIso();
+
+	          // Optional x402 holdback: implemented as a follow-on "holdback settlement" funded from the payer's wallet.
+	          // The primary settlement is always fully resolved (release+refund==amount) to preserve AgentRunSettlement invariants.
+	          const holdbackBpsRaw = gate?.terms?.holdbackBps ?? 0;
+	          const holdbackBps = Number(holdbackBpsRaw);
+	          const normalizedHoldbackBps =
+	            Number.isSafeInteger(holdbackBps) && holdbackBps >= 0 ? Math.min(10_000, holdbackBps) : 0;
+	          const holdbackAmountCents =
+	            normalizedHoldbackBps > 0 && releaseAmountCents > 0
+	              ? Math.floor((releaseAmountCents * normalizedHoldbackBps) / 10_000)
+	              : 0;
+	          const immediateReleaseAmountCents = releaseAmountCents - holdbackAmountCents;
+	          const immediateRefundAmountCents = refundAmountCents + holdbackAmountCents;
+	          const disputeWindowMsEffective = (() => {
+	            const ms = gate?.terms?.disputeWindowMs;
+	            if (Number.isSafeInteger(ms) && ms >= 0) return ms;
+	            const days = gate?.terms?.disputeWindowDays;
+	            if (Number.isSafeInteger(days) && days >= 0) return days * 86_400_000;
+	            return 0;
+	          })();
+	          const holdbackReleaseEligibleAt =
+	            holdbackAmountCents > 0 ? new Date(Date.parse(at) + disputeWindowMsEffective).toISOString() : null;
+	 
+	          try {
+	            if (immediateReleaseAmountCents > 0) {
+	              const moved = releaseAgentWalletEscrowToPayee({
+	                payerWallet,
+	                payeeWallet,
+	                amountCents: immediateReleaseAmountCents,
+	                at
+	              });
+	              payerWallet = moved.payerWallet;
+	              payeeWallet = moved.payeeWallet;
+	            }
+	            if (immediateRefundAmountCents > 0) {
+	              payerWallet = refundAgentWalletEscrow({ wallet: payerWallet, amountCents: immediateRefundAmountCents, at });
+	            }
+	          } catch (err) {
+	            if (err?.code === "INSUFFICIENT_ESCROW_BALANCE") {
+	              return sendError(res, 409, "insufficient escrow balance", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+	            }
+	            throw err;
+	          }
+
+		          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
+		          const immediateReleaseRatePct =
+		            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
+		          const reasonCodes = (() => {
+		            const out = [];
+		            const push = (v) => {
+		              const s = typeof v === "string" ? v.trim() : "";
+		              if (s) out.push(s);
+		            };
+		            if (Array.isArray(policyDecision.reasonCodes)) for (const c of policyDecision.reasonCodes) push(c);
+		            for (const c of extraReasonCodes) push(c);
+		            // Deterministic ordering for receipts/logs.
+		            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
+		          })();
+		          const decisionTrace = {
+		            schemaVersion: "X402GateDecisionTrace.v1",
+		            verificationStatus: String(policyDecision.verificationStatus ?? ""),
+		            runStatus: String(policyDecision.runStatus ?? ""),
+		            shouldAutoResolve: policyDecision.shouldAutoResolve === true,
+		            reasonCodes,
+		            policyReleaseRatePct: policyDecision.releaseRatePct,
+		            policyReleasedAmountCents: releaseAmountCents,
+		            policyRefundedAmountCents: refundAmountCents,
+		            holdbackBps: normalizedHoldbackBps,
+		            holdbackAmountCents,
+	            holdbackReleaseEligibleAt,
+	            immediateReleasedAmountCents: immediateReleaseAmountCents,
+	            immediateRefundedAmountCents: immediateRefundAmountCents,
+	            releaseRatePct: immediateReleaseRatePct,
+	            verificationMethod: policyDecision.verificationMethod
+	          };
+
+	          const resolvedSettlement = resolveAgentRunSettlement({
+	            settlement,
+	            status: policyDecision.settlementStatus,
+	            runStatus: policyDecision.runStatus,
+	            releasedAmountCents: immediateReleaseAmountCents,
+	            refundedAmountCents: immediateRefundAmountCents,
+	            releaseRatePct: immediateReleaseRatePct,
+		            decisionStatus: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED : AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_REVIEW_REQUIRED,
+		            decisionMode: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC : AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+		            decisionPolicyHash: policyHashUsed,
+		            decisionReason: reasonCodes[0] ?? null,
+		            decisionTrace,
+		            resolutionEventId: createId("x402res"),
+		            at
+		          });
+
+	          let holdbackSettlement = null;
+	          let holdbackSettlementResolved = null;
+	          let holdbackRunId = null;
+	          if (holdbackAmountCents > 0) {
+	            holdbackRunId = `${runId}_holdback`;
+	            const existingHoldback =
+	              typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId: holdbackRunId }) : null;
+	            if (existingHoldback && String(existingHoldback.status ?? "").toLowerCase() !== "locked") {
+	              holdbackSettlementResolved = existingHoldback;
+	            } else if (existingHoldback) {
+	              holdbackSettlement = existingHoldback;
+	            } else {
+	              // Re-lock the holdback funds into escrow for the follow-on settlement.
+	              try {
+	                payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents: holdbackAmountCents, at });
+	              } catch (err) {
+	                if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
+	                  return sendError(res, 409, "insufficient wallet balance for holdback lock", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+	                }
+	                throw err;
+	              }
+	              holdbackSettlement = createAgentRunSettlement({
+	                tenantId,
+	                runId: holdbackRunId,
+	                agentId: payeeAgentId,
+	                payerAgentId,
+	                amountCents: holdbackAmountCents,
+	                currency: settlement.currency ?? "USD",
+	                disputeWindowDays: 0,
+	                at
+	              });
+	            }
+
+	            // If there's no dispute window, resolve the holdback immediately.
+	            if (holdbackSettlement && disputeWindowMsEffective <= 0) {
+	              try {
+	                const moved = releaseAgentWalletEscrowToPayee({
+	                  payerWallet,
+	                  payeeWallet,
+	                  amountCents: holdbackAmountCents,
+	                  at
+	                });
+	                payerWallet = moved.payerWallet;
+	                payeeWallet = moved.payeeWallet;
+	              } catch (err) {
+	                if (err?.code === "INSUFFICIENT_ESCROW_BALANCE") {
+	                  return sendError(res, 409, "insufficient escrow balance for holdback release", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+	                }
+	                throw err;
+	              }
+
+	              holdbackSettlementResolved = resolveAgentRunSettlement({
+	                settlement: holdbackSettlement,
+	                status: AGENT_RUN_SETTLEMENT_STATUS.RELEASED,
+	                runStatus: "completed",
+	                releasedAmountCents: holdbackAmountCents,
+	                refundedAmountCents: 0,
+	                releaseRatePct: 100,
+	                decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED,
+	                decisionMode: AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC,
+	                decisionPolicyHash: policyHashUsed,
+	                decisionReason: "x402_holdback_auto_release",
+	                decisionTrace: {
+	                  schemaVersion: "X402HoldbackDecisionTrace.v1",
+	                  gateId,
+	                  policyHashUsed,
+	                  releasedAmountCents: holdbackAmountCents,
+	                  refundedAmountCents: 0
+	                },
+	                resolutionEventId: createId("x402hb"),
+	                at
+	              });
+	              holdbackSettlement = null;
+	            }
+	          }
+
+	          const nextGate = normalizeForCanonicalJson(
+	            {
+	              ...gate,
+	              status: "resolved",
+	              resolvedAt: at,
+		              decision: {
+		                policyHashUsed,
+		                verificationStatus: policyDecision.verificationStatus,
+		                runStatus: policyDecision.runStatus,
+		                policyReleaseRatePct: policyDecision.releaseRatePct,
+	                policyReleasedAmountCents: releaseAmountCents,
+	                policyRefundedAmountCents: refundAmountCents,
+	                holdbackBps: normalizedHoldbackBps,
+	                holdbackAmountCents,
+	                holdbackRunId,
+	                holdbackReleaseEligibleAt,
+		                releaseRatePct: immediateReleaseRatePct,
+		                releasedAmountCents: immediateReleaseAmountCents,
+		                refundedAmountCents: immediateRefundAmountCents,
+		                reasonCodes
+		              },
+	              holdback:
+	                holdbackAmountCents > 0
+	                  ? {
+	                      schemaVersion: "X402GateHoldback.v1",
+	                      runId: holdbackRunId,
+	                      amountCents: holdbackAmountCents,
+	                      bps: normalizedHoldbackBps,
+	                      releaseEligibleAt: holdbackReleaseEligibleAt,
+	                      status: holdbackSettlementResolved ? "released" : "held",
+	                      releasedAt: holdbackSettlementResolved ? at : null
+	                    }
+	                  : null,
+		              evidenceRefs,
+		              providerSignature: body?.providerSignature ?? null,
+		              updatedAt: at
+		            },
+	            { path: "$" }
+	          );
+
+	          const ops = [
+	            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+	            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet },
+	            { kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement: resolvedSettlement },
+	            ...(holdbackSettlement
+	              ? [{ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId: holdbackRunId, settlement: holdbackSettlement }]
+	              : []),
+	            ...(holdbackSettlementResolved
+	              ? [{ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId: holdbackRunId, settlement: holdbackSettlementResolved }]
+	              : []),
+	            { kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate }
+	          ];
+	          const responseBody = {
+	            ok: true,
+	            gate: nextGate,
+	            settlement: resolvedSettlement,
+	            holdbackSettlement: holdbackSettlementResolved ?? holdbackSettlement ?? null,
+	            decision: policyDecision
+	          };
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await store.commitTx({ at, ops });
+          return sendJson(res, 200, responseBody);
+        }
+
+	        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] && parts.length === 3 && req.method === "GET") {
+	          const gateId = parts[2];
+	          const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
+	          if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
+	          const runId = String(gate.runId ?? "");
+	          const settlement = runId && typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
+	          const holdbackRunId = String(gate?.holdback?.runId ?? gate?.decision?.holdbackRunId ?? "");
+	          const holdbackSettlement =
+	            holdbackRunId && typeof store.getAgentRunSettlement === "function"
+	              ? await store.getAgentRunSettlement({ tenantId, runId: holdbackRunId })
+	              : null;
+	          return sendJson(res, 200, { ok: true, gate, settlement, holdbackSettlement });
+	        }
       }
 
       if (req.method === "GET" && path === "/agents") {
@@ -32693,13 +33515,18 @@ export function createApi({
               } else if (store.agentIdentities instanceof Map) {
                 payerIdentity = store.agentIdentities.get(makeScopedKey({ tenantId, id: settlementRequest.payerAgentId })) ?? null;
               }
-              if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
-
-              try {
-                assertSettlementWithinWalletPolicy({ agentIdentity: payerIdentity, amountCents: settlementRequest.amountCents });
-              } catch (err) {
-                return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
-              }
+	              if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
+	
+	              try {
+	                await assertSettlementWithinWalletPolicy({
+	                  tenantId,
+	                  agentIdentity: payerIdentity,
+	                  amountCents: settlementRequest.amountCents,
+	                  at: nowAt
+	                });
+	              } catch (err) {
+	                return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
+	              }
 
               let payerWallet = null;
               try {
@@ -34210,7 +35037,7 @@ export function createApi({
               contractVersion
             }
           };
-          const existing = getJobEvents(tenantId, jobId);
+          const existing = await getJobEventsFresh(tenantId, jobId);
           const currentPrevChainHash = getCurrentPrevChainHash(existing);
           if (expectedHeader.expectedPrevChainHash !== currentPrevChainHash) {
             return sendError(res, 409, "event append conflict", {
@@ -34513,7 +35340,7 @@ export function createApi({
             return sendError(res, 400, "invalid booking", { message: err?.message });
           }
 
-          const existing = getJobEvents(tenantId, jobId);
+          const existing = await getJobEventsFresh(tenantId, jobId);
           const currentPrevChainHash = getCurrentPrevChainHash(existing);
           if (expectedHeader.expectedPrevChainHash !== currentPrevChainHash) {
             return sendError(res, 409, "event append conflict", {
@@ -35879,6 +36706,123 @@ export function createApi({
     fetchFn
   });
 
+  async function tickX402Holdbacks({ maxMessages = 100 } = {}) {
+    if (!Number.isSafeInteger(maxMessages) || maxMessages <= 0) throw new TypeError("maxMessages must be a positive safe integer");
+    if (!(store?.x402Gates instanceof Map)) return { ok: true, processed: 0, skipped: true, reason: "x402 gates unsupported" };
+    if (typeof store.getAgentRunSettlement !== "function" || typeof store.getAgentWallet !== "function") {
+      return { ok: true, processed: 0, skipped: true, reason: "store missing settlement/wallet support" };
+    }
+
+    const at = nowIso();
+    const nowMs = Date.parse(at);
+    const due = [];
+    for (const gate of store.x402Gates.values()) {
+      if (!gate || typeof gate !== "object") continue;
+      const holdback = gate?.holdback;
+      if (!holdback || typeof holdback !== "object") continue;
+      if (String(holdback.status ?? "").toLowerCase() !== "held") continue;
+      const eligibleAt = typeof holdback.releaseEligibleAt === "string" ? holdback.releaseEligibleAt : null;
+      if (!eligibleAt) continue;
+      const eligibleMs = Date.parse(eligibleAt);
+      if (!Number.isFinite(eligibleMs)) continue;
+      if (eligibleMs > nowMs) continue;
+      due.push(gate);
+    }
+    due.sort((a, b) => String(a?.holdback?.releaseEligibleAt ?? "").localeCompare(String(b?.holdback?.releaseEligibleAt ?? "")));
+
+    let processed = 0;
+    for (const gate of due.slice(0, maxMessages)) {
+      const tenantId = normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID);
+      const gateId = String(gate.gateId ?? "");
+      const holdback = gate.holdback;
+      const holdbackRunId = String(holdback.runId ?? "");
+      const amountCents = Number(holdback.amountCents ?? 0);
+      if (!gateId || !holdbackRunId || !Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+
+      const settlement = await store.getAgentRunSettlement({ tenantId, runId: holdbackRunId });
+      if (!settlement) continue;
+      if (String(settlement.status ?? "").toLowerCase() !== "locked") {
+        // Ensure the gate reflects final state even if something else resolved it.
+        if (String(holdback.status ?? "").toLowerCase() !== "released") {
+          const nextGate = normalizeForCanonicalJson(
+            {
+              ...gate,
+              holdback: { ...holdback, status: "released", releasedAt: settlement.resolvedAt ?? at },
+              updatedAt: at
+            },
+            { path: "$" }
+          );
+          await store.commitTx({ at, ops: [{ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate }] });
+        }
+        processed += 1;
+        continue;
+      }
+
+      const payerAgentId = String(settlement.payerAgentId ?? gate.payerAgentId ?? "");
+      const payeeAgentId = String(settlement.agentId ?? gate.payeeAgentId ?? "");
+      if (!payerAgentId || !payeeAgentId) continue;
+
+      const payerWalletExisting = await store.getAgentWallet({ tenantId, agentId: payerAgentId });
+      const payeeWalletExisting = await store.getAgentWallet({ tenantId, agentId: payeeAgentId });
+      if (!payerWalletExisting || !payeeWalletExisting) continue;
+
+      let payerWallet = payerWalletExisting;
+      let payeeWallet = payeeWalletExisting;
+      try {
+        const moved = releaseAgentWalletEscrowToPayee({ payerWallet, payeeWallet, amountCents, at });
+        payerWallet = moved.payerWallet;
+        payeeWallet = moved.payeeWallet;
+      } catch (err) {
+        if (err?.code === "INSUFFICIENT_ESCROW_BALANCE") continue;
+        logger.error("tickX402Holdbacks.release_failed", { err, tenantId, gateId, holdbackRunId });
+        continue;
+      }
+
+      const resolvedHoldbackSettlement = resolveAgentRunSettlement({
+        settlement,
+        status: AGENT_RUN_SETTLEMENT_STATUS.RELEASED,
+        runStatus: "completed",
+        releasedAmountCents: amountCents,
+        refundedAmountCents: 0,
+        releaseRatePct: 100,
+        decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED,
+        decisionMode: AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC,
+        decisionPolicyHash: settlement.decisionPolicyHash ?? null,
+        decisionReason: "x402_holdback_auto_release",
+        decisionTrace: {
+          schemaVersion: "X402HoldbackDecisionTrace.v1",
+          gateId,
+          releasedAmountCents: amountCents,
+          refundedAmountCents: 0
+        },
+        resolutionEventId: createId("x402hb"),
+        at
+      });
+
+      const nextGate = normalizeForCanonicalJson(
+        {
+          ...gate,
+          holdback: { ...holdback, status: "released", releasedAt: at },
+          updatedAt: at
+        },
+        { path: "$" }
+      );
+
+      await store.commitTx({
+        at,
+        ops: [
+          { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+          { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet },
+          { kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId: holdbackRunId, settlement: resolvedHoldbackSettlement },
+          { kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate }
+        ]
+      });
+      processed += 1;
+    }
+
+    return { ok: true, processed };
+  }
+
   return {
     store,
     handle,
@@ -35892,6 +36836,7 @@ export function createApi({
     tickRetentionCleanup,
     tickFinanceReconciliation,
     tickMoneyRailReconciliation,
+    tickX402Holdbacks,
     tickBillingStripeSync,
     tickProof,
     tickArtifacts,

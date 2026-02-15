@@ -155,6 +155,10 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.agentRuns.clear();
     if (!(store.arbitrationCases instanceof Map)) store.arbitrationCases = new Map();
     store.arbitrationCases.clear();
+    if (!(store.agreementDelegations instanceof Map)) store.agreementDelegations = new Map();
+    store.agreementDelegations.clear();
+    if (!(store.x402Gates instanceof Map)) store.x402Gates = new Map();
+    store.x402Gates.clear();
     if (!(store.toolCallHolds instanceof Map)) store.toolCallHolds = new Map();
     store.toolCallHolds.clear();
     if (!(store.settlementAdjustments instanceof Map)) store.settlementAdjustments = new Map();
@@ -178,6 +182,20 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           ...snap,
           tenantId: snap?.tenantId ?? tenantId,
           caseId: snap?.caseId ?? String(id)
+        });
+      }
+      if (type === "agreement_delegation") {
+        store.agreementDelegations.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          delegationId: snap?.delegationId ?? String(id)
+        });
+      }
+      if (type === "x402_gate") {
+        store.x402Gates.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          gateId: snap?.gateId ?? String(id)
         });
       }
       if (type === "tool_call_hold") {
@@ -1149,6 +1167,63 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     );
   }
 
+  async function persistAgreementDelegation(client, { tenantId, delegationId, delegation }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!delegation || typeof delegation !== "object" || Array.isArray(delegation)) {
+      throw new TypeError("delegation is required");
+    }
+    const normalizedDelegationId =
+      delegationId ? String(delegationId) : delegation.delegationId ? String(delegation.delegationId) : null;
+    if (!normalizedDelegationId) throw new TypeError("delegationId is required");
+
+    const updatedAt = parseIsoOrNull(delegation.updatedAt) ?? new Date().toISOString();
+    const normalizedDelegation = {
+      ...delegation,
+      tenantId,
+      delegationId: normalizedDelegationId,
+      updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'agreement_delegation', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedDelegationId, JSON.stringify(normalizedDelegation), updatedAt]
+    );
+  }
+
+  async function persistX402Gate(client, { tenantId, gateId, gate }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!gate || typeof gate !== "object" || Array.isArray(gate)) {
+      throw new TypeError("gate is required");
+    }
+    const normalizedGateId = gateId ? String(gateId) : gate.gateId ? String(gate.gateId) : gate.id ? String(gate.id) : null;
+    if (!normalizedGateId) throw new TypeError("gateId is required");
+
+    const updatedAt = parseIsoOrNull(gate.updatedAt) ?? new Date().toISOString();
+    const normalizedGate = {
+      ...gate,
+      tenantId,
+      gateId: normalizedGateId,
+      updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_gate', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedGateId, JSON.stringify(normalizedGate), updatedAt]
+    );
+  }
+
   async function persistToolCallHold(client, { tenantId, holdHash, hold }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     if (!hold || typeof hold !== "object" || Array.isArray(hold)) {
@@ -1643,6 +1718,8 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "AGENT_RUN_EVENTS_APPENDED",
       "AGENT_RUN_SETTLEMENT_UPSERT",
       "ARBITRATION_CASE_UPSERT",
+      "AGREEMENT_DELEGATION_UPSERT",
+      "X402_GATE_UPSERT",
       "TOOL_CALL_HOLD_UPSERT",
       "SETTLEMENT_ADJUSTMENT_PUT",
       "MARKETPLACE_RFQ_UPSERT",
@@ -2466,6 +2543,14 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           const tenantId = normalizeTenantId(op.tenantId ?? op.arbitrationCase?.tenantId ?? DEFAULT_TENANT_ID);
           await persistArbitrationCase(client, { tenantId, caseId: op.caseId, arbitrationCase: op.arbitrationCase });
         }
+        if (op.kind === "AGREEMENT_DELEGATION_UPSERT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.delegation?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistAgreementDelegation(client, { tenantId, delegationId: op.delegationId, delegation: op.delegation });
+        }
+        if (op.kind === "X402_GATE_UPSERT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.gate?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402Gate(client, { tenantId, gateId: op.gateId, gate: op.gate });
+        }
         if (op.kind === "TOOL_CALL_HOLD_UPSERT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.hold?.tenantId ?? DEFAULT_TENANT_ID);
           await persistToolCallHold(client, { tenantId, holdHash: op.holdHash, hold: op.hold });
@@ -2807,6 +2892,88 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       if (err?.code !== "42P01") throw err;
       return store.agentRunSettlements.get(makeScopedKey({ tenantId, id: String(runId) })) ?? null;
     }
+  };
+
+  store.sumWalletPolicySpendCentsForDay = async function sumWalletPolicySpendCentsForDay({
+    tenantId = DEFAULT_TENANT_ID,
+    agentId,
+    dayStartIso,
+    dayEndIso
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(agentId, "agentId");
+    assertNonEmptyString(dayStartIso, "dayStartIso");
+    assertNonEmptyString(dayEndIso, "dayEndIso");
+    const startMs = Date.parse(dayStartIso);
+    const endMs = Date.parse(dayEndIso);
+    if (!Number.isFinite(startMs)) throw new TypeError("dayStartIso must be an ISO date string");
+    if (!Number.isFinite(endMs)) throw new TypeError("dayEndIso must be an ISO date string");
+    if (!(endMs > startMs)) throw new TypeError("dayEndIso must be after dayStartIso");
+
+    let runSum = 0;
+    try {
+      const res = await pool.query(
+        `
+          SELECT COALESCE(SUM(amount_cents), 0)::bigint AS c
+          FROM agent_run_settlements
+          WHERE tenant_id = $1
+            AND payer_agent_id = $2
+            AND locked_at >= $3
+            AND locked_at < $4
+        `,
+        [tenantId, String(agentId), String(dayStartIso), String(dayEndIso)]
+      );
+      const n = Number(res.rows[0]?.c ?? 0);
+      runSum = Number.isSafeInteger(n) && n >= 0 ? n : 0;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      for (const row of store.agentRunSettlements.values()) {
+        if (!row || typeof row !== "object") continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+        const lockedAt = row.lockedAt ?? null;
+        const lockedMs = typeof lockedAt === "string" ? Date.parse(lockedAt) : NaN;
+        if (!Number.isFinite(lockedMs)) continue;
+        if (lockedMs < startMs || lockedMs >= endMs) continue;
+        const amountCents = Number(row.amountCents ?? 0);
+        if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+        runSum += amountCents;
+      }
+    }
+
+    let holdSum = 0;
+    try {
+      const res = await pool.query(
+        `
+          SELECT COALESCE(SUM((snapshot_json->>'heldAmountCents')::bigint), 0)::bigint AS c
+          FROM snapshots
+          WHERE tenant_id = $1
+            AND aggregate_type = 'tool_call_hold'
+            AND snapshot_json->>'payerAgentId' = $2
+            AND (snapshot_json->>'createdAt')::timestamptz >= $3::timestamptz
+            AND (snapshot_json->>'createdAt')::timestamptz < $4::timestamptz
+        `,
+        [tenantId, String(agentId), String(dayStartIso), String(dayEndIso)]
+      );
+      const n = Number(res.rows[0]?.c ?? 0);
+      holdSum = Number.isSafeInteger(n) && n >= 0 ? n : 0;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      for (const row of store.toolCallHolds.values()) {
+        if (!row || typeof row !== "object") continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (String(row.payerAgentId ?? "") !== String(agentId)) continue;
+        const createdAt = row.createdAt ?? null;
+        const createdMs = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+        if (!Number.isFinite(createdMs)) continue;
+        if (createdMs < startMs || createdMs >= endMs) continue;
+        const heldAmountCents = Number(row.heldAmountCents ?? 0);
+        if (!Number.isSafeInteger(heldAmountCents) || heldAmountCents <= 0) continue;
+        holdSum += heldAmountCents;
+      }
+    }
+
+    return runSum + holdSum;
   };
 
   function arbitrationCaseSnapshotRowToRecord(row) {

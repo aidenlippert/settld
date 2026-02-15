@@ -22,7 +22,9 @@ export function loadKeypairsJsonFromFile({ keysPath, enforcePerms = true } = {})
   const raw = fsSync.readFileSync(abs, "utf8");
   const json = JSON.parse(raw);
   if (!isPlainObject(json)) throw new TypeError("keys file must be a JSON object");
-  if (enforcePerms) {
+  // Windows does not provide reliable POSIX mode bits; enforcing 0600 based on fs.statSync().mode
+  // causes false positives (and breaks cross-platform smoke tests).
+  if (enforcePerms && process.platform !== "win32") {
     try {
       const st = fsSync.statSync(abs);
       if (typeof st?.mode === "number" && hasAnyGroupOrOtherBits(st.mode)) {
@@ -87,4 +89,3 @@ export function createLocalSignerProvider({ keypairsJson } = {}) {
     }
   };
 }
-

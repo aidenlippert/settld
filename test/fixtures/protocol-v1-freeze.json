@@ -1,7 +1,8 @@
 {
   "schemaVersion": "ProtocolV1Freeze.v1",
   "files": {
-    "test/fixtures/protocol-vectors/v1.json": "6c245522d83625cd71f2620faabdf7f6150835a96113307be5d7a1651f4c6c66",
+    "test/fixtures/protocol-vectors/v1.json": "156429f6b7fdf3592b00b798db211fcfc0cb1f2d0446fef4b1ea2a0741684f43",
+    "docs/spec/schemas/AgreementDelegation.v1.schema.json": "55c2bd349a4393dd3bf54de948653c519a85d57e6366471f4dcd144594b6dd9e",
     "docs/spec/schemas/BundleHeadAttestation.v1.schema.json": "101345071099e8bc0daebe4d39f09e68c1c439f20d5f9d5ef817b1e8ef32555d",
     "docs/spec/schemas/FinancePackBundleManifest.v1.schema.json": "05ec300543ae87b231462906b9df8253b1cbdec9170df4e962451b5d0580aeea",
     "docs/spec/schemas/GovernancePolicy.v1.schema.json": "457769d80327ec6ea77cce1335d182f2f3e27619f4665eab12f13aa584aebd8f",
@@ -9,6 +10,8 @@
     "docs/spec/schemas/PublicKeys.v1.schema.json": "9407919238468fcc2fdce9078b421b6353778a31c4d76d677bc3b8eb9b32b940",
     "docs/spec/schemas/RevocationList.v1.schema.json": "d73756a538f210b3883c2e7427432145ae9e21e884780ee49c5ed485b80dd667",
     "docs/spec/schemas/TimestampProof.v1.schema.json": "8eeefd57e961d85b0e8157e1c43bea6f71c6005582beed035fa12bd88cbbc75a",
+    "docs/spec/schemas/ToolCallAgreement.v1.schema.json": "ad72962b63e237b9f1722ff0887b53e7a4b9787ec1d189b667de7b7b7a122eac",
+    "docs/spec/schemas/ToolCallEvidence.v1.schema.json": "73958b75580f2edf297fddc445b4ab15e7486d38c010a4023e1ff8d174c5886d",
     "docs/spec/schemas/ToolManifest.v1.schema.json": "2f7afeb1a9e6b2839758158800c234b0d71663aa1030252353f71a013f87b11e",
     "docs/spec/schemas/VerificationReport.v1.schema.json": "b6f83cadf1c1c2001da201143e27f9a2abef0d410360cb91c7c02dd23b177aa6",
     "docs/spec/schemas/VerifyAboutOutput.v1.schema.json": "198bdc2a795cf1416068649ff506f06f8f0c5292359dc100d95ad83623509e79",

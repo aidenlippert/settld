@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/AgreementDelegation.v1.schema.json",
+  "title": "AgreementDelegation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "delegationId",
+    "tenantId",
+    "parentAgreementHash",
+    "childAgreementHash",
+    "delegatorAgentId",
+    "delegateeAgentId",
+    "budgetCapCents",
+    "currency",
+    "delegationDepth",
+    "maxDelegationDepth",
+    "createdAt",
+    "delegationHash",
+    "status",
+    "revision",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "AgreementDelegation.v1" },
+    "delegationId": { "type": "string", "minLength": 3, "maxLength": 240, "pattern": "^[A-Za-z0-9:_-]+$" },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9:_-]+$" },
+    "parentAgreementHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "childAgreementHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "delegatorAgentId": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[A-Za-z0-9:_-]+$" },
+    "delegateeAgentId": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[A-Za-z0-9:_-]+$" },
+    "budgetCapCents": { "type": "integer", "minimum": 1 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 12, "pattern": "^[A-Z][A-Z0-9_]{2,11}$" },
+    "delegationDepth": { "type": "integer", "minimum": 0 },
+    "maxDelegationDepth": { "type": "integer", "minimum": 0 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "ancestorChain": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "delegationHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "status": { "type": "string", "enum": ["active", "settled", "revoked"] },
+    "resolvedAt": { "type": "string", "format": "date-time" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "metadata": { "type": "object", "additionalProperties": true }
+  }
+}
+

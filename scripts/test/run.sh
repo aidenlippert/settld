@@ -7,6 +7,8 @@ PROBLEM_TESTS=(
   "test/api-python-sdk-first-paid-task-smoke.test.js"
   "test/api-python-sdk-first-verified-run-smoke.test.js"
   "test/magic-link-service.test.js"
+  "test/mcp-http-gateway.test.js"
+  "test/mcp-stdio-spike.test.js"
   "test/payment-triggers.test.js"
   "test/sdk-tenant-analytics-examples-smoke.test.js"
   "test/trust-config-wizard-cli.test.js"

@@ -95,7 +95,23 @@ export async function createPgPool({ databaseUrl, schema = "public" } = {}) {
   if (schema !== "public") {
     // Concurrency-safe: docker-compose may start multiple processes (api + maintenance)
     // that race to initialize the same schema.
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schema)}`);
+    try {
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schema)}`);
+    } catch (err) {
+      // Postgres documents that IF NOT EXISTS can still raise errors under concurrent creation.
+      // In practice we can see 23505 (unique violation on pg_namespace) or 42P06 (duplicate schema).
+      const code = typeof err?.code === "string" ? err.code : "";
+      if (code === "23505" || code === "42P06") {
+        const exists = await pool.query("SELECT 1 FROM pg_namespace WHERE nspname = $1 LIMIT 1", [schema]);
+        if (exists?.rowCount) {
+          // Another process won the race; continue.
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
   }
 
   pool.on("connect", (client) => {

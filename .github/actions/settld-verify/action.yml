@@ -81,20 +81,28 @@ runs:
             echo "trust_file not found: $TRUST_FILE" >&2
             exit 2
           fi
-          node -e '
-            import fs from "node:fs";
-            const p = process.env.TRUST_FILE;
-            const t = JSON.parse(fs.readFileSync(p, "utf8"));
-            const gov = t?.governanceRoots ?? {};
-            const time = t?.timeAuthorities ?? {};
-            process.stdout.write(`SETTLD_TRUSTED_GOVERNANCE_ROOT_KEYS_JSON=${JSON.stringify(gov)}\n`);
-            if (time && Object.keys(time).length) {
-              process.stdout.write(`SETTLD_TRUSTED_TIME_AUTHORITY_KEYS_JSON=${JSON.stringify(time)}\n`);
-            }
-          ' >> "$GITHUB_ENV"
+          # NOTE: $GITHUB_ENV is applied after the step completes; we need these env vars now.
+          {
+            IFS= read -r GOV_JSON
+            IFS= read -r TIME_JSON || true
+          } < <(
+            TRUST_FILE="$TRUST_FILE" node -e '
+              import fs from "node:fs";
+              const p = process.env.TRUST_FILE;
+              const t = JSON.parse(fs.readFileSync(p, "utf8"));
+              const gov = t?.governanceRoots ?? {};
+              const time = t?.timeAuthorities ?? {};
+              process.stdout.write(`${JSON.stringify(gov)}\n`);
+              process.stdout.write(`${Object.keys(time || {}).length ? JSON.stringify(time) : ""}\n`);
+            '
+          )
+          export SETTLD_TRUSTED_GOVERNANCE_ROOT_KEYS_JSON="$GOV_JSON"
+          if [[ -n "${TIME_JSON:-}" ]]; then
+            export SETTLD_TRUSTED_TIME_AUTHORITY_KEYS_JSON="$TIME_JSON"
+          fi
         fi
 
-        KIND_FLAG="$(node -e '
+        KIND_FLAG="$(BUNDLE_PATH="$BUNDLE_PATH" node -e '
           import fs from "node:fs";
           import path from "node:path";
           const dir = process.env.BUNDLE_PATH;
@@ -123,7 +131,7 @@ runs:
             console.error(`unsupported/unknown bundle kind: ${kind || "(missing)"}`);
             process.exit(2);
           }
-        ' BUNDLE_PATH="$BUNDLE_PATH")"
+        ')"
 
         ARGS=(--format json --hash-concurrency "$HASH_CONCURRENCY")
         if [[ "$STRICT" == "true" ]]; then ARGS+=(--strict); fi

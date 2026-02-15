@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/ToolCallEvidence.v1.schema.json",
+  "title": "ToolCallEvidence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "agreementHash",
+    "callId",
+    "inputHash",
+    "outputHash",
+    "outputRef",
+    "metrics",
+    "startedAt",
+    "completedAt",
+    "createdAt",
+    "evidenceHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ToolCallEvidence.v1" },
+    "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "callId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "inputHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "outputHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "outputRef": { "type": ["string", "null"], "minLength": 1, "maxLength": 2048 },
+    "metrics": { "type": ["object", "null"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "evidenceHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signature": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["algorithm", "signerKeyId", "evidenceHash", "signature"],
+      "properties": {
+        "algorithm": { "const": "ed25519" },
+        "signerKeyId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "evidenceHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "signature": { "type": "string", "minLength": 1, "maxLength": 16384 }
+      }
+    }
+  }
+}
+

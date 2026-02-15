@@ -86,16 +86,17 @@ async function waitUntil(fn, { timeoutMs = 10_000, intervalMs = 50 } = {}) {
       const outboxId = Number(outboxInserted.rows?.[0]?.id ?? 0);
       assert.ok(Number.isFinite(outboxId) && outboxId > 0);
 
-      // Any write request will call outbox processing and should crash during ledger apply.
+      // Drain outbox through the ops endpoint so pg-mode tests don't depend on PROXY_AUTOTICK.
+      // Server should crash during ledger apply due to the failpoint.
       await requestJson({
         baseUrl: server1.baseUrl,
         method: "POST",
-        path: "/robots/register",
-        headers: authHeaders(),
-        body: { robotId: `rob_${schema}`, publicKeyPem: createEd25519Keypair().publicKeyPem }
+        path: "/ops/maintenance/outbox/run",
+        headers: { ...authHeaders(), "x-proxy-tenant-id": "tenant_default" },
+        body: { maxMessages: 1000, passes: 3 }
       }).catch(() => {});
 
-      const exit = await server1.waitForExit({ timeoutMs: 10_000 });
+      const exit = await server1.waitForExit();
       assert.equal(exit.signal, "SIGKILL");
 
       const port2 = await getFreePort();
@@ -109,13 +110,12 @@ async function waitUntil(fn, { timeoutMs = 10_000, intervalMs = 50 } = {}) {
       try {
         await waitForHealth({ baseUrl: server2.baseUrl, timeoutMs: 10_000 });
 
-        // Trigger outbox processing again.
         await requestJson({
           baseUrl: server2.baseUrl,
           method: "POST",
-          path: "/robots/register",
-          headers: authHeaders(),
-          body: { robotId: `rob2_${schema}`, publicKeyPem: createEd25519Keypair().publicKeyPem }
+          path: "/ops/maintenance/outbox/run",
+          headers: { ...authHeaders(), "x-proxy-tenant-id": "tenant_default" },
+          body: { maxMessages: 1000, passes: 10 }
         });
 
         await waitUntil(async () => {

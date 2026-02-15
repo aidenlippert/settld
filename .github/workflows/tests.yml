@@ -46,7 +46,7 @@ jobs:
 
   unit_tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:15
@@ -72,6 +72,24 @@ jobs:
         run: npm test
         env:
           DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+
+  x402_quickstart_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run x402 quickstart (CI mode)
+        run: |
+          set -euo pipefail
+          SETTLD_QUICKSTART_KEEP_ALIVE=0 \
+          HOLDBACK_BPS=2000 \
+          DISPUTE_WINDOW_MS=3600000 \
+          npm run quickstart:x402
 
   deploy_safety_smoke:
     runs-on: ubuntu-latest

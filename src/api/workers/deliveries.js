@@ -40,6 +40,13 @@ function computeBackoffMs({ attempts, baseMs = 1000, maxMs = 60_000, random = Ma
   return Math.max(baseMs, Math.floor(raw * jitter));
 }
 
+function headerSafeValue(value) {
+  // Prevent fetch/undici from throwing on invalid header values (CTL chars, newlines).
+  // `orderKey` is allowed to include newlines internally; for transport we normalize it.
+  const s = String(value ?? "");
+  return s.replaceAll(/[\u0000-\u001F\u007F]/g, " ").trim();
+}
+
 async function fetchWithTimeout(fetchFn, url, options, timeoutMs) {
   if (typeof fetchFn !== "function") throw new TypeError("fetchFn must be a function");
   const ms = Number(timeoutMs);
@@ -255,7 +262,7 @@ export function createDeliveryWorker({
             "x-proxy-artifact-type": String(delivery.artifactType ?? ""),
             "x-proxy-artifact-id": String(delivery.artifactId ?? ""),
             "x-proxy-artifact-hash": String(delivery.artifactHash ?? ""),
-            "x-proxy-order-key": String(delivery.orderKey ?? ""),
+            "x-proxy-order-key": headerSafeValue(delivery.orderKey ?? ""),
             "x-proxy-timestamp": timestamp,
             "x-proxy-signature": signature
           },
@@ -265,7 +272,16 @@ export function createDeliveryWorker({
       );
     } catch (err) {
       const isTimeout = err?.name === "AbortError" || String(err?.message ?? "").toLowerCase().includes("timeout");
-      return { ok: false, status: null, error: isTimeout ? "timeout" : "network error", destinationType: "webhook", failureReason: isTimeout ? "timeout" : "network_error" };
+      const code = typeof err?.cause?.code === "string" ? err.cause.code : typeof err?.code === "string" ? err.code : null;
+      const msg = typeof err?.message === "string" && err.message.trim() ? err.message.trim() : String(err ?? "");
+      const detail = code ? `${code}: ${msg || "fetch failed"}` : msg || "fetch failed";
+      return {
+        ok: false,
+        status: null,
+        error: isTimeout ? "timeout" : `network error: ${detail}`,
+        destinationType: "webhook",
+        failureReason: isTimeout ? "timeout" : "network_error"
+      };
     }
 
     const ok = res.status >= 200 && res.status < 300;

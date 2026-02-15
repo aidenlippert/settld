@@ -54,8 +54,10 @@ function makeInProcessFetch(api) {
     const now = Date.now();
     const availStartAt = new Date(now - 60 * 60_000).toISOString();
     const availEndAt = new Date(now + 24 * 60 * 60_000).toISOString();
-    const startAt = new Date(now + 10 * 60_000).toISOString();
-    const endAt = new Date(now + 70 * 60_000).toISOString();
+    // /jobs/:jobId/events rejects event.at >5m in the future. Keep the entire access+execution
+    // timeline within that skew so the pg e2e remains deterministic on CI runners.
+    const startAt = new Date(now + 60_000).toISOString(); // +1m
+    const endAt = new Date(now + 10 * 60_000).toISOString(); // +10m
 
     const { publicKeyPem: robotPublicKeyPem, privateKeyPem: robotPrivateKeyPem } = createEd25519Keypair();
     const robotKeyId = keyIdFromPublicKeyPem(robotPublicKeyPem);
@@ -139,7 +141,7 @@ function makeInProcessFetch(api) {
     );
 
     // EN_ROUTE -> ACCESS_GRANTED
-    const accessAt = new Date(Date.parse(startAt) + 5 * 60_000).toISOString();
+    const accessAt = new Date(Date.parse(startAt) + 30_000).toISOString();
     await sdk.appendEvent(
       jobId,
       "ACCESS_GRANTED",
@@ -177,8 +179,7 @@ function makeInProcessFetch(api) {
     );
 
     // COMPLETED -> SETTLED (server-signed)
-    const settledAt = new Date(Date.parse(doneAt) + 5_000).toISOString();
-    await sdk.appendEvent(jobId, "SETTLED", { type: "finance", id: "settlement_v1" }, null, { mode: "server", at: settledAt });
+    await sdk.appendEvent(jobId, "SETTLED", { type: "finance", id: "settlement_v1" }, null, { mode: "server" });
 
     // Generate artifacts and deliver.
     for (let i = 0; i < 50; i += 1) {

@@ -21,3 +21,11 @@ Settld verification is designed to be diagnosable from **structured, stable outp
 - Warning codes and remediation: `docs/spec/WARNINGS.md`
 - Trust anchor posture: `docs/spec/TRUST_ANCHORS.md`
 - Strict/non-strict semantics: `docs/spec/STRICTNESS.md`
+
+## Quickstart failures (Docker / local dev)
+
+If you're stuck getting the quickstart running:
+
+1. Run `./scripts/collect-debug.sh`
+2. Attach the resulting `settld-debug-*.tar.gz` to a GitHub issue using the \"Quickstart failure\" template:
+   - https://github.com/aidenlippert/settld/issues/new?template=quickstart-failure.yml
