@@ -1,6 +1,8 @@
 # Settld
 
-Settld is the closure layer for delegated autonomous work: **verify what happened**, retain **audit-ready evidence**, and **settle** outcomes deterministically.
+Settld is verify-before-release receipts for delegated autonomous work: **verify what happened**, retain **audit-ready evidence**, and **settle** outcomes deterministically.
+
+Wedge (current): an x402-style gateway that turns `HTTP 402` into `hold -> verify -> release/refund`, with deterministic receipts. Default posture is strict: **hold 100% until PASS**; **refund on FAIL**. Optionally require an **Ed25519 provider signature** over the upstream response hash.
 
 What you get in this repo:
 
