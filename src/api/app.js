@@ -115,6 +115,7 @@ import {
 } from "../core/dispute-open-envelope.js";
 import { buildSettldAgentCard } from "../core/agent-card.js";
 import { buildX402SettlementTerms, parseX402PaymentRequired } from "../core/x402-gate.js";
+import { createCircleReserveAdapter } from "../core/circle-reserve-adapter.js";
 import {
   REPUTATION_EVENT_KIND,
   REPUTATION_EVENT_SCHEMA_VERSION,
@@ -229,6 +230,8 @@ import {
   extractSettlementKernelArtifacts,
   verifySettlementKernelArtifacts
 } from "../core/settlement-kernel.js";
+import { buildSettldPayPayloadV1, computeSettldPayTokenSha256, mintSettldPayTokenV1 } from "../core/settld-pay-token.js";
+import { buildSettldPayKeysetV1 } from "../core/settld-keys.js";
 import {
   buildMarketplaceOffer,
   buildMarketplaceAcceptance
@@ -322,7 +325,11 @@ export function createApi({
   moneyRailReconcileIntervalSeconds = null,
   moneyRailReconcileMaxTenants = null,
   moneyRailReconcileMaxPeriodsPerTenant = null,
-  moneyRailReconcileMaxProvidersPerTenant = null
+  moneyRailReconcileMaxProvidersPerTenant = null,
+  x402ReserveAdapter = null,
+  settldPayTokenTtlSeconds = null,
+  settldPayFallbackKeys = null,
+  settldPayIssuer = null
 } = {}) {
   const apiStartedAtMs = Date.now();
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
@@ -975,9 +982,93 @@ export function createApi({
     return value;
   }
 
+  function parseBooleanLike(value, fallback = false) {
+    if (value === null || value === undefined || String(value).trim() === "") return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+    throw new TypeError("boolean-like value must be true|false");
+  }
+
+  function normalizeSettldPayFallbackKeysInput(raw) {
+    if (raw === null || raw === undefined || raw === "") return [];
+    let parsed = raw;
+    if (typeof parsed === "string") {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch (err) {
+        throw new TypeError(`invalid SETTLD_PAY_FALLBACK_KEYS JSON: ${err?.message ?? String(err ?? "")}`);
+      }
+    }
+    const entries = Array.isArray(parsed) ? parsed : [parsed];
+    const out = [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const publicKeyPem = typeof entry.publicKeyPem === "string" && entry.publicKeyPem.trim() !== "" ? entry.publicKeyPem.trim() : null;
+      if (!publicKeyPem) continue;
+      const keyId = typeof entry.keyId === "string" && entry.keyId.trim() !== "" ? entry.keyId.trim() : null;
+      out.push({ publicKeyPem, keyId });
+    }
+    return out;
+  }
+
   // Keep in-memory derived subsystems (deliveries/correlations) time-consistent in tests.
   if (store && typeof store === "object" && typeof store.nowIso === "function") {
     store.nowIso = nowIso;
+  }
+
+  const settldPayIssuerValue =
+    typeof settldPayIssuer === "string" && settldPayIssuer.trim() !== ""
+      ? settldPayIssuer.trim()
+      : typeof process !== "undefined" && typeof process.env.SETTLD_PAY_ISSUER === "string" && process.env.SETTLD_PAY_ISSUER.trim() !== ""
+        ? process.env.SETTLD_PAY_ISSUER.trim()
+        : "settld";
+  const settldPayTokenTtlSecondsValue = (() => {
+    const raw =
+      settldPayTokenTtlSeconds ??
+      (typeof process !== "undefined" ? (process.env.SETTLD_PAY_TOKEN_TTL_SECONDS ?? null) : null) ??
+      300;
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n <= 0 || n > 3600) throw new TypeError("SETTLD_PAY_TOKEN_TTL_SECONDS must be an integer within 1..3600");
+    return n;
+  })();
+  const settldPayFallbackKeysValue = (() => {
+    const explicit = normalizeSettldPayFallbackKeysInput(settldPayFallbackKeys);
+    if (explicit.length > 0) return explicit;
+    const fromEnvJson =
+      typeof process !== "undefined" ? normalizeSettldPayFallbackKeysInput(process.env.SETTLD_PAY_FALLBACK_KEYS ?? null) : [];
+    if (fromEnvJson.length > 0) return fromEnvJson;
+    const singlePem =
+      typeof process !== "undefined" && typeof process.env.SETTLD_PAY_FALLBACK_PUBLIC_KEY_PEM === "string"
+        ? process.env.SETTLD_PAY_FALLBACK_PUBLIC_KEY_PEM.trim()
+        : "";
+    if (!singlePem) return [];
+    const singleKid =
+      typeof process !== "undefined" && typeof process.env.SETTLD_PAY_FALLBACK_KEY_ID === "string"
+        ? process.env.SETTLD_PAY_FALLBACK_KEY_ID.trim()
+        : "";
+    return [{ publicKeyPem: singlePem, keyId: singleKid || null }];
+  })();
+  const x402RequireExternalReserve = (() => {
+    const raw = typeof process !== "undefined" ? process.env.X402_REQUIRE_EXTERNAL_RESERVE : null;
+    return parseBooleanLike(raw, false);
+  })();
+  const x402ReserveMode = (() => {
+    const raw = typeof process !== "undefined" ? process.env.X402_CIRCLE_RESERVE_MODE : null;
+    if (raw === null || raw === undefined || String(raw).trim() === "") return "stub";
+    return String(raw).trim();
+  })();
+  const circleReserveAdapter = x402ReserveAdapter ?? createCircleReserveAdapter({ mode: x402ReserveMode, now: nowIso });
+
+  function buildSettldPayKeyset() {
+    return buildSettldPayKeysetV1({
+      activeKey: {
+        keyId: store.serverSigner.keyId,
+        publicKeyPem: store.serverSigner.publicKeyPem
+      },
+      fallbackKeys: settldPayFallbackKeysValue,
+      refreshedAt: nowIso()
+    });
   }
 
   const CANONICAL_MONEY_RAIL_PROVIDER_EVENT_TYPES = new Set(Object.values(MONEY_RAIL_PROVIDER_EVENT_TYPE));
@@ -7388,7 +7479,8 @@ export function createApi({
     releaseRatePct = null,
     finalityState = SETTLEMENT_FINALITY_STATE.PENDING,
     settledAt = null,
-    createdAt
+    createdAt,
+    bindings = null
 	  }) {
 	    if (!settlement || typeof settlement !== "object") return { decisionRecord: null, settlementReceipt: null };
 	    const at = createdAt ?? nowIso();
@@ -7449,12 +7541,13 @@ export function createApi({
 		      policyHashUsed: effectivePolicyHash,
 		      verificationMethodHashUsed: effectiveVerificationMethodHash ?? undefined,
 		      policyRef: { policyHash: effectivePolicyHash, verificationMethodHash: effectiveVerificationMethodHash },
-		      verifierRef: {
+      verifierRef: {
 		        verifierId,
 		        verifierVersion,
 		        verifierHash,
 		        modality: verificationMethodMode ?? null
 	      },
+      ...(bindings && typeof bindings === "object" && !Array.isArray(bindings) ? { bindings } : {}),
       runStatus: run?.status ?? settlement.runStatus ?? null,
       runLastEventId: run?.lastEventId ?? null,
       runLastChainHash: run?.lastChainHash ?? null,
@@ -7496,6 +7589,7 @@ export function createApi({
       resolutionEventId: resolutionEventId ?? settlement.resolutionEventId ?? null,
       finalityState,
       settledAt: settledAt ?? settlement.resolvedAt ?? null,
+      ...(bindings && typeof bindings === "object" && !Array.isArray(bindings) ? { bindings } : {}),
       createdAt: at
     });
     return { decisionRecord, settlementReceipt: receipt };
@@ -7537,6 +7631,41 @@ export function createApi({
       errors: verification.errors
     };
     throw err;
+  }
+
+  function parseEvidenceRefSha256(evidenceRefs, prefix) {
+    if (!Array.isArray(evidenceRefs)) return null;
+    const normalizedPrefix = typeof prefix === "string" && prefix.trim() !== "" ? prefix.trim() : "";
+    if (!normalizedPrefix) return null;
+    for (const row of evidenceRefs) {
+      const text = typeof row === "string" ? row.trim() : "";
+      if (!text || !text.startsWith(normalizedPrefix)) continue;
+      const candidate = text.slice(normalizedPrefix.length).trim().toLowerCase();
+      if (/^[0-9a-f]{64}$/.test(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  function normalizeProviderSignatureStatus({
+    providerSignatureRequired = false,
+    providerSignature = null,
+    providerReasonCodes = []
+  } = {}) {
+    const required = providerSignatureRequired === true;
+    const present = providerSignature && typeof providerSignature === "object" && !Array.isArray(providerSignature);
+    const verified = required ? present && (!Array.isArray(providerReasonCodes) || providerReasonCodes.length === 0) : present;
+    const providerKeyId = present && typeof providerSignature.keyId === "string" && providerSignature.keyId.trim() !== "" ? providerSignature.keyId : null;
+    const firstReason =
+      Array.isArray(providerReasonCodes) && providerReasonCodes.length > 0 && typeof providerReasonCodes[0] === "string"
+        ? providerReasonCodes[0]
+        : null;
+    return {
+      required,
+      present,
+      verified,
+      providerKeyId,
+      error: firstReason
+    };
   }
 
   async function getArbitrationCaseRecord({ tenantId, caseId }) {
@@ -16359,6 +16488,7 @@ export function createApi({
           (req.method === "GET" && path === "/healthz") ||
           (req.method === "GET" && path === "/capabilities") ||
           (req.method === "GET" && path === "/.well-known/agent.json") ||
+          (req.method === "GET" && path === "/.well-known/settld-keys.json") ||
           (req.method === "GET" && path === "/openapi.json") ||
           (req.method === "POST" && path === "/ingest/proxy") ||
           (req.method === "POST" && path === "/exports/ack");
@@ -16549,6 +16679,16 @@ export function createApi({
           const version = typeof process !== "undefined" ? (process.env.SETTLD_VERSION ?? null) : null;
           const card = buildSettldAgentCard({ baseUrl, version });
           return sendJson(res, 200, card);
+        }
+
+        if (req.method === "GET" && path === "/.well-known/settld-keys.json") {
+          const keyset = buildSettldPayKeyset();
+          try {
+            res.setHeader("cache-control", "public, max-age=86400");
+          } catch {
+            // ignore
+          }
+          return sendJson(res, 200, keyset);
         }
 
 	      if (req.method === "GET" && path === "/healthz") {
@@ -28898,6 +29038,20 @@ export function createApi({
 	              ...(providerKey ? { providerKey } : {}),
 	              terms,
 	              upstream,
+              authorization: {
+                schemaVersion: "X402GateAuthorization.v1",
+                authorizationRef: `auth_${gateId}`,
+                status: "pending",
+                walletEscrow: {
+                  status: "locked",
+                  amountCents,
+                  currency,
+                  lockedAt: nowAt
+                },
+                reserve: null,
+                token: null,
+                updatedAt: nowAt
+              },
 	              status: "held",
 	              createdAt: nowAt,
 	              updatedAt: nowAt
@@ -28921,6 +29075,290 @@ export function createApi({
           }
           await store.commitTx({ at: nowAt, ops });
           return sendJson(res, 201, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "authorize-payment" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const gateId = typeof body?.gateId === "string" && body.gateId.trim() !== "" ? body.gateId.trim() : null;
+          if (!gateId) return sendError(res, 400, "gateId is required", null, { code: "SCHEMA_INVALID" });
+
+          const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
+          if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
+          if (String(gate.status ?? "").toLowerCase() === "resolved") {
+            return sendError(res, 409, "gate is already resolved", null, { code: "X402_GATE_TERMINAL" });
+          }
+
+          const runId = String(gate.runId ?? "");
+          const settlement = typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
+          if (!settlement) return sendError(res, 404, "settlement not found for gate", null, { code: "NOT_FOUND" });
+          if (String(settlement.status ?? "").toLowerCase() !== "locked") {
+            return sendError(res, 409, "settlement already resolved", null, { code: "X402_GATE_TERMINAL" });
+          }
+
+          const payerAgentId = typeof gate?.payerAgentId === "string" && gate.payerAgentId.trim() !== "" ? gate.payerAgentId.trim() : null;
+          if (!payerAgentId) return sendError(res, 409, "gate payer missing", null, { code: "X402_GATE_INVALID" });
+
+          const amountCents = Number(gate?.terms?.amountCents ?? settlement?.amountCents ?? 0);
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return sendError(res, 409, "gate amount invalid", null, { code: "X402_GATE_INVALID" });
+          const currency =
+            typeof gate?.terms?.currency === "string" && gate.terms.currency.trim() !== ""
+              ? gate.terms.currency.trim().toUpperCase()
+              : settlement?.currency ?? "USD";
+
+          const nowAt = nowIso();
+          const nowMs = Date.parse(nowAt);
+          const nowUnix = Math.floor(nowMs / 1000);
+          const defaultAuthorizationRef = `auth_${gateId}`;
+          const existingAuthorization =
+            gate?.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization) ? gate.authorization : null;
+          const authorizationRef =
+            typeof existingAuthorization?.authorizationRef === "string" && existingAuthorization.authorizationRef.trim() !== ""
+              ? existingAuthorization.authorizationRef.trim()
+              : defaultAuthorizationRef;
+          const existingToken =
+            existingAuthorization?.token && typeof existingAuthorization.token === "object" && !Array.isArray(existingAuthorization.token)
+              ? existingAuthorization.token
+              : null;
+          const existingReserve =
+            existingAuthorization?.reserve && typeof existingAuthorization.reserve === "object" && !Array.isArray(existingAuthorization.reserve)
+              ? existingAuthorization.reserve
+              : null;
+          const existingWalletEscrow =
+            existingAuthorization?.walletEscrow && typeof existingAuthorization.walletEscrow === "object" && !Array.isArray(existingAuthorization.walletEscrow)
+              ? existingAuthorization.walletEscrow
+              : null;
+          const tokenExpiresAtMs = Number.isFinite(Date.parse(String(existingToken?.expiresAt ?? "")))
+            ? Date.parse(String(existingToken.expiresAt))
+            : Number.NaN;
+          const hasLiveToken =
+            String(existingAuthorization?.status ?? "").toLowerCase() === "reserved" &&
+            typeof existingToken?.value === "string" &&
+            existingToken.value.trim() !== "" &&
+            Number.isFinite(tokenExpiresAtMs) &&
+            tokenExpiresAtMs > nowMs &&
+            String(existingReserve?.status ?? "").toLowerCase() === "reserved" &&
+            typeof existingReserve?.reserveId === "string" &&
+            existingReserve.reserveId.trim() !== "";
+          if (hasLiveToken) {
+            const responseBody = {
+              gateId,
+              authorizationRef,
+              expiresAt: new Date(tokenExpiresAtMs).toISOString(),
+              token: existingToken.value,
+              tokenKid: existingToken.kid ?? null,
+              reserve: {
+                amountCents,
+                currency,
+                mode: existingReserve.mode ?? "transfer",
+                circleTransferId: existingReserve.reserveId,
+                reserveId: existingReserve.reserveId,
+                status: "reserved"
+              }
+            };
+            if (idemStoreKey) {
+              await store.commitTx({
+                at: nowAt,
+                ops: [{ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }]
+              });
+            }
+            return sendJson(res, 200, responseBody);
+          }
+
+          if (x402RequireExternalReserve && String(circleReserveAdapter?.mode ?? "").toLowerCase() === "stub") {
+            return sendError(res, 503, "external reserve unavailable", null, { code: "X402_RESERVE_UNAVAILABLE" });
+          }
+
+          let payerWallet = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payerAgentId }) : null;
+          if (!payerWallet) return sendError(res, 409, "payer wallet missing", null, { code: "WALLET_MISSING" });
+          let payerWalletChanged = false;
+          let walletEscrowLocked = String(existingWalletEscrow?.status ?? "").toLowerCase() === "locked";
+
+          if (!walletEscrowLocked) {
+            try {
+              payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents, at: nowAt });
+              payerWalletChanged = true;
+              walletEscrowLocked = true;
+            } catch (err) {
+              if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
+                return sendError(res, 402, "insufficient wallet balance", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+              }
+              throw err;
+            }
+          }
+
+          let reserve = existingReserve;
+          if (!(reserve && String(reserve.status ?? "").toLowerCase() === "reserved" && typeof reserve.reserveId === "string" && reserve.reserveId.trim() !== "")) {
+            try {
+              const reserved = await circleReserveAdapter.reserve({
+                tenantId,
+                gateId,
+                amountCents,
+                currency,
+                idempotencyKey: gateId,
+                payerAgentId: gate?.payerAgentId ?? null,
+                payeeAgentId: gate?.payeeAgentId ?? null
+              });
+              reserve = {
+                adapter: reserved?.adapter ?? "circle",
+                mode: reserved?.mode ?? "transfer",
+                reserveId: String(reserved?.reserveId ?? ""),
+                status: String(reserved?.status ?? "reserved"),
+                reservedAt: reserved?.createdAt ?? nowAt,
+                circleTransferId: String(reserved?.reserveId ?? "")
+              };
+              if (!reserve.reserveId) throw new TypeError("reserveId missing from reserve adapter");
+            } catch (err) {
+              // Hard guarantee: no reserve means no token. Roll back internal lock to avoid stranded funds.
+              try {
+                if (walletEscrowLocked) {
+                  payerWallet = refundAgentWalletEscrow({ wallet: payerWallet, amountCents, at: nowAt });
+                  payerWalletChanged = true;
+                  walletEscrowLocked = false;
+                }
+              } catch {
+                // keep original error below
+              }
+              const failedGate = normalizeForCanonicalJson(
+                {
+                  ...gate,
+                  authorization: {
+                    schemaVersion: "X402GateAuthorization.v1",
+                    authorizationRef,
+                    status: "failed",
+                    walletEscrow: {
+                      status: walletEscrowLocked ? "locked" : "unlocked",
+                      amountCents,
+                      currency,
+                      lockedAt: existingWalletEscrow?.lockedAt ?? nowAt
+                    },
+                    reserve: null,
+                    token: null,
+                    lastError: {
+                      code: err?.code ?? "X402_RESERVE_FAILED",
+                      message: err?.message ?? String(err ?? "")
+                    },
+                    updatedAt: nowAt
+                  },
+                  updatedAt: nowAt
+                },
+                { path: "$" }
+              );
+              const ops = [];
+              if (payerWalletChanged) ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet });
+              ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: failedGate });
+              if (idemStoreKey) {
+                ops.push({
+                  kind: "IDEMPOTENCY_PUT",
+                  key: idemStoreKey,
+                  value: {
+                    requestHash: idemRequestHash,
+                    statusCode: 503,
+                    body: { error: "reserve failed", code: "X402_RESERVE_FAILED", details: { message: err?.message ?? String(err ?? "") } }
+                  }
+                });
+              }
+              await store.commitTx({ at: nowAt, ops });
+              return sendError(res, 503, "reserve failed", { message: err?.message ?? String(err ?? "") }, { code: "X402_RESERVE_FAILED" });
+            }
+          }
+
+          const payload = buildSettldPayPayloadV1({
+            iss: settldPayIssuerValue,
+            aud: String(gate?.payeeAgentId ?? ""),
+            gateId,
+            authorizationRef,
+            amountCents,
+            currency,
+            payeeProviderId: String(gate?.payeeAgentId ?? ""),
+            iat: nowUnix,
+            exp: nowUnix + settldPayTokenTtlSecondsValue
+          });
+          const minted = mintSettldPayTokenV1({
+            payload,
+            keyId: store.serverSigner.keyId,
+            publicKeyPem: store.serverSigner.publicKeyPem,
+            privateKeyPem: store.serverSigner.privateKeyPem
+          });
+          const expiresAt = new Date(payload.exp * 1000).toISOString();
+
+          const nextGate = normalizeForCanonicalJson(
+            {
+              ...gate,
+              authorization: {
+                schemaVersion: "X402GateAuthorization.v1",
+                authorizationRef,
+                status: "reserved",
+                walletEscrow: {
+                  status: walletEscrowLocked ? "locked" : "unlocked",
+                  amountCents,
+                  currency,
+                  lockedAt: existingWalletEscrow?.lockedAt ?? nowAt
+                },
+                reserve: {
+                  adapter: reserve.adapter ?? "circle",
+                  mode: reserve.mode ?? "transfer",
+                  reserveId: reserve.reserveId,
+                  status: "reserved",
+                  reservedAt: reserve.reservedAt ?? nowAt,
+                  circleTransferId: reserve.circleTransferId ?? reserve.reserveId
+                },
+                token: {
+                  value: minted.token,
+                  kid: minted.kid,
+                  sha256: minted.tokenSha256,
+                  issuedAt: nowAt,
+                  expiresAt
+                },
+                updatedAt: nowAt
+              },
+              updatedAt: nowAt
+            },
+            { path: "$" }
+          );
+
+          const responseBody = {
+            gateId,
+            authorizationRef,
+            expiresAt,
+            token: minted.token,
+            tokenKid: minted.kid,
+            reserve: {
+              amountCents,
+              currency,
+              mode: reserve.mode ?? "transfer",
+              circleTransferId: reserve.circleTransferId ?? reserve.reserveId,
+              reserveId: reserve.reserveId,
+              status: "reserved"
+            }
+          };
+
+          const ops = [];
+          if (payerWalletChanged) ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet });
+          ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await store.commitTx({ at: nowAt, ops });
+          return sendJson(res, 200, responseBody);
         }
 
         if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "verify" && parts.length === 3 && req.method === "POST") {
@@ -28955,6 +29393,19 @@ export function createApi({
 
           if (String(settlement.status ?? "").toLowerCase() !== "locked") {
             return sendJson(res, 200, { ok: true, gate, settlement, alreadyResolved: true });
+          }
+
+          const gateAuthorization =
+            gate?.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization) ? gate.authorization : null;
+          const authorizedForSettlement =
+            String(gateAuthorization?.status ?? "").toLowerCase() === "reserved" &&
+            String(gateAuthorization?.reserve?.status ?? "").toLowerCase() === "reserved" &&
+            typeof gateAuthorization?.reserve?.reserveId === "string" &&
+            gateAuthorization.reserve.reserveId.trim() !== "" &&
+            typeof gateAuthorization?.token?.value === "string" &&
+            gateAuthorization.token.value.trim() !== "";
+          if (!authorizedForSettlement) {
+            return sendError(res, 409, "payment not authorized", null, { code: "X402_PAYMENT_NOT_AUTHORIZED" });
           }
 
           // Optional: if this gate is bound to an agreementHash, enforce that the delegation graph
@@ -29151,37 +29602,114 @@ export function createApi({
 	            throw err;
 	          }
 
-		          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
-		          const immediateReleaseRatePct =
-		            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
-		          const reasonCodes = (() => {
-		            const out = [];
-		            const push = (v) => {
-		              const s = typeof v === "string" ? v.trim() : "";
-		              if (s) out.push(s);
-		            };
-		            if (Array.isArray(policyDecision.reasonCodes)) for (const c of policyDecision.reasonCodes) push(c);
-		            for (const c of extraReasonCodes) push(c);
-		            // Deterministic ordering for receipts/logs.
-		            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
-		          })();
-		          const decisionTrace = {
-		            schemaVersion: "X402GateDecisionTrace.v1",
-		            verificationStatus: String(policyDecision.verificationStatus ?? ""),
-		            runStatus: String(policyDecision.runStatus ?? ""),
-		            shouldAutoResolve: policyDecision.shouldAutoResolve === true,
-		            reasonCodes,
-		            policyReleaseRatePct: policyDecision.releaseRatePct,
-		            policyReleasedAmountCents: releaseAmountCents,
-		            policyRefundedAmountCents: refundAmountCents,
-		            holdbackBps: normalizedHoldbackBps,
-		            holdbackAmountCents,
-	            holdbackReleaseEligibleAt,
-	            immediateReleasedAmountCents: immediateReleaseAmountCents,
-	            immediateRefundedAmountCents: immediateRefundAmountCents,
-	            releaseRatePct: immediateReleaseRatePct,
-	            verificationMethod: policyDecision.verificationMethod
-	          };
+	          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
+	          const immediateReleaseRatePct =
+	            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
+	          const reasonCodes = (() => {
+	            const out = [];
+	            const push = (v) => {
+	              const s = typeof v === "string" ? v.trim() : "";
+	              if (s) out.push(s);
+	            };
+	            if (Array.isArray(policyDecision.reasonCodes)) for (const c of policyDecision.reasonCodes) push(c);
+	            for (const c of extraReasonCodes) push(c);
+	            // Deterministic ordering for receipts/logs.
+	            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
+	          })();
+          const requestSha256 = parseEvidenceRefSha256(evidenceRefs, "http:request_sha256:");
+          const responseSha256 = parseEvidenceRefSha256(evidenceRefs, "http:response_sha256:");
+          const providerSigStatus = normalizeProviderSignatureStatus({
+            providerSignatureRequired: verificationSource === "provider_signature_v1",
+            providerSignature: body?.providerSignature ?? null,
+            providerReasonCodes: reasonCodes
+          });
+          const settlementBindings = {
+            authorizationRef:
+              typeof gateAuthorization?.authorizationRef === "string" && gateAuthorization.authorizationRef.trim() !== ""
+                ? gateAuthorization.authorizationRef
+                : `auth_${gateId}`,
+            token: {
+              kid: gateAuthorization?.token?.kid ?? null,
+              sha256:
+                gateAuthorization?.token?.sha256 ??
+                (typeof gateAuthorization?.token?.value === "string" && gateAuthorization.token.value.trim() !== ""
+                  ? computeSettldPayTokenSha256(gateAuthorization.token.value)
+                  : null),
+              expiresAt: gateAuthorization?.token?.expiresAt ?? null
+            },
+            request: {
+              sha256: requestSha256 ?? null
+            },
+            response: {
+              status:
+                body?.responseStatus === null || body?.responseStatus === undefined || body?.responseStatus === ""
+                  ? null
+                  : Number.isSafeInteger(Number(body.responseStatus))
+                    ? Number(body.responseStatus)
+                    : null,
+              sha256: responseSha256 ?? null
+            },
+            providerSig: providerSigStatus,
+            reserve: {
+              adapter: gateAuthorization?.reserve?.adapter ?? "circle",
+              mode: gateAuthorization?.reserve?.mode ?? "transfer",
+              reserveId: gateAuthorization?.reserve?.reserveId ?? null,
+              status: gateAuthorization?.reserve?.status ?? null
+            }
+          };
+
+          const settlementDecisionStatus = policyDecision.shouldAutoResolve
+            ? AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED
+            : AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_REVIEW_REQUIRED;
+          const settlementDecisionMode = policyDecision.shouldAutoResolve
+            ? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC
+            : AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW;
+          const resolutionEventId = createId("x402res");
+          const verificationMethodHashUsed = computeVerificationMethodHash(policyDecision.verificationMethod ?? {});
+          const resolvedKernelRefs = buildSettlementKernelRefs({
+            settlement,
+            run: null,
+            agreementId: gate?.agreementHash ?? null,
+            decisionStatus: settlementDecisionStatus,
+            decisionMode: settlementDecisionMode,
+            decisionReason: reasonCodes[0] ?? null,
+            verificationStatus: policyDecision.verificationStatus,
+            policyHash: policyHashUsed,
+            verificationMethodHash: verificationMethodHashUsed,
+            verificationMethodMode: policyDecision?.verificationMethod?.mode ?? null,
+            verifierId: "settld.x402",
+            verifierVersion: "v1",
+            verifierHash: null,
+            resolutionEventId,
+            status: policyDecision.settlementStatus,
+            releasedAmountCents: immediateReleaseAmountCents,
+            refundedAmountCents: immediateRefundAmountCents,
+            releaseRatePct: immediateReleaseRatePct,
+            finalityState: SETTLEMENT_FINALITY_STATE.FINAL,
+            settledAt: at,
+            createdAt: at,
+            bindings: settlementBindings
+          });
+          const decisionTrace = {
+            schemaVersion: "X402GateDecisionTrace.v1",
+            verificationStatus: String(policyDecision.verificationStatus ?? ""),
+            runStatus: String(policyDecision.runStatus ?? ""),
+            shouldAutoResolve: policyDecision.shouldAutoResolve === true,
+            reasonCodes,
+            policyReleaseRatePct: policyDecision.releaseRatePct,
+            policyReleasedAmountCents: releaseAmountCents,
+            policyRefundedAmountCents: refundAmountCents,
+            holdbackBps: normalizedHoldbackBps,
+            holdbackAmountCents,
+            holdbackReleaseEligibleAt,
+            immediateReleasedAmountCents: immediateReleaseAmountCents,
+            immediateRefundedAmountCents: immediateRefundAmountCents,
+            releaseRatePct: immediateReleaseRatePct,
+            verificationMethod: policyDecision.verificationMethod,
+            bindings: settlementBindings,
+            decisionRecord: resolvedKernelRefs.decisionRecord,
+            settlementReceipt: resolvedKernelRefs.settlementReceipt
+          };
 
 	          const resolvedSettlement = resolveAgentRunSettlement({
 	            settlement,
@@ -29190,12 +29718,12 @@ export function createApi({
 	            releasedAmountCents: immediateReleaseAmountCents,
 	            refundedAmountCents: immediateRefundAmountCents,
 	            releaseRatePct: immediateReleaseRatePct,
-		            decisionStatus: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_STATUS.AUTO_RESOLVED : AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_REVIEW_REQUIRED,
-		            decisionMode: policyDecision.shouldAutoResolve ? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC : AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+		            decisionStatus: settlementDecisionStatus,
+		            decisionMode: settlementDecisionMode,
 		            decisionPolicyHash: policyHashUsed,
 		            decisionReason: reasonCodes[0] ?? null,
 		            decisionTrace,
-		            resolutionEventId: createId("x402res"),
+		            resolutionEventId,
 		            at
 		          });
 
@@ -29280,6 +29808,22 @@ export function createApi({
 	              ...gate,
 	              status: "resolved",
 	              resolvedAt: at,
+              authorization:
+                gateAuthorization && typeof gateAuthorization === "object" && !Array.isArray(gateAuthorization)
+                  ? {
+                      ...gateAuthorization,
+                      status: "settled",
+                      reserve:
+                        gateAuthorization.reserve && typeof gateAuthorization.reserve === "object" && !Array.isArray(gateAuthorization.reserve)
+                          ? {
+                              ...gateAuthorization.reserve,
+                              status: policyDecision.settlementStatus === AGENT_RUN_SETTLEMENT_STATUS.REFUNDED ? "voided" : "settled",
+                              settledAt: at
+                            }
+                          : gateAuthorization.reserve ?? null,
+                      updatedAt: at
+                    }
+                  : null,
 		              decision: {
 		                policyHashUsed,
 		                verificationStatus: policyDecision.verificationStatus,
@@ -29294,7 +29838,11 @@ export function createApi({
 		                releaseRatePct: immediateReleaseRatePct,
 		                releasedAmountCents: immediateReleaseAmountCents,
 		                refundedAmountCents: immediateRefundAmountCents,
-		                reasonCodes
+		                reasonCodes,
+                    authorizationRef: settlementBindings.authorizationRef,
+                    requestSha256: settlementBindings.request?.sha256 ?? null,
+                    responseSha256: settlementBindings.response?.sha256 ?? null,
+                    providerSig: settlementBindings.providerSig ?? null
 		              },
 	              holdback:
 	                holdbackAmountCents > 0
@@ -29332,7 +29880,9 @@ export function createApi({
 	            gate: nextGate,
 	            settlement: resolvedSettlement,
 	            holdbackSettlement: holdbackSettlementResolved ?? holdbackSettlement ?? null,
-	            decision: policyDecision
+	            decision: policyDecision,
+            decisionRecord: resolvedKernelRefs.decisionRecord,
+            settlementReceipt: resolvedKernelRefs.settlementReceipt
 	          };
           if (idemStoreKey) {
             ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });

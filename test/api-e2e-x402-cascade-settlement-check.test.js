@@ -90,6 +90,14 @@ test("API e2e: x402 gate verify blocks on cascadeSettlementCheck failure (stable
   assert.equal(created.statusCode, 201, created.body);
   assert.equal(created.json?.gate?.agreementHash, A);
 
+  const authorized = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_cascade_1" },
+    body: { gateId }
+  });
+  assert.equal(authorized.statusCode, 200, authorized.body);
+
   const payerAfterLock = await request(api, { method: "GET", path: `/agents/${encodeURIComponent(payerAgentId)}/wallet` });
   assert.equal(payerAfterLock.statusCode, 200, payerAfterLock.body);
   assert.equal(payerAfterLock.json?.wallet?.escrowLockedCents, amountCents);
@@ -117,4 +125,3 @@ test("API e2e: x402 gate verify blocks on cascadeSettlementCheck failure (stable
   assert.equal(payeeAfter.statusCode, 200, payeeAfter.body);
   assert.equal(payeeAfter.json?.wallet?.availableCents, 0);
 });
-

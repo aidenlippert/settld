@@ -58,6 +58,14 @@ test("API e2e: x402 provider signature invalid => verification forced red and se
   });
   assert.equal(created.statusCode, 201, created.body);
 
+  const authorized = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_sig_1" },
+    body: { gateId }
+  });
+  assert.equal(authorized.statusCode, 200, authorized.body);
+
   const responseHash = sha256Hex("demo response bytes");
   const nonce = "a".repeat(16);
   const signedAt = "2026-02-15T00:00:00.000Z";
@@ -150,6 +158,14 @@ test("API e2e: pinned providerPublicKeyPem prevents key swap attacks (signature 
     }
   });
   assert.equal(created.statusCode, 201, created.body);
+
+  const authorized = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_sig_2" },
+    body: { gateId }
+  });
+  assert.equal(authorized.statusCode, 200, authorized.body);
 
   const responseHash = sha256Hex("demo response bytes 2");
   const nonce = "b".repeat(16);
