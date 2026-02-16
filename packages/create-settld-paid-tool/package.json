@@ -1,0 +1,29 @@
+{
+  "name": "create-settld-paid-tool",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aidenlippert/settld"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "create-settld-paid-tool": "./bin/create-settld-paid-tool.js"
+  },
+  "exports": {
+    ".": {
+      "default": "./src/lib.js"
+    }
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ]
+}

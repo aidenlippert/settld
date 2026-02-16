@@ -79,7 +79,14 @@ async function main() {
   sh(process.execPath, ["scripts/ci/npm-pack-smoke.mjs"]);
   sh(process.execPath, ["scripts/ci/cli-pack-smoke.mjs"]);
 
-  const npmPackages = [".", "packages/api-sdk", "packages/executor-sdk", "packages/artifact-verify"];
+  const npmPackages = [
+    ".",
+    "packages/api-sdk",
+    "packages/executor-sdk",
+    "packages/artifact-verify",
+    "packages/provider-kit",
+    "packages/create-settld-paid-tool"
+  ];
   const npmTgzs = [];
   for (const p of npmPackages) {
     // eslint-disable-next-line no-await-in-loop

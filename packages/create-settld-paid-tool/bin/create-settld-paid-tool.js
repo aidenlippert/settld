@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { runCreateSettldPaidToolCli, usage } from "../../packages/create-settld-paid-tool/src/lib.js";
+import { runCreateSettldPaidToolCli, usage } from "../src/lib.js";
 
 try {
   runCreateSettldPaidToolCli({

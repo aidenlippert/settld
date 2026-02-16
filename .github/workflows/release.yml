@@ -348,6 +348,8 @@ jobs:
           VERSION="${{ steps.v.outputs.version }}"
           npm pkg set version="$VERSION" --silent
           npm pkg set version="$VERSION" --prefix packages/api-sdk --silent
+          npm pkg set version="$VERSION" --prefix packages/provider-kit --silent
+          npm pkg set version="$VERSION" --prefix packages/create-settld-paid-tool --silent
           printf '%s\n' "$VERSION" > SETTLD_VERSION
 
       - name: Pack npm artifacts (no publish)
@@ -369,6 +371,8 @@ jobs:
           (cd packages/executor-sdk && npm pack --silent --pack-destination "$OUT")
           (cd packages/magic-link-cli && npm pack --silent --pack-destination "$OUT")
           (cd packages/metering-adapter-sdk && npm pack --silent --pack-destination "$OUT")
+          (cd packages/provider-kit && npm pack --silent --pack-destination "$OUT")
+          (cd packages/create-settld-paid-tool && npm pack --silent --pack-destination "$OUT")
           (cd . && npm pack --silent --pack-destination "$OUT")
 
           (cd "$OUT" && ls -la && sha256sum *.tgz | tee npm-SHA256SUMS)
@@ -432,6 +436,8 @@ jobs:
           VERSION="${{ steps.v.outputs.version }}"
           npm pkg set version="$VERSION" --silent
           npm pkg set version="$VERSION" --prefix packages/api-sdk --silent
+          npm pkg set version="$VERSION" --prefix packages/provider-kit --silent
+          npm pkg set version="$VERSION" --prefix packages/create-settld-paid-tool --silent
           printf '%s\n' "$VERSION" > SETTLD_VERSION
 
       - name: Publish npm packages (CLI + JS SDK)

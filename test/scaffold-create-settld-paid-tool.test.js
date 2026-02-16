@@ -51,3 +51,20 @@ test("create-settld-paid-tool scaffold writes runnable template files", async ()
   const readme = await readFile(path.join(outDir, "README.md"), "utf8");
   assert.match(readme, /SettldPay/);
 });
+
+test("create-settld-paid-tool package bin scaffolds template", async () => {
+  const tmpRoot = await mkdtemp(path.join(os.tmpdir(), "settld-scaffold-paid-tool-bin-"));
+  const outDir = path.join(tmpRoot, "paid-tool-bin");
+  const exec = await runNode({
+    cwd: REPO_ROOT,
+    args: ["packages/create-settld-paid-tool/bin/create-settld-paid-tool.js", outDir, "--provider-id", "prov_test_pkg_bin_1"]
+  });
+  assert.equal(exec.code, 0, `stderr=${exec.stderr}`);
+  assert.match(exec.stdout, /created=/);
+  assert.match(exec.stdout, /providerId=prov_test_pkg_bin_1/);
+
+  const pkg = JSON.parse(await readFile(path.join(outDir, "package.json"), "utf8"));
+  assert.equal(pkg.type, "module");
+  assert.equal(pkg.dependencies?.["@settld/provider-kit"], "latest");
+  assert.equal(fs.existsSync(path.join(outDir, "server.mjs")), true);
+});

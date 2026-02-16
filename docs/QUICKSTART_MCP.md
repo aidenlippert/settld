@@ -12,6 +12,12 @@ This quickstart connects an MCP-compatible agent/client to Settld using the Spri
 
 Boots local API + provider wrapper + x402 gateway, runs MCP `settld.exa_search_paid`, verifies signatures/tokens, and writes an artifact bundle.
 
+To scaffold your own paid tool server quickly:
+
+```bash
+npx create-settld-paid-tool my-paid-tool
+```
+
 ```bash
 npm run demo:mcp-paid-exa
 ```

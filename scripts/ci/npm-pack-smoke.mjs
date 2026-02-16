@@ -40,6 +40,7 @@ async function main() {
   const verifyPkgDir = path.resolve(repoRoot, "packages", "artifact-verify");
   const producePkgDir = path.resolve(repoRoot, "packages", "artifact-produce");
   const providerKitPkgDir = path.resolve(repoRoot, "packages", "provider-kit");
+  const paidToolScaffoldPkgDir = path.resolve(repoRoot, "packages", "create-settld-paid-tool");
 
   const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-pack-"));
   const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-install-"));
@@ -57,20 +58,27 @@ async function main() {
     sh("npm", ["pack", "--pack-destination", outDir], { cwd: verifyPkgDir, env: npmEnv });
     sh("npm", ["pack", "--pack-destination", outDir], { cwd: producePkgDir, env: npmEnv });
     sh("npm", ["pack", "--pack-destination", outDir], { cwd: providerKitPkgDir, env: npmEnv });
+    sh("npm", ["pack", "--pack-destination", outDir], { cwd: paidToolScaffoldPkgDir, env: npmEnv });
     const packed = (await fs.readdir(outDir)).filter((n) => n.endsWith(".tgz"));
     if (!packed.length) throw new Error("npm pack did not produce a .tgz in pack destination");
     const verifyCandidates = packed.filter((n) => n.startsWith("settld-artifact-verify-"));
     const produceCandidates = packed.filter((n) => n.startsWith("settld-artifact-produce-"));
     const providerKitCandidates = packed.filter((n) => n.startsWith("settld-provider-kit-"));
+    const paidToolScaffoldCandidates = packed.filter((n) => n.startsWith("create-settld-paid-tool-"));
     if (!verifyCandidates.length) throw new Error("expected settld-artifact-verify-*.tgz in pack destination");
     if (!produceCandidates.length) throw new Error("expected settld-artifact-produce-*.tgz in pack destination");
     if (!providerKitCandidates.length) throw new Error("expected settld-provider-kit-*.tgz in pack destination");
+    if (!paidToolScaffoldCandidates.length) throw new Error("expected create-settld-paid-tool-*.tgz in pack destination");
     const verifyTarball = path.join(outDir, verifyCandidates[0]);
     const produceTarball = path.join(outDir, produceCandidates[0]);
     const providerKitTarball = path.join(outDir, providerKitCandidates[0]);
+    const paidToolScaffoldTarball = path.join(outDir, paidToolScaffoldCandidates[0]);
 
     sh("npm", ["init", "-y"], { cwd: installDir, env: npmEnv });
-    sh("npm", ["install", "--silent", verifyTarball, produceTarball, providerKitTarball], { cwd: installDir, env: npmEnv });
+    sh("npm", ["install", "--silent", verifyTarball, produceTarball, providerKitTarball, paidToolScaffoldTarball], {
+      cwd: installDir,
+      env: npmEnv
+    });
 
     const verifyCliJs = path.join(installDir, "node_modules", "settld-artifact-verify", "bin", "settld-verify.js");
     const produceCliJs = path.join(installDir, "node_modules", "settld-artifact-produce", "bin", "settld-produce.js");
@@ -105,6 +113,18 @@ async function main() {
         "}"
       ].join("\n")
     });
+
+    const scaffoldOutDir = path.join(installDir, "scaffold-smoke");
+    sh("npm", ["exec", "--yes", "--", "create-settld-paid-tool", scaffoldOutDir, "--provider-id", "prov_smoke_pack"], {
+      cwd: installDir,
+      env: npmEnv
+    });
+    const scaffoldPackageJson = JSON.parse(await fs.readFile(path.join(scaffoldOutDir, "package.json"), "utf8"));
+    if (scaffoldPackageJson?.dependencies?.["@settld/provider-kit"] !== "latest") {
+      throw new Error("scaffolded package.json missing @settld/provider-kit dependency");
+    }
+    await fs.access(path.join(scaffoldOutDir, "server.mjs"));
+    await fs.access(path.join(scaffoldOutDir, ".env.example"));
 
     // Producer bootstrap: init trust + produce bundles + strict verify them using the installed packages.
     const trustOutDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-trust-init-"));
