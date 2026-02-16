@@ -25,10 +25,21 @@ function nodeCli({ cliJs, cwd, env, args }) {
   return res.stdout;
 }
 
+function nodeEvalModule({ cwd, env, source }) {
+  if (typeof source !== "string" || source.trim() === "") throw new TypeError("source is required");
+  const res = spawnSync(process.execPath, ["--input-type=module", "-e", source], { cwd, env, encoding: "utf8" });
+  if (res.status !== 0) {
+    const err = (res.stderr || res.stdout || res.error?.message || "").trim();
+    throw new Error(`node --input-type=module -e <source> failed (exit ${res.status})${err ? `: ${err}` : ""}`);
+  }
+  return res.stdout;
+}
+
 async function main() {
   const repoRoot = process.cwd();
   const verifyPkgDir = path.resolve(repoRoot, "packages", "artifact-verify");
   const producePkgDir = path.resolve(repoRoot, "packages", "artifact-produce");
+  const providerKitPkgDir = path.resolve(repoRoot, "packages", "provider-kit");
 
   const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-pack-"));
   const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-install-"));
@@ -45,17 +56,21 @@ async function main() {
 
     sh("npm", ["pack", "--pack-destination", outDir], { cwd: verifyPkgDir, env: npmEnv });
     sh("npm", ["pack", "--pack-destination", outDir], { cwd: producePkgDir, env: npmEnv });
+    sh("npm", ["pack", "--pack-destination", outDir], { cwd: providerKitPkgDir, env: npmEnv });
     const packed = (await fs.readdir(outDir)).filter((n) => n.endsWith(".tgz"));
     if (!packed.length) throw new Error("npm pack did not produce a .tgz in pack destination");
     const verifyCandidates = packed.filter((n) => n.startsWith("settld-artifact-verify-"));
     const produceCandidates = packed.filter((n) => n.startsWith("settld-artifact-produce-"));
+    const providerKitCandidates = packed.filter((n) => n.startsWith("settld-provider-kit-"));
     if (!verifyCandidates.length) throw new Error("expected settld-artifact-verify-*.tgz in pack destination");
     if (!produceCandidates.length) throw new Error("expected settld-artifact-produce-*.tgz in pack destination");
+    if (!providerKitCandidates.length) throw new Error("expected settld-provider-kit-*.tgz in pack destination");
     const verifyTarball = path.join(outDir, verifyCandidates[0]);
     const produceTarball = path.join(outDir, produceCandidates[0]);
+    const providerKitTarball = path.join(outDir, providerKitCandidates[0]);
 
     sh("npm", ["init", "-y"], { cwd: installDir, env: npmEnv });
-    sh("npm", ["install", "--silent", verifyTarball, produceTarball], { cwd: installDir, env: npmEnv });
+    sh("npm", ["install", "--silent", verifyTarball, produceTarball, providerKitTarball], { cwd: installDir, env: npmEnv });
 
     const verifyCliJs = path.join(installDir, "node_modules", "settld-artifact-verify", "bin", "settld-verify.js");
     const produceCliJs = path.join(installDir, "node_modules", "settld-artifact-produce", "bin", "settld-produce.js");
@@ -73,6 +88,23 @@ async function main() {
     if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-.]+)?$/.test(trustVer)) {
       throw new Error(`unexpected settld-trust --version output: ${JSON.stringify(trustVer)}`);
     }
+    nodeEvalModule({
+      cwd: installDir,
+      env: npmEnv,
+      source: [
+        "import * as kit from '@settld/provider-kit';",
+        "const exportsToCheck = [",
+        "  'createSettldPaidNodeHttpHandler',",
+        "  'createSettldPayKeysetResolver',",
+        "  'createInMemoryReplayStore',",
+        "  'parseSettldPayAuthorizationHeader',",
+        "  'buildPaymentRequiredHeaderValue'",
+        "];",
+        "for (const name of exportsToCheck) {",
+        "  if (typeof kit[name] !== 'function') throw new Error(`missing export: ${name}`);",
+        "}"
+      ].join("\n")
+    });
 
     // Producer bootstrap: init trust + produce bundles + strict verify them using the installed packages.
     const trustOutDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-trust-init-"));

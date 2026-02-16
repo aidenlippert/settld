@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
 
-import { canonicalJsonStringify } from "../../../src/core/canonical-json.js";
-import { keyIdFromPublicKeyPem, sha256Hex } from "../../../src/core/crypto.js";
-import { buildSettldPayKeysetV1 } from "../../../src/core/settld-keys.js";
-import { verifySettldPayTokenV1 } from "../../../src/core/settld-pay-token.js";
-import { signToolProviderSignatureV1 } from "../../../src/core/tool-provider-signature.js";
+import { canonicalJsonStringify } from "./internal/canonical-json.js";
+import { keyIdFromPublicKeyPem, sha256Hex } from "./internal/crypto.js";
+import { buildSettldPayKeysetV1 } from "./internal/settld-keys.js";
+import { verifySettldPayTokenV1 } from "./internal/settld-pay-token.js";
+import { signToolProviderSignatureV1 } from "./internal/tool-provider-signature.js";
 
 function assertFn(value, name) {
   if (typeof value !== "function") throw new TypeError(`${name} must be a function`);
