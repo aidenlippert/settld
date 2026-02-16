@@ -54,6 +54,21 @@ After adapter wiring is complete:
 CIRCLE_E2E=1 node --test test/circle-sandbox-reserve-e2e.test.js
 ```
 
+## Run full paid MCP demo in Circle mode
+
+The demo now supports explicit reserve rail mode:
+
+```bash
+SETTLD_DEMO_CIRCLE_MODE=sandbox \
+X402_REQUIRE_EXTERNAL_RESERVE=1 \
+node scripts/demo/mcp-paid-exa.mjs --circle=sandbox
+```
+
+Artifacts include:
+
+- `summary.json` with `circleMode`, `circleReserveId`, `reserveTransitions`, and `payoutDestination`.
+- `reserve-state.json` with reserve details, transition timeline, and configured Circle rail metadata.
+
 ## Pass criteria
 
 - Reserve call returns a stable `reserveId`.

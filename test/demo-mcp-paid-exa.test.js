@@ -85,4 +85,16 @@ test("demo:mcp-paid-exa script completes and writes PASS artifact bundle", async
   assert.equal(summary.ok, true, `summary failed: ${summaryRaw}`);
   assert.equal(summary.passChecks?.providerSignature, true);
   assert.equal(summary.passChecks?.tokenVerified, true);
+  assert.equal(summary.passChecks?.reserveTracked, true);
+  assert.equal(summary.circleMode, "stub");
+  assert.equal(typeof summary.circleReserveId, "string");
+  assert.ok(summary.circleReserveId.length > 0);
+
+  const reserveStateRaw = await readFile(path.join(artifactDir, "reserve-state.json"), "utf8");
+  const reserveState = JSON.parse(reserveStateRaw);
+  assert.equal(reserveState.mode, "stub");
+  assert.equal(typeof reserveState.circleReserveId, "string");
+  assert.ok(Array.isArray(reserveState.transitions));
+  assert.ok(reserveState.transitions.length >= 2);
+  assert.equal(reserveState.payoutDestination?.type, "agent_wallet");
 });

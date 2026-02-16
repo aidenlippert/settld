@@ -11,6 +11,45 @@ import { sha256Hex } from "../../src/core/crypto.js";
 import { verifySettldPayTokenV1 } from "../../src/core/settld-pay-token.js";
 import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "../../src/core/tool-provider-signature.js";
 
+function usage() {
+  return [
+    "Usage:",
+    "  node scripts/demo/mcp-paid-exa.mjs [--circle <stub|sandbox|production>]",
+    "  node scripts/demo/mcp-paid-exa.mjs --circle=sandbox",
+    "",
+    "Environment overrides:",
+    "  SETTLD_DEMO_CIRCLE_MODE=stub|sandbox|production"
+  ].join("\n");
+}
+
+function parseCliArgs(argv) {
+  const out = {
+    circleMode: null,
+    help: false
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = String(argv[i] ?? "").trim();
+    if (!arg) continue;
+    if (arg === "--help" || arg === "-h") {
+      out.help = true;
+      continue;
+    }
+    if (arg === "--circle") {
+      const value = String(argv[i + 1] ?? "").trim();
+      if (!value) throw new Error("--circle requires a value");
+      out.circleMode = value;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--circle=")) {
+      out.circleMode = arg.slice("--circle=".length).trim();
+      continue;
+    }
+    throw new Error(`unknown argument: ${arg}`);
+  }
+  return out;
+}
+
 function readIntEnv(name, fallback) {
   const raw = process.env[name];
   if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
@@ -36,6 +75,88 @@ function sanitizeIdSegment(text, { maxLen = 96 } = {}) {
   const raw = String(text ?? "").trim();
   const safe = raw.replaceAll(/[^A-Za-z0-9:_-]/g, "_").slice(0, maxLen);
   return safe || "unknown";
+}
+
+function normalizeCircleMode(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw || raw === "stub" || raw === "test") return "stub";
+  if (raw === "sandbox") return "sandbox";
+  if (raw === "production" || raw === "prod") return "production";
+  throw new Error("circle mode must be stub|sandbox|production");
+}
+
+function readEnvString(name, fallback = null) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
+  return String(raw).trim();
+}
+
+function assertCircleModeInputs({ mode }) {
+  if (mode === "stub") return;
+  const required = ["CIRCLE_API_KEY", "CIRCLE_WALLET_ID_SPEND", "CIRCLE_WALLET_ID_ESCROW", "CIRCLE_TOKEN_ID_USDC"];
+  const missing = required.filter((name) => !readEnvString(name));
+  if (missing.length > 0) {
+    throw new Error(`circle mode ${mode} requires env: ${missing.join(", ")}`);
+  }
+  const hasTemplate = Boolean(readEnvString("CIRCLE_ENTITY_SECRET_CIPHERTEXT_TEMPLATE"));
+  const hasStatic = Boolean(readEnvString("CIRCLE_ENTITY_SECRET_CIPHERTEXT")) && readBoolEnv("CIRCLE_ALLOW_STATIC_ENTITY_SECRET", false);
+  if (!hasTemplate && !hasStatic) {
+    throw new Error(
+      `circle mode ${mode} requires CIRCLE_ENTITY_SECRET_CIPHERTEXT_TEMPLATE (recommended) or CIRCLE_ENTITY_SECRET_CIPHERTEXT with CIRCLE_ALLOW_STATIC_ENTITY_SECRET=1`
+    );
+  }
+}
+
+function buildReserveTransitions(gate) {
+  const transitions = [];
+  const createdAt = typeof gate?.createdAt === "string" && gate.createdAt.trim() !== "" ? gate.createdAt : null;
+  const auth = gate?.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization) ? gate.authorization : null;
+  const reserve = auth?.reserve && typeof auth.reserve === "object" && !Array.isArray(auth.reserve) ? auth.reserve : null;
+
+  if (createdAt) {
+    transitions.push({
+      phase: "gate_created",
+      authorizationStatus: "pending",
+      reserveStatus: null,
+      at: createdAt
+    });
+  }
+
+  const reservedAt = typeof reserve?.reservedAt === "string" && reserve.reservedAt.trim() !== "" ? reserve.reservedAt : null;
+  if (reserve && reservedAt) {
+    transitions.push({
+      phase: "authorize_payment",
+      authorizationStatus: "reserved",
+      reserveStatus: "reserved",
+      at: reservedAt
+    });
+  }
+
+  const finalAuthStatus = typeof auth?.status === "string" && auth.status.trim() !== "" ? auth.status : null;
+  const finalReserveStatus = typeof reserve?.status === "string" && reserve.status.trim() !== "" ? reserve.status : null;
+  const finalAt =
+    (typeof reserve?.settledAt === "string" && reserve.settledAt.trim() !== "" ? reserve.settledAt : null) ??
+    (typeof gate?.resolvedAt === "string" && gate.resolvedAt.trim() !== "" ? gate.resolvedAt : null) ??
+    (typeof auth?.updatedAt === "string" && auth.updatedAt.trim() !== "" ? auth.updatedAt : null) ??
+    (typeof gate?.updatedAt === "string" && gate.updatedAt.trim() !== "" ? gate.updatedAt : null);
+  if (finalAuthStatus || finalReserveStatus || finalAt) {
+    const previous = transitions[transitions.length - 1] ?? null;
+    const changed =
+      !previous ||
+      previous.authorizationStatus !== finalAuthStatus ||
+      previous.reserveStatus !== finalReserveStatus ||
+      previous.at !== finalAt;
+    if (changed) {
+      transitions.push({
+        phase: "gate_verify",
+        authorizationStatus: finalAuthStatus,
+        reserveStatus: finalReserveStatus,
+        at: finalAt
+      });
+    }
+  }
+
+  return transitions;
 }
 
 function log(prefix, msg) {
@@ -219,10 +340,19 @@ async function writeArtifactJson(dir, filename, value) {
 }
 
 async function main() {
+  const cli = parseCliArgs(process.argv.slice(2));
+  if (cli.help) {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
+
   const apiPort = readIntEnv("SETTLD_DEMO_API_PORT", 3000);
   const upstreamPort = readIntEnv("SETTLD_DEMO_UPSTREAM_PORT", 9402);
   const gatewayPort = readIntEnv("SETTLD_DEMO_GATEWAY_PORT", 8402);
   const keepAlive = readBoolEnv("SETTLD_DEMO_KEEP_ALIVE", false);
+  const circleMode = normalizeCircleMode(cli.circleMode ?? readEnvString("SETTLD_DEMO_CIRCLE_MODE", "stub"));
+  const externalReserveRequired = circleMode !== "stub";
+  assertCircleModeInputs({ mode: circleMode });
   const opsToken = String(process.env.SETTLD_DEMO_OPS_TOKEN ?? "tok_ops").trim() || "tok_ops";
   const tenantId = String(process.env.SETTLD_TENANT_ID ?? "tenant_default").trim() || "tenant_default";
   const query = String(process.env.SETTLD_DEMO_QUERY ?? "dentist near me chicago").trim() || "dentist near me chicago";
@@ -258,6 +388,7 @@ async function main() {
     runId,
     artifactDir,
     providerId,
+    circleMode,
     timestamps: { startedAt: now.toISOString(), completedAt: null }
   };
 
@@ -280,7 +411,9 @@ async function main() {
       env: {
         PROXY_OPS_TOKEN: opsToken,
         BIND_HOST: "127.0.0.1",
-        PORT: String(apiPort)
+        PORT: String(apiPort),
+        X402_CIRCLE_RESERVE_MODE: circleMode,
+        X402_REQUIRE_EXTERNAL_RESERVE: externalReserveRequired ? "1" : "0"
       }
     });
     procs.push(api);
@@ -369,6 +502,40 @@ async function main() {
     if (!gateStateRes.ok) throw new Error(`gate state fetch failed: HTTP ${gateStateRes.status} ${gateStateText}`);
     await writeArtifactJson(artifactDir, "gate-state.json", gateState ?? {});
 
+    const reserveState = (() => {
+      const gate = gateState?.gate ?? null;
+      const auth = gate?.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization) ? gate.authorization : null;
+      const reserve = auth?.reserve && typeof auth.reserve === "object" && !Array.isArray(auth.reserve) ? auth.reserve : null;
+      const circleReserveId =
+        typeof reserve?.reserveId === "string" && reserve.reserveId.trim() !== ""
+          ? reserve.reserveId.trim()
+          : typeof reserve?.circleTransferId === "string" && reserve.circleTransferId.trim() !== ""
+            ? reserve.circleTransferId.trim()
+            : null;
+      return {
+        mode: circleMode,
+        externalReserveRequired,
+        authorizationRef: typeof auth?.authorizationRef === "string" ? auth.authorizationRef : null,
+        circleReserveId,
+        reserve,
+        transitions: buildReserveTransitions(gate),
+        rail: {
+          provider: "circle",
+          mode: circleMode,
+          blockchain: readEnvString("CIRCLE_BLOCKCHAIN", circleMode === "production" ? "BASE" : "BASE-SEPOLIA"),
+          tokenId: readEnvString("CIRCLE_TOKEN_ID_USDC", null),
+          spendWalletId: readEnvString("CIRCLE_WALLET_ID_SPEND", null),
+          escrowWalletId: readEnvString("CIRCLE_WALLET_ID_ESCROW", null)
+        },
+        payoutDestination: {
+          type: "agent_wallet",
+          payeeAgentId: providerId,
+          note: "Batch payout worker is not enabled in this demo run."
+        }
+      };
+    })();
+    await writeArtifactJson(artifactDir, "reserve-state.json", reserveState);
+
     const providerSignatureVerification = (() => {
       const responseHash = sha256Hex(canonicalJsonStringify(responseBody ?? {}));
       const signature = {
@@ -434,7 +601,12 @@ async function main() {
       settlementStatus: String(headers["x-settld-settlement-status"] ?? "") === "released",
       verificationStatus: String(headers["x-settld-verification-status"] ?? "") === "green",
       providerSignature: providerSignatureVerification.ok === true,
-      tokenVerified: tokenVerification.ok === true
+      tokenVerified: tokenVerification.ok === true,
+      reserveTracked:
+        typeof reserveState?.circleReserveId === "string" &&
+        reserveState.circleReserveId.trim() !== "" &&
+        Array.isArray(reserveState?.transitions) &&
+        reserveState.transitions.length >= 2
     };
 
     summary = {
@@ -444,11 +616,15 @@ async function main() {
       gateId,
       query,
       numResults,
+      circleReserveId: reserveState.circleReserveId,
+      reserveTransitions: reserveState.transitions,
+      payoutDestination: reserveState.payoutDestination,
       artifactFiles: [
         "mcp-call.raw.json",
         "mcp-call.parsed.json",
         "response-body.json",
         "gate-state.json",
+        "reserve-state.json",
         "provider-signature-verification.json",
         "settld-pay-token-verification.json"
       ],

@@ -16,6 +16,14 @@ Boots local API + provider wrapper + x402 gateway, runs MCP `settld.exa_search_p
 npm run demo:mcp-paid-exa
 ```
 
+Circle sandbox mode (real reserve path):
+
+```bash
+SETTLD_DEMO_CIRCLE_MODE=sandbox \
+X402_REQUIRE_EXTERNAL_RESERVE=1 \
+npm run demo:mcp-paid-exa -- --circle=sandbox
+```
+
 Success output:
 
 ```text
@@ -30,6 +38,7 @@ Artifact bundle includes:
 - `mcp-call.parsed.json`
 - `response-body.json`
 - `gate-state.json`
+- `reserve-state.json`
 - `provider-signature-verification.json`
 - `settld-pay-token-verification.json`
 
