@@ -9,14 +9,37 @@ This runbook covers rotation for the SettldPay Ed25519 signing key used by:
 
 - Tokens include `kid` and are signed with the active server signer key.
 - Verifiers resolve keys via `/.well-known/settld-keys.json`.
+- For file-backed deployments (`STORE=memory` with `PROXY_DATA_DIR`), key material is persisted in:
+  - `${PROXY_DATA_DIR}/server-signer.json` (active signer compatibility file)
+  - `${PROXY_DATA_DIR}/settld-pay-keyset-store.json` (active + previous key history)
 - API supports published fallback keys via:
   - `SETTLD_PAY_FALLBACK_KEYS` (JSON array of `{ keyId?, publicKeyPem }`)
   - `SETTLD_PAY_FALLBACK_PUBLIC_KEY_PEM`
   - `SETTLD_PAY_FALLBACK_KEY_ID`
 
+## Automated rotation command
+
+Run:
+
+```bash
+npm run keys:rotate -- --data-dir ./data --report artifacts/key-rotation/rotation-report.json --keep-previous 3
+```
+
+What it does:
+
+1. Generates a new Ed25519 keypair.
+2. Promotes it to active signer.
+3. Moves the prior active key into `previous[]` (published fallback set).
+4. Updates both key files in `--data-dir`.
+5. Prints:
+   - new active `kid`
+   - active JWKS entry
+   - provider notification snippet text
+6. Optionally writes a rotation report JSON artifact (`--report`).
+
 ## Planned rotation (normal)
 
-1. Generate new Ed25519 keypair.
+1. Run `npm run keys:rotate ...` (or equivalent process in your deployment pipeline).
 2. Deploy signer with new private key (but do not remove old key yet).
 3. Publish keyset including both:
    - new active key

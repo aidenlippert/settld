@@ -18,23 +18,100 @@ import { computeFinanceAccountMapHash, validateFinanceAccountMapV1 } from "../co
 import { appendChainedEvent, createChainedEvent } from "../core/event-chain.js";
 import { normalizeBillingPlanId } from "../core/billing-plans.js";
 
+const SERVER_SIGNER_FILENAME = "server-signer.json";
+const SETTLD_PAY_KEYSET_STORE_FILENAME = "settld-pay-keyset-store.json";
+
+function readJsonFileSafe(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  const raw = fs.readFileSync(filePath, "utf8");
+  return JSON.parse(raw);
+}
+
+function normalizeSettldPayPreviousRows(rows) {
+  const out = [];
+  const list = Array.isArray(rows) ? rows : [];
+  const seen = new Set();
+  for (const row of list) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const publicKeyPem = typeof row.publicKeyPem === "string" ? row.publicKeyPem : "";
+    if (!publicKeyPem.trim()) continue;
+    const derivedKeyId = keyIdFromPublicKeyPem(publicKeyPem);
+    const keyId = typeof row.keyId === "string" && row.keyId.trim() !== "" ? row.keyId.trim() : derivedKeyId;
+    if (keyId !== derivedKeyId) throw new Error("invalid settld-pay-keyset-store.json: previous[].keyId mismatch");
+    if (seen.has(keyId)) continue;
+    seen.add(keyId);
+    const rotatedAt = typeof row.rotatedAt === "string" && row.rotatedAt.trim() !== "" ? row.rotatedAt.trim() : null;
+    out.push({ keyId, publicKeyPem, rotatedAt });
+  }
+  return out;
+}
+
+function normalizeSettldPayKeysetStore(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("invalid settld-pay-keyset-store.json: object expected");
+  }
+  const active = payload.active;
+  if (!active || typeof active !== "object" || Array.isArray(active)) {
+    throw new Error("invalid settld-pay-keyset-store.json: active key missing");
+  }
+  const activePublicKeyPem = typeof active.publicKeyPem === "string" ? active.publicKeyPem : "";
+  const activePrivateKeyPem = typeof active.privateKeyPem === "string" ? active.privateKeyPem : "";
+  if (!activePublicKeyPem.trim() || !activePrivateKeyPem.trim()) {
+    throw new Error("invalid settld-pay-keyset-store.json: active keypair missing");
+  }
+  const activeDerivedKeyId = keyIdFromPublicKeyPem(activePublicKeyPem);
+  const activeKeyId = typeof active.keyId === "string" && active.keyId.trim() !== "" ? active.keyId.trim() : activeDerivedKeyId;
+  if (activeKeyId !== activeDerivedKeyId) throw new Error("invalid settld-pay-keyset-store.json: active.keyId mismatch");
+
+  const previous = normalizeSettldPayPreviousRows(payload.previous);
+  return {
+    active: {
+      keyId: activeKeyId,
+      publicKeyPem: activePublicKeyPem,
+      privateKeyPem: activePrivateKeyPem
+    },
+    previous
+  };
+}
+
 function loadOrCreateServerSigner({ persistenceDir }) {
   if (!persistenceDir) {
     const { publicKeyPem, privateKeyPem } = createEd25519Keypair();
-    return { publicKeyPem, privateKeyPem };
+    return { active: { publicKeyPem, privateKeyPem }, previous: [], source: "generated-ephemeral" };
   }
 
   fs.mkdirSync(persistenceDir, { recursive: true });
-  const signerPath = path.join(persistenceDir, "server-signer.json");
+  const keysetStorePath = path.join(persistenceDir, SETTLD_PAY_KEYSET_STORE_FILENAME);
+  const signerPath = path.join(persistenceDir, SERVER_SIGNER_FILENAME);
+  if (fs.existsSync(keysetStorePath)) {
+    const parsed = readJsonFileSafe(keysetStorePath);
+    const normalized = normalizeSettldPayKeysetStore(parsed);
+    // Keep legacy signer file in sync for compatibility with existing tooling.
+    fs.writeFileSync(
+      signerPath,
+      JSON.stringify({ publicKeyPem: normalized.active.publicKeyPem, privateKeyPem: normalized.active.privateKeyPem }, null, 2),
+      "utf8"
+    );
+    return {
+      active: { publicKeyPem: normalized.active.publicKeyPem, privateKeyPem: normalized.active.privateKeyPem },
+      previous: normalized.previous,
+      source: "keyset-store"
+    };
+  }
+
   if (fs.existsSync(signerPath)) {
     const parsed = JSON.parse(fs.readFileSync(signerPath, "utf8"));
     if (!parsed?.publicKeyPem || !parsed?.privateKeyPem) throw new Error("invalid server-signer.json");
-    return { publicKeyPem: parsed.publicKeyPem, privateKeyPem: parsed.privateKeyPem };
+    return {
+      active: { publicKeyPem: parsed.publicKeyPem, privateKeyPem: parsed.privateKeyPem },
+      previous: [],
+      source: "legacy-signer"
+    };
   }
 
   const { publicKeyPem, privateKeyPem } = createEd25519Keypair();
   fs.writeFileSync(signerPath, JSON.stringify({ publicKeyPem, privateKeyPem }, null, 2), "utf8");
-  return { publicKeyPem, privateKeyPem };
+  return { active: { publicKeyPem, privateKeyPem }, previous: [], source: "generated-persistent" };
 }
 
 export function createStore({ persistenceDir = null, serverSignerKeypair = null } = {}) {
@@ -49,8 +126,18 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     throw new Error("invalid serverSignerKeypair");
   }
 
-  const { publicKeyPem: serverPublicKeyPem, privateKeyPem: serverPrivateKeyPem } =
-    resolvedServerSignerKeypair ?? loadOrCreateServerSigner({ persistenceDir });
+  const loadedServerSigner =
+    resolvedServerSignerKeypair === null
+      ? loadOrCreateServerSigner({ persistenceDir })
+      : {
+          active: {
+            publicKeyPem: resolvedServerSignerKeypair.publicKeyPem,
+            privateKeyPem: resolvedServerSignerKeypair.privateKeyPem
+          },
+          previous: [],
+          source: "explicit-override"
+        };
+  const { publicKeyPem: serverPublicKeyPem, privateKeyPem: serverPrivateKeyPem } = loadedServerSigner.active;
   const serverKeyId = keyIdFromPublicKeyPem(serverPublicKeyPem);
 
   function parseEvidenceRetentionMaxDaysByTenant() {
@@ -238,6 +325,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
 	    idempotency: new Map(),
 	    publicKeyByKeyId,
 	    serverSigner: { keyId: serverKeyId, publicKeyPem: serverPublicKeyPem, privateKeyPem: serverPrivateKeyPem },
+      settldPayFallbackKeys: loadedServerSigner.previous.map((row) => ({ keyId: row.keyId, publicKeyPem: row.publicKeyPem })),
 	    ledgerByTenant,
 	    // Back-compat: keep store.ledger and store.config as the default tenant's objects.
 	    ledger: ledgerByTenant.get(DEFAULT_TENANT_ID),

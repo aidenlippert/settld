@@ -1017,10 +1017,29 @@ export function createApi({
     const out = [];
     for (const entry of entries) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-      const publicKeyPem = typeof entry.publicKeyPem === "string" && entry.publicKeyPem.trim() !== "" ? entry.publicKeyPem.trim() : null;
+      const publicKeyPem = typeof entry.publicKeyPem === "string" && entry.publicKeyPem.trim() !== "" ? entry.publicKeyPem : null;
       if (!publicKeyPem) continue;
       const keyId = typeof entry.keyId === "string" && entry.keyId.trim() !== "" ? entry.keyId.trim() : null;
       out.push({ publicKeyPem, keyId });
+    }
+    return out;
+  }
+
+  function mergeSettldPayFallbackKeys(...lists) {
+    const out = [];
+    const seen = new Set();
+    for (const list of lists) {
+      const rows = Array.isArray(list) ? list : [];
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        const publicKeyPem = typeof row.publicKeyPem === "string" ? row.publicKeyPem : "";
+        if (!publicKeyPem.trim()) continue;
+        const derivedKeyId = keyIdFromPublicKeyPem(publicKeyPem);
+        if (seen.has(derivedKeyId)) continue;
+        seen.add(derivedKeyId);
+        const keyId = typeof row.keyId === "string" && row.keyId.trim() !== "" ? row.keyId.trim() : derivedKeyId;
+        out.push({ publicKeyPem, keyId });
+      }
     }
     return out;
   }
@@ -1046,21 +1065,22 @@ export function createApi({
     return n;
   })();
   const settldPayFallbackKeysValue = (() => {
+    const fromStore = normalizeSettldPayFallbackKeysInput(store?.settldPayFallbackKeys ?? null);
     const explicit = normalizeSettldPayFallbackKeysInput(settldPayFallbackKeys);
-    if (explicit.length > 0) return explicit;
+    if (explicit.length > 0) return mergeSettldPayFallbackKeys(fromStore, explicit);
     const fromEnvJson =
       typeof process !== "undefined" ? normalizeSettldPayFallbackKeysInput(process.env.SETTLD_PAY_FALLBACK_KEYS ?? null) : [];
-    if (fromEnvJson.length > 0) return fromEnvJson;
+    if (fromEnvJson.length > 0) return mergeSettldPayFallbackKeys(fromStore, fromEnvJson);
     const singlePem =
       typeof process !== "undefined" && typeof process.env.SETTLD_PAY_FALLBACK_PUBLIC_KEY_PEM === "string"
         ? process.env.SETTLD_PAY_FALLBACK_PUBLIC_KEY_PEM.trim()
         : "";
-    if (!singlePem) return [];
+    if (!singlePem) return fromStore;
     const singleKid =
       typeof process !== "undefined" && typeof process.env.SETTLD_PAY_FALLBACK_KEY_ID === "string"
         ? process.env.SETTLD_PAY_FALLBACK_KEY_ID.trim()
         : "";
-    return [{ publicKeyPem: singlePem, keyId: singleKid || null }];
+    return mergeSettldPayFallbackKeys(fromStore, [{ publicKeyPem: singlePem, keyId: singleKid || null }]);
   })();
   const productionLikeEnv = isProductionLikeRuntimeEnv();
   const x402RequireExternalReserveValue = (() => {
