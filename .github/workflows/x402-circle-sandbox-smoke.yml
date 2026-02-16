@@ -1,0 +1,81 @@
+name: x402-circle-sandbox-smoke
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "15 10 * * *"
+
+concurrency:
+  group: x402-circle-sandbox-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  circle_sandbox_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CIRCLE_API_KEY: ${{ secrets.CIRCLE_SANDBOX_API_KEY }}
+      CIRCLE_BASE_URL: ${{ secrets.CIRCLE_SANDBOX_BASE_URL }}
+      CIRCLE_BLOCKCHAIN: ${{ secrets.CIRCLE_SANDBOX_BLOCKCHAIN }}
+      CIRCLE_WALLET_ID_SPEND: ${{ secrets.CIRCLE_SANDBOX_WALLET_ID_SPEND }}
+      CIRCLE_WALLET_ID_ESCROW: ${{ secrets.CIRCLE_SANDBOX_WALLET_ID_ESCROW }}
+      CIRCLE_TOKEN_ID_USDC: ${{ secrets.CIRCLE_SANDBOX_TOKEN_ID_USDC }}
+      CIRCLE_ENTITY_SECRET_HEX: ${{ secrets.CIRCLE_SANDBOX_ENTITY_SECRET_HEX }}
+      SETTLD_DEMO_CIRCLE_MODE: sandbox
+      X402_CIRCLE_RESERVE_MODE: sandbox
+      X402_REQUIRE_EXTERNAL_RESERVE: "1"
+      CIRCLE_E2E_AMOUNT_CENTS: "100"
+      CIRCLE_BATCH_E2E_AMOUNT_CENTS: "100"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Circle secret wiring
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in \
+            CIRCLE_API_KEY \
+            CIRCLE_WALLET_ID_SPEND \
+            CIRCLE_WALLET_ID_ESCROW \
+            CIRCLE_TOKEN_ID_USDC \
+            CIRCLE_ENTITY_SECRET_HEX
+          do
+            if [[ -z "${!key:-}" ]]; then
+              echo "missing required secret/env: $key" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+          if [[ -z "${CIRCLE_BASE_URL:-}" ]]; then
+            echo "CIRCLE_BASE_URL not set; defaulting to https://api.circle.com"
+            echo "CIRCLE_BASE_URL=https://api.circle.com" >> "$GITHUB_ENV"
+          fi
+          if [[ -z "${CIRCLE_BLOCKCHAIN:-}" ]]; then
+            echo "CIRCLE_BLOCKCHAIN not set; defaulting to BASE-SEPOLIA"
+            echo "CIRCLE_BLOCKCHAIN=BASE-SEPOLIA" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run Circle sandbox smoke gate
+        run: npm run test:x402:circle:sandbox:smoke
+
+      - name: Upload Circle smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x402-circle-sandbox-smoke-${{ github.run_id }}
+          path: |
+            artifacts/gates/x402-circle-sandbox-smoke.json
+            artifacts/mcp-paid-exa
+          if-no-files-found: warn

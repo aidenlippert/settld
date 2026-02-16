@@ -99,6 +99,39 @@ This test:
 2. Confirms payout submission state is recorded.
 3. Reruns the worker and verifies payout idempotency (no duplicate submit).
 
+## Run the full Circle sandbox smoke gate
+
+This command is the recommended "no-regression" check. It runs:
+
+1. Optional faucet top-ups for spend/escrow wallets (can be disabled with `CIRCLE_SKIP_TOPUP=1`).
+2. `test/circle-sandbox-reserve-e2e.test.js`
+3. `test/circle-sandbox-batch-settlement-e2e.test.js`
+
+```bash
+npm run test:x402:circle:sandbox:smoke
+```
+
+Smoke output artifact:
+
+- `artifacts/gates/x402-circle-sandbox-smoke.json`
+
+## GitHub Actions smoke workflow
+
+The repo includes `.github/workflows/x402-circle-sandbox-smoke.yml` for manual/nightly runs.
+
+Required repo secrets:
+
+- `CIRCLE_SANDBOX_API_KEY`
+- `CIRCLE_SANDBOX_WALLET_ID_SPEND`
+- `CIRCLE_SANDBOX_WALLET_ID_ESCROW`
+- `CIRCLE_SANDBOX_TOKEN_ID_USDC`
+- `CIRCLE_SANDBOX_ENTITY_SECRET_HEX`
+
+Optional repo secrets:
+
+- `CIRCLE_SANDBOX_BASE_URL` (defaults to `https://api.circle.com`)
+- `CIRCLE_SANDBOX_BLOCKCHAIN` (defaults to `BASE-SEPOLIA`)
+
 ## Pass criteria
 
 - Reserve call returns a stable `reserveId`.
