@@ -23,7 +23,7 @@ For a v1 freeze release, the GitHub Release MUST include:
 
 - npm tarballs (`*.tgz`) + `npm-SHA256SUMS`
   - includes `settld-*.tgz` (CLI distribution for `npx --package ... settld ...`)
-  - optional registry publish lane (if `NPM_TOKEN` present) publishes `settld` and `settld-api-sdk` so `npx settld ...` works without local tarballs
+  - optional registry publish lane (if `NPM_TOKEN` present) publishes `settld`, `settld-api-sdk`, `@settld/provider-kit`, and `create-settld-paid-tool`
 - Python distributions (`*.whl`, `*.tar.gz`) + `python-SHA256SUMS`
 - `conformance-v1.tar.gz` + `conformance-v1-SHA256SUMS`
 - `settld-audit-packet-v1.zip` + `settld-audit-packet-v1.zip.sha256`
@@ -34,9 +34,12 @@ Release-gate evidence should also include:
 - `billing-smoke-prod.log`
 - `billing-smoke-status.json`
 - `npm-postpublish-smoke-<version>` artifact (when `NPM_TOKEN` is configured), containing:
+  - `provider-kit-npm-view-version.txt`
+  - `create-settld-paid-tool-npm-view-version.txt`
   - `settld-npx-version.txt`
   - `settld-kernel-cases.txt`
-  - `settld-closepack-help.txt`
+  - `settld-help.txt`
+  - `create-settld-paid-tool-help.txt`
   - `npm-postpublish-smoke.json`
 - `artifacts/throughput/10x-drill-summary.json`
 - `artifacts/gates/s13-go-live-gate.json`

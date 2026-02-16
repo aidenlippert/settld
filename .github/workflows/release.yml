@@ -460,6 +460,8 @@ jobs:
           }
           publish_if_missing "."
           publish_if_missing "packages/api-sdk"
+          publish_if_missing "packages/provider-kit"
+          publish_if_missing "packages/create-settld-paid-tool"
 
       - name: Smoke npm registry install (npx, no-clone)
         if: ${{ steps.npm_publish_guard.outputs.skip != 'true' }}
@@ -487,6 +489,12 @@ jobs:
           wait_for_cmd "npm view settld@${VERSION} version > /tmp/settld-npm-view-version.txt"
           test "$(tr -d '\r\n' < /tmp/settld-npm-view-version.txt)" = "${VERSION}"
 
+          wait_for_cmd "npm view @settld/provider-kit@${VERSION} version > /tmp/provider-kit-npm-view-version.txt"
+          test "$(tr -d '\r\n' < /tmp/provider-kit-npm-view-version.txt)" = "${VERSION}"
+
+          wait_for_cmd "npm view create-settld-paid-tool@${VERSION} version > /tmp/create-settld-paid-tool-npm-view-version.txt"
+          test "$(tr -d '\r\n' < /tmp/create-settld-paid-tool-npm-view-version.txt)" = "${VERSION}"
+
           wait_for_cmd "npm exec --yes --package settld@${VERSION} -- settld --version > /tmp/settld-npx-version.txt"
           test "$(tr -d '\r\n' < /tmp/settld-npx-version.txt)" = "${VERSION}"
 
@@ -504,6 +512,16 @@ jobs:
           test -f "$STARTER_DIR/scripts/kernel-prove.mjs"
           grep -q 'settld-api-sdk' "$STARTER_DIR/package.json"
 
+          wait_for_cmd "npm exec --yes --package create-settld-paid-tool@${VERSION} -- create-settld-paid-tool --help > /tmp/create-settld-paid-tool-help.txt"
+          grep -q 'create-settld-paid-tool \[directory\]' /tmp/create-settld-paid-tool-help.txt
+
+          PAID_TOOL_DIR="/tmp/settld-registry-paid-tool"
+          rm -rf "$PAID_TOOL_DIR"
+          wait_for_cmd "cd \"$SMOKE_DIR\" && npm exec --yes --package create-settld-paid-tool@${VERSION} -- create-settld-paid-tool \"$PAID_TOOL_DIR\""
+          test -f "$PAID_TOOL_DIR/package.json"
+          test -f "$PAID_TOOL_DIR/server.mjs"
+          grep -q '@settld/provider-kit' "$PAID_TOOL_DIR/package.json"
+
           node -e '
             const fs = require("node:fs");
             const payload = {
@@ -513,10 +531,14 @@ jobs:
               checkedAt: new Date().toISOString(),
               commands: [
                 { cmd: "npm view settld@<version> version", ok: true },
+                { cmd: "npm view @settld/provider-kit@<version> version", ok: true },
+                { cmd: "npm view create-settld-paid-tool@<version> version", ok: true },
                 { cmd: "npm exec --yes --package settld@<version> -- settld --version", ok: true },
                 { cmd: "npm exec --yes --package settld@<version> -- settld conformance kernel:list", ok: true },
                 { cmd: "npm exec --yes --package settld@<version> -- settld --help (contains closepack verify)", ok: true },
-                { cmd: "npm exec --yes --package settld@<version> -- settld init capability smoke-cap --out /tmp/settld-registry-starter", ok: true }
+                { cmd: "npm exec --yes --package settld@<version> -- settld init capability smoke-cap --out /tmp/settld-registry-starter", ok: true },
+                { cmd: "npm exec --yes --package create-settld-paid-tool@<version> -- create-settld-paid-tool --help", ok: true },
+                { cmd: "npm exec --yes --package create-settld-paid-tool@<version> -- create-settld-paid-tool /tmp/settld-registry-paid-tool", ok: true }
               ]
             };
             fs.writeFileSync("/tmp/npm-postpublish-smoke.json", JSON.stringify(payload, null, 2));
@@ -531,9 +553,12 @@ jobs:
           name: npm-postpublish-smoke-${{ steps.v.outputs.version }}
           path: |
             /tmp/settld-npm-view-version.txt
+            /tmp/provider-kit-npm-view-version.txt
+            /tmp/create-settld-paid-tool-npm-view-version.txt
             /tmp/settld-npx-version.txt
             /tmp/settld-kernel-cases.txt
             /tmp/settld-help.txt
+            /tmp/create-settld-paid-tool-help.txt
             /tmp/npm-postpublish-smoke.json
           if-no-files-found: warn
 

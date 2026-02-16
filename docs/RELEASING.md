@@ -31,7 +31,9 @@ On tag push, GitHub Actions builds and publishes release artifacts (Docker image
 If `NPM_TOKEN` is configured in repo secrets, the release lane also publishes:
 
 - `settld` (CLI, so `npx settld ...` works directly),
-- `settld-api-sdk` (JS SDK used by starter templates).
+- `settld-api-sdk` (JS SDK used by starter templates),
+- `@settld/provider-kit` (provider middleware package),
+- `create-settld-paid-tool` (scaffold CLI package).
   After publish, the workflow runs registry smoke checks and uploads `npm-postpublish-smoke-<version>` artifacts with command outputs + JSON summary evidence.
 The `release_gate` job also runs a staging billing smoke (`dev:billing:smoke:prod`) and uploads `billing-smoke-prod.log` + `billing-smoke-status.json` as gate artifacts.
 
