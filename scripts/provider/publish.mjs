@@ -20,7 +20,9 @@ function usage() {
     "  --terms-url <url>            Provider terms URL",
     "  --tags <a,b,c>               Comma-separated tags",
     "  --no-conformance             Publish as draft (skip conformance)",
+    "  --allow-fail                 Exit 0 even when conformance fails",
     "  --json-out <file>            Write publication JSON to file",
+    "  --conformance-json-out <file> Write conformance report JSON to file",
     "  --help                       Show this help"
   ].join("\n");
 }
@@ -41,7 +43,9 @@ function parseArgs(argv) {
     termsUrl: null,
     tags: [],
     runConformance: true,
+    allowFail: false,
     jsonOut: null,
+    conformanceJsonOut: null,
     help: false
   };
 
@@ -49,6 +53,7 @@ function parseArgs(argv) {
     const arg = String(argv[i] ?? "");
     if (arg === "--help" || arg === "-h") out.help = true;
     else if (arg === "--no-conformance") out.runConformance = false;
+    else if (arg === "--allow-fail") out.allowFail = true;
     else if (arg === "--manifest") out.manifestPath = String(argv[++i] ?? "").trim();
     else if (arg === "--base-url") out.baseUrl = String(argv[++i] ?? "").trim();
     else if (arg === "--api-url") out.apiUrl = String(argv[++i] ?? "").trim();
@@ -67,6 +72,7 @@ function parseArgs(argv) {
         .map((row) => row.trim())
         .filter(Boolean);
     } else if (arg === "--json-out") out.jsonOut = String(argv[++i] ?? "").trim();
+    else if (arg === "--conformance-json-out") out.conformanceJsonOut = String(argv[++i] ?? "").trim();
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (!out.help) {
@@ -91,13 +97,47 @@ function resolveProviderKeyPem({ inlinePem, filePath }) {
   return null;
 }
 
+function writeJsonFile(filePath, value) {
+  const resolved = path.resolve(process.cwd(), filePath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  fs.writeFileSync(resolved, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function defaultConformanceOutPath(publicationOutPath) {
+  if (typeof publicationOutPath !== "string" || publicationOutPath.trim() === "") return null;
+  const resolved = path.resolve(process.cwd(), publicationOutPath);
+  if (resolved.endsWith(".json")) return resolved.slice(0, -".json".length) + ".conformance.json";
+  return `${resolved}.conformance.json`;
+}
+
+function toPublicationSummary(publication) {
+  return {
+    providerId: publication?.providerId ?? null,
+    status: publication?.status ?? null,
+    certified: publication?.certified === true,
+    publicationId: publication?.publicationId ?? null,
+    manifestHash: publication?.manifestHash ?? null
+  };
+}
+
+function printJson(value) {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function makeCliError(code, message, details = null) {
+  const err = new Error(message);
+  err.code = code;
+  err.details = details;
+  return err;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(`${usage()}\n`);
     return;
   }
-  if (!args.apiKey) throw new Error("SETTLD_API_KEY or --api-key is required");
+  if (!args.apiKey) throw makeCliError("PROVIDER_PUBLISH_MISSING_API_KEY", "SETTLD_API_KEY or --api-key is required");
 
   const manifest = readJson(args.manifestPath);
   const providerSigningPublicKeyPem = resolveProviderKeyPem({ inlinePem: args.providerKeyPem, filePath: args.providerKeyFile });
@@ -130,33 +170,58 @@ async function main() {
   } catch {
     json = null;
   }
-  if (!response.ok) throw new Error(`publish failed (${response.status}): ${text || "unknown"}`);
+  if (!response.ok) {
+    throw makeCliError("PROVIDER_PUBLISH_REQUEST_FAILED", "publish failed", {
+      statusCode: response.status,
+      response: json ?? text ?? null
+    });
+  }
   const publication = json?.publication ?? null;
-  if (!publication || typeof publication !== "object") throw new Error("publish response missing publication");
-
-  if (args.jsonOut) {
-    const outPath = path.resolve(process.cwd(), args.jsonOut);
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, `${JSON.stringify(publication, null, 2)}\n`, "utf8");
+  if (!publication || typeof publication !== "object") {
+    throw makeCliError("PROVIDER_PUBLISH_INVALID_RESPONSE", "publish response missing publication");
   }
 
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        ok: true,
-        providerId: publication.providerId,
-        status: publication.status,
-        certified: publication.certified === true,
-        publicationId: publication.publicationId,
-        manifestHash: publication.manifestHash
-      },
-      null,
-      2
-    )}\n`
-  );
+  if (args.jsonOut) {
+    writeJsonFile(args.jsonOut, publication);
+  }
+  const conformanceReport = publication?.conformanceReport ?? null;
+  const conformanceOutPath = args.conformanceJsonOut || defaultConformanceOutPath(args.jsonOut);
+  if (conformanceOutPath && conformanceReport && typeof conformanceReport === "object" && !Array.isArray(conformanceReport)) {
+    writeJsonFile(conformanceOutPath, conformanceReport);
+  }
+
+  const summary = {
+    ...toPublicationSummary(publication),
+    conformanceVerdict: conformanceReport?.verdict ?? null,
+    publicationJsonOut: args.jsonOut ? path.resolve(process.cwd(), args.jsonOut) : null,
+    conformanceJsonOut: conformanceOutPath ?? null
+  };
+  const conformanceFailed = args.runConformance !== false && publication.certified !== true;
+  if (conformanceFailed) {
+    const payload = {
+      ok: false,
+      code: "PROVIDER_PUBLISH_CONFORMANCE_FAILED",
+      message: "provider publication is not certified",
+      allowFailApplied: args.allowFail === true,
+      ...summary
+    };
+    printJson(payload);
+    if (!args.allowFail) process.exitCode = 1;
+    return;
+  }
+
+  printJson({
+    ok: true,
+    ...summary
+  });
 }
 
 main().catch((err) => {
-  process.stderr.write(`${err?.stack || err?.message || String(err)}\n`);
+  printJson({
+    ok: false,
+    code: typeof err?.code === "string" && err.code.trim() !== "" ? err.code : "PROVIDER_PUBLISH_CLI_ERROR",
+    message: err?.message ?? String(err ?? ""),
+    details: err?.details ?? null
+  });
   process.exit(1);
 });

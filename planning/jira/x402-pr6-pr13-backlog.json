@@ -1,0 +1,247 @@
+{
+  "epics": [
+    {
+      "Epic Key": "STLD-E13",
+      "Summary": "Paid Tool Commerce Substrate: Provider Growth + Settlement Reliability",
+      "Description": "Convert the existing x402 + SettldPay foundation into a self-serve provider loop with certification, discovery, policy-bound receipts, and payout-grade reliability controls.",
+      "Owner": "PM + Backend + DevEx + Ops",
+      "Priority": "Highest",
+      "Labels": "x402,settldpay,provider,settlement,reliability,marketplace"
+    }
+  ],
+  "tickets": [
+    {
+      "Ticket Key": "STLD-T200",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 6",
+      "Summary": "Harden provider publish CLI and auto-certify output contract",
+      "Description": "Tighten `provider:publish` and `provider:conformance` UX for deterministic machine consumption: explicit failure codes, publication summary output, and saved report artifacts for CI and onboarding flows.",
+      "Owner": "Backend + DevEx",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "W1",
+      "Dependencies": "",
+      "Labels": "provider,publish,cli,devex",
+      "File Touchpoints": [
+        "scripts/provider/publish.mjs",
+        "scripts/provider/conformance-run.mjs",
+        "docs/QUICKSTART_MCP.md",
+        "test/api-e2e-marketplace-provider-publish.test.js"
+      ],
+      "Acceptance Criteria": [
+        "`npm run provider:publish` exits non-zero when conformance fails and prints stable machine-readable error fields.",
+        "`--json-out` writes publication output with `providerId`, `status`, `certified`, `publicationId`, and `manifestHash`.",
+        "Idempotent publish replay returns byte-equivalent publication payload."
+      ],
+      "Test Commands": [
+        "node --test test/api-e2e-marketplace-provider-publish.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T201",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 7",
+      "Summary": "Expose certification badge endpoint for provider listings",
+      "Description": "Add a provider certification badge/document endpoint so external catalogs and docs can embed current certification state with conformance timestamp and verdict binding.",
+      "Owner": "Backend",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "W1",
+      "Dependencies": "STLD-T200",
+      "Labels": "provider,certification,api",
+      "File Touchpoints": [
+        "src/api/app.js",
+        "src/api/openapi.js",
+        "src/core/provider-publish-conformance.js",
+        "test/api-e2e-marketplace-provider-publish.test.js"
+      ],
+      "Acceptance Criteria": [
+        "`GET /marketplace/providers/{providerId}` includes deterministic certification metadata suitable for badge rendering.",
+        "Badge payload changes when certification state changes and remains stable for identical publication state.",
+        "OpenAPI includes the certification/badge response schema."
+      ],
+      "Test Commands": [
+        "node --test test/api-e2e-marketplace-provider-publish.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T202",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 8",
+      "Summary": "Add aggregated marketplace tools discovery endpoint",
+      "Description": "Expose a tools-first discovery API derived from certified provider manifests so agents can discover paid tools without manually traversing provider payloads.",
+      "Owner": "Backend",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "W1",
+      "Dependencies": "STLD-T201",
+      "Labels": "marketplace,discovery,api",
+      "File Touchpoints": [
+        "src/api/app.js",
+        "src/api/openapi.js",
+        "src/core/paid-tool-manifest.js",
+        "test/api-e2e-marketplace-provider-publish.test.js"
+      ],
+      "Acceptance Criteria": [
+        "`GET /marketplace/tools` returns only certified tools by default with pagination.",
+        "Filters `providerId`, `toolId`, `q`, and `tags` produce deterministic subsets.",
+        "Each tool result includes manifest hash and provider certification snapshot for trust binding."
+      ],
+      "Test Commands": [
+        "node --test test/api-e2e-marketplace-provider-publish.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T203",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 9",
+      "Summary": "Harden x402 batch settlement idempotency and reconciliation outputs",
+      "Description": "Guarantee payout safety under retries/restarts by strengthening idempotency boundaries, terminal-state transitions, and reconciliation artifacts in the batch worker.",
+      "Owner": "Backend + Ops",
+      "Estimate": "4d",
+      "Priority": "Highest",
+      "Sprint": "W2",
+      "Dependencies": "STLD-T202",
+      "Labels": "x402,settlement,payout,reliability",
+      "File Touchpoints": [
+        "scripts/settlement/x402-batch-worker.mjs",
+        "scripts/ops/build-x402-pilot-reliability-report.mjs",
+        "docs/X402_BATCH_SETTLEMENT.md",
+        "test/x402-batch-settlement-worker.test.js",
+        "test/circle-sandbox-batch-settlement-e2e.test.js"
+      ],
+      "Acceptance Criteria": [
+        "Re-running the worker with unchanged inputs never creates a second payout submission.",
+        "Failed payout attempts remain retryable without manual state mutation.",
+        "Worker emits deterministic reconciliation artifact linking batch totals to source receipt IDs."
+      ],
+      "Test Commands": [
+        "node --test test/x402-batch-settlement-worker.test.js",
+        "node --test test/circle-sandbox-batch-settlement-e2e.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T204",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 10",
+      "Summary": "Attach policy decision fingerprint to x402 receipt bindings",
+      "Description": "Include policy-decision trace binding in x402 gate/receipt outputs so audits can prove why payment was allowed and which policy version/hash was applied.",
+      "Owner": "Backend",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "W2",
+      "Dependencies": "STLD-T203",
+      "Labels": "policy,receipts,compliance,x402",
+      "File Touchpoints": [
+        "src/api/app.js",
+        "src/core/settlement-kernel.js",
+        "docs/spec/SettlementDecisionRecord.v2.md",
+        "docs/spec/SettlementReceipt.v1.md",
+        "docs/spec/schemas/SettlementDecisionRecord.v2.json",
+        "docs/spec/schemas/SettlementReceipt.v1.json",
+        "test/api-e2e-x402-authorize-payment.test.js",
+        "test/settlement-kernel.test.js"
+      ],
+      "Acceptance Criteria": [
+        "Receipt/decision bindings include a stable `policyDecisionFingerprint` (policy id/version/hash + evaluation hash).",
+        "Fingerprint changes when relevant policy input changes and remains stable for identical input.",
+        "Protocol docs and schemas validate new additive fields."
+      ],
+      "Test Commands": [
+        "node --test test/api-e2e-x402-authorize-payment.test.js",
+        "node --test test/settlement-kernel.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T205",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 11",
+      "Summary": "Implement side-effect-safe request-bound token mode",
+      "Description": "Add optional strict mode that binds SettldPay authorization to canonical request fingerprint for non-idempotent tools, preventing body/path mutation replay abuse.",
+      "Owner": "Backend + Provider Kit",
+      "Estimate": "4d",
+      "Priority": "High",
+      "Sprint": "W3",
+      "Dependencies": "STLD-T204",
+      "Labels": "security,provider-kit,x402,replay",
+      "File Touchpoints": [
+        "src/core/settld-pay-token.js",
+        "packages/provider-kit/src/index.js",
+        "src/core/provider-publish-conformance.js",
+        "docs/QUICKSTART_X402_GATEWAY.md",
+        "test/settld-pay-token.test.js",
+        "test/api-e2e-x402-provider-signature.test.js"
+      ],
+      "Acceptance Criteria": [
+        "When strict request-binding is enabled, replaying token with changed request body/path fails with stable error code.",
+        "Current idempotent read-tool behavior remains backward compatible when strict mode is disabled.",
+        "Conformance report includes explicit check for strict-mode request binding when manifest marks tool as side-effecting."
+      ],
+      "Test Commands": [
+        "node --test test/settld-pay-token.test.js",
+        "node --test test/api-e2e-x402-provider-signature.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T206",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 12",
+      "Summary": "Automate key rotation drill and compatibility validation",
+      "Description": "Turn key rotation from runbook-only into automated operator workflow with deterministic report output and CI validation for overlap windows.",
+      "Owner": "Ops + Backend",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "W3",
+      "Dependencies": "STLD-T205",
+      "Labels": "keys,rotation,ops,reliability",
+      "File Touchpoints": [
+        "scripts/trust-config/rotate-settld-pay.mjs",
+        "docs/KEY_ROTATION.md",
+        "test/keys-rotate-settld-pay.test.js",
+        ".github/workflows/x402-circle-sandbox-smoke.yml"
+      ],
+      "Acceptance Criteria": [
+        "Rotation command emits machine-readable report with new active key and retained previous keys.",
+        "Tokens signed with previous key continue verifying through overlap window.",
+        "CI runs rotation compatibility check without breaking conformance/demo path."
+      ],
+      "Test Commands": [
+        "node --test test/keys-rotate-settld-pay.test.js"
+      ]
+    },
+    {
+      "Ticket Key": "STLD-T207",
+      "Epic Key": "STLD-E13",
+      "PR": "PR 13",
+      "Summary": "Promote multi-workload paid MCP demos to release gate",
+      "Description": "Run Exa, Weather, and LLM paid demos as a consistent artifact contract and reliability gate so ecosystem messaging is backed by repeatable cross-workload evidence.",
+      "Owner": "DevEx + Ops",
+      "Estimate": "3d",
+      "Priority": "High",
+      "Sprint": "W4",
+      "Dependencies": "STLD-T206",
+      "Labels": "demo,ci,workloads,reliability",
+      "File Touchpoints": [
+        "scripts/demo/mcp-paid-exa.mjs",
+        "scripts/ops/build-x402-pilot-reliability-report.mjs",
+        ".github/workflows/x402-circle-sandbox-smoke.yml",
+        "test/demo-mcp-paid-exa.test.js",
+        "test/mcp-paid-weather-tool.test.js",
+        "test/mcp-paid-llm-tool.test.js"
+      ],
+      "Acceptance Criteria": [
+        "CI executes at least two paid workloads (weather + llm) in addition to exa and stores uniform artifact schema.",
+        "Reliability report includes per-workload pass/fail counts and overall pilot verdict.",
+        "Release gate fails if any required workload misses reserve/token/signature/settlement checks."
+      ],
+      "Test Commands": [
+        "node --test test/demo-mcp-paid-exa.test.js",
+        "node --test test/mcp-paid-weather-tool.test.js",
+        "node --test test/mcp-paid-llm-tool.test.js"
+      ]
+    }
+  ],
+  "merge_order": [
+    "PR 6 -> PR 7 -> PR 8 -> PR 9 -> PR 10 -> PR 11 -> PR 12 -> PR 13"
+  ]
+}

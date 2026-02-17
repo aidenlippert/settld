@@ -230,7 +230,12 @@ import {
   extractSettlementKernelArtifacts,
   verifySettlementKernelArtifacts
 } from "../core/settlement-kernel.js";
-import { buildSettldPayPayloadV1, computeSettldPayTokenSha256, mintSettldPayTokenV1 } from "../core/settld-pay-token.js";
+import {
+  buildSettldPayPayloadV1,
+  computeSettldPayTokenSha256,
+  mintSettldPayTokenV1,
+  parseSettldPayTokenV1
+} from "../core/settld-pay-token.js";
 import { buildSettldPayKeysetV1 } from "../core/settld-keys.js";
 import {
   buildMarketplaceOffer,
@@ -7218,6 +7223,166 @@ export function createApi({
     return rows;
   }
 
+  function buildMarketplaceProviderCertificationBadge(publication) {
+    if (!publication || typeof publication !== "object" || Array.isArray(publication)) return null;
+    const toolCount = Array.isArray(publication?.manifest?.tools) ? publication.manifest.tools.length : 0;
+    const conformance =
+      publication?.conformanceReport && typeof publication.conformanceReport === "object" && !Array.isArray(publication.conformanceReport)
+        ? {
+            schemaVersion: publication.conformanceReport.schemaVersion ?? null,
+            generatedAt: publication.conformanceReport.generatedAt ?? null,
+            verdict: publication.conformanceReport.verdict ?? null
+          }
+        : null;
+    const binding = normalizeForCanonicalJson(
+      {
+        schemaVersion: "MarketplaceProviderCertificationBadgeBinding.v1",
+        providerId: publication.providerId ?? null,
+        publicationId: publication.publicationId ?? null,
+        status: publication.status ?? null,
+        certified: publication.certified === true,
+        certifiedAt: publication.certifiedAt ?? null,
+        updatedAt: publication.updatedAt ?? null,
+        manifestHash: publication.manifestHash ?? null,
+        providerSigningKeyId: publication?.providerSigning?.keyId ?? null,
+        toolCount,
+        conformance
+      },
+      { path: "$" }
+    );
+    return {
+      schemaVersion: "MarketplaceProviderCertificationBadge.v1",
+      providerId: publication.providerId ?? null,
+      publicationId: publication.publicationId ?? null,
+      status: publication.status ?? null,
+      certified: publication.certified === true,
+      certifiedAt: publication.certifiedAt ?? null,
+      updatedAt: publication.updatedAt ?? null,
+      manifestHash: publication.manifestHash ?? null,
+      providerSigningKeyId: publication?.providerSigning?.keyId ?? null,
+      toolCount,
+      conformance,
+      badgeHash: sha256Hex(canonicalJsonStringify(binding))
+    };
+  }
+
+  function listMarketplaceToolListings({
+    tenantId,
+    status = "certified",
+    providerId = null,
+    toolId = null,
+    search = null,
+    tags = null
+  } = {}) {
+    const rows = listMarketplaceProviderPublications({ tenantId, status, providerId, toolId: null, search: null });
+    const toolFilter = toolId && String(toolId).trim() !== "" ? String(toolId).trim() : null;
+    const searchFilter = search && String(search).trim() !== "" ? String(search).trim().toLowerCase() : null;
+    const requiredTags =
+      tags === null || tags === undefined
+        ? []
+        : String(tags)
+            .split(",")
+            .map((row) => row.trim())
+            .filter(Boolean);
+
+    const out = [];
+    for (const row of rows) {
+      const tools = Array.isArray(row?.manifest?.tools) ? row.manifest.tools : [];
+      const defaults = row?.manifest?.defaults && typeof row.manifest.defaults === "object" && !Array.isArray(row.manifest.defaults)
+        ? row.manifest.defaults
+        : {};
+      for (const tool of tools) {
+        if (!tool || typeof tool !== "object" || Array.isArray(tool)) continue;
+        const rowToolId = String(tool?.toolId ?? "").trim();
+        if (!rowToolId) continue;
+        if (toolFilter && rowToolId !== toolFilter) continue;
+        const providerTags = Array.isArray(row.tags) ? row.tags.map((tag) => String(tag ?? "").trim()).filter(Boolean) : [];
+        const toolTags = Array.isArray(tool.tags) ? tool.tags.map((tag) => String(tag ?? "").trim()).filter(Boolean) : [];
+        const combinedTagSet = new Set([...providerTags, ...toolTags]);
+        if (requiredTags.length > 0) {
+          const hasAllTags = requiredTags.every((tag) => combinedTagSet.has(tag));
+          if (!hasAllTags) continue;
+        }
+        const listing = {
+          schemaVersion: "MarketplaceToolListing.v1",
+          providerId: row.providerId ?? null,
+          publicationId: row.publicationId ?? null,
+          certified: row.certified === true,
+          providerStatus: row.status ?? null,
+          providerDescription: row.description ?? null,
+          providerTags,
+          manifestSchemaVersion: row.manifestSchemaVersion ?? null,
+          manifestHash: row.manifestHash ?? null,
+          toolId: rowToolId,
+          mcpToolName: typeof tool?.mcpToolName === "string" && tool.mcpToolName.trim() !== "" ? tool.mcpToolName.trim() : null,
+          description: typeof tool?.description === "string" && tool.description.trim() !== "" ? tool.description.trim() : null,
+          method: typeof tool?.method === "string" && tool.method.trim() !== "" ? String(tool.method).toUpperCase() : null,
+          paidPath: typeof tool?.paidPath === "string" && tool.paidPath.trim() !== "" ? tool.paidPath.trim() : null,
+          upstreamPath: typeof tool?.upstreamPath === "string" && tool.upstreamPath.trim() !== "" ? tool.upstreamPath.trim() : null,
+          tags: toolTags,
+          pricing: {
+            amountCents: Number.isSafeInteger(Number(tool?.pricing?.amountCents))
+              ? Number(tool.pricing.amountCents)
+              : Number.isSafeInteger(Number(defaults?.amountCents))
+                ? Number(defaults.amountCents)
+                : null,
+            currency:
+              typeof tool?.pricing?.currency === "string" && tool.pricing.currency.trim() !== ""
+                ? String(tool.pricing.currency).trim().toUpperCase()
+                : typeof defaults?.currency === "string" && defaults.currency.trim() !== ""
+                  ? String(defaults.currency).trim().toUpperCase()
+                  : null
+          },
+          idempotency:
+            typeof tool?.idempotency === "string" && tool.idempotency.trim() !== ""
+              ? tool.idempotency.trim()
+              : typeof defaults?.idempotency === "string" && defaults.idempotency.trim() !== ""
+                ? defaults.idempotency.trim()
+                : null,
+          signatureMode:
+            typeof tool?.signatureMode === "string" && tool.signatureMode.trim() !== ""
+              ? tool.signatureMode.trim()
+              : typeof defaults?.signatureMode === "string" && defaults.signatureMode.trim() !== ""
+                ? defaults.signatureMode.trim()
+                : null,
+          authMode:
+            typeof tool?.auth?.mode === "string" && tool.auth.mode.trim() !== ""
+              ? tool.auth.mode.trim()
+              : null,
+          certificationBadge: buildMarketplaceProviderCertificationBadge(row),
+          publishedAt: row.publishedAt ?? null,
+          updatedAt: row.updatedAt ?? null
+        };
+        if (searchFilter) {
+          const haystack = [
+            listing.providerId,
+            listing.toolId,
+            listing.mcpToolName,
+            listing.description,
+            listing.paidPath,
+            listing.upstreamPath,
+            ...(providerTags ?? []),
+            ...(toolTags ?? [])
+          ]
+            .map((value) => String(value ?? "").toLowerCase())
+            .join(" ");
+          if (!haystack.includes(searchFilter)) continue;
+        }
+        out.push(listing);
+      }
+    }
+
+    out.sort((left, right) => {
+      const leftAt = Date.parse(String(left.updatedAt ?? left.publishedAt ?? ""));
+      const rightAt = Date.parse(String(right.updatedAt ?? right.publishedAt ?? ""));
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+      const providerOrder = String(left.providerId ?? "").localeCompare(String(right.providerId ?? ""));
+      if (providerOrder !== 0) return providerOrder;
+      return String(left.toolId ?? "").localeCompare(String(right.toolId ?? ""));
+    });
+    return out;
+  }
+
   function listMarketplaceRfqs({
     tenantId,
     status = "all",
@@ -7880,6 +8045,98 @@ export function createApi({
       providerKeyId,
       error: firstReason
     };
+  }
+
+  function normalizePolicyDecisionId(value) {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  }
+
+  function normalizeSafeIntOrNull(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+    if (value === null || value === undefined || value === "") return null;
+    const n = Number(value);
+    if (!Number.isSafeInteger(n) || n < min || n > max) return null;
+    return n;
+  }
+
+  function computePolicyDecisionEvaluationHash({
+    policyHashUsed = null,
+    verificationMethodHashUsed = null,
+    policyDecision = null
+  } = {}) {
+    const reasons =
+      Array.isArray(policyDecision?.reasonCodes) && policyDecision.reasonCodes.length > 0
+        ? Array.from(
+            new Set(
+              policyDecision.reasonCodes
+                .map((code) => (typeof code === "string" ? code.trim() : ""))
+                .filter(Boolean)
+            )
+          ).sort((a, b) => a.localeCompare(b))
+        : [];
+    const payload = normalizeForCanonicalJson(
+      {
+        schemaVersion: "PolicyDecisionEvaluationInput.v1",
+        policyHash: typeof policyHashUsed === "string" && /^[0-9a-f]{64}$/.test(policyHashUsed.trim().toLowerCase())
+          ? policyHashUsed.trim().toLowerCase()
+          : null,
+        verificationMethodHash:
+          typeof verificationMethodHashUsed === "string" && /^[0-9a-f]{64}$/.test(verificationMethodHashUsed.trim().toLowerCase())
+            ? verificationMethodHashUsed.trim().toLowerCase()
+            : null,
+        verificationStatus: typeof policyDecision?.verificationStatus === "string" ? policyDecision.verificationStatus.trim().toLowerCase() : null,
+        runStatus: typeof policyDecision?.runStatus === "string" ? policyDecision.runStatus.trim().toLowerCase() : null,
+        shouldAutoResolve: policyDecision?.shouldAutoResolve === true,
+        releaseRatePct: normalizeSafeIntOrNull(policyDecision?.releaseRatePct, { min: 0, max: 100 }),
+        releaseAmountCents: normalizeSafeIntOrNull(policyDecision?.releaseAmountCents, { min: 0 }),
+        refundAmountCents: normalizeSafeIntOrNull(policyDecision?.refundAmountCents, { min: 0 }),
+        settlementStatus: typeof policyDecision?.settlementStatus === "string" ? policyDecision.settlementStatus.trim().toLowerCase() : null,
+        reasons
+      },
+      { path: "$" }
+    );
+    return sha256Hex(canonicalJsonStringify(payload));
+  }
+
+  function buildPolicyDecisionFingerprint({
+    policyInput = null,
+    policyHashUsed = null,
+    verificationMethodHashUsed = null,
+    policyDecision = null
+  } = {}) {
+    const rawPolicy = policyInput && typeof policyInput === "object" && !Array.isArray(policyInput) ? policyInput : {};
+    const policyVersion =
+      normalizeSafeIntOrNull(policyDecision?.policy?.policyVersion, { min: 1 }) ??
+      normalizeSafeIntOrNull(rawPolicy.policyVersion, { min: 1 }) ??
+      null;
+    const policyId =
+      normalizePolicyDecisionId(rawPolicy.policyId) ??
+      normalizePolicyDecisionId(rawPolicy.id) ??
+      null;
+    const normalizedPolicyHash =
+      typeof policyHashUsed === "string" && /^[0-9a-f]{64}$/.test(policyHashUsed.trim().toLowerCase())
+        ? policyHashUsed.trim().toLowerCase()
+        : null;
+    const normalizedVerificationMethodHash =
+      typeof verificationMethodHashUsed === "string" && /^[0-9a-f]{64}$/.test(verificationMethodHashUsed.trim().toLowerCase())
+        ? verificationMethodHashUsed.trim().toLowerCase()
+        : null;
+    return normalizeForCanonicalJson(
+      {
+        fingerprintVersion: "PolicyDecisionFingerprint.v1",
+        policyId,
+        policyVersion,
+        policyHash: normalizedPolicyHash,
+        verificationMethodHash: normalizedVerificationMethodHash,
+        evaluationHash: computePolicyDecisionEvaluationHash({
+          policyHashUsed: normalizedPolicyHash,
+          verificationMethodHashUsed: normalizedVerificationMethodHash,
+          policyDecision
+        })
+      },
+      { path: "$" }
+    );
   }
 
   async function getArbitrationCaseRecord({ tenantId, caseId }) {
@@ -27640,11 +27897,25 @@ export function createApi({
                   verdict: row.conformanceReport.verdict ?? null
                 }
               : null,
+            certificationBadge: buildMarketplaceProviderCertificationBadge(row),
             publishedAt: row.publishedAt ?? null,
             certifiedAt: row.certifiedAt ?? null,
             updatedAt: row.updatedAt ?? null
           }));
           return sendJson(res, 200, { publications, total: rows.length, limit, offset });
+        }
+
+        if (req.method === "GET" && marketplaceParts.length === 4 && marketplaceParts[3] === "badge") {
+          let providerId = null;
+          try {
+            providerId = parseMarketplaceProviderId(marketplaceParts[2], { fieldPath: "providerId" });
+          } catch (err) {
+            return sendError(res, 400, "invalid providerId", { message: err?.message });
+          }
+          const publication = getMarketplaceProviderPublication({ tenantId, providerId });
+          if (!publication) return sendError(res, 404, "provider publication not found");
+          const badge = buildMarketplaceProviderCertificationBadge(publication);
+          return sendJson(res, 200, { badge });
         }
 
         if (req.method === "GET" && marketplaceParts.length === 3) {
@@ -27656,9 +27927,38 @@ export function createApi({
           }
           const publication = getMarketplaceProviderPublication({ tenantId, providerId });
           if (!publication) return sendError(res, 404, "provider publication not found");
-          return sendJson(res, 200, { publication });
+          return sendJson(res, 200, { publication, certificationBadge: buildMarketplaceProviderCertificationBadge(publication) });
         }
 
+        return sendError(res, 404, "not found");
+      }
+
+      if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "tools") {
+        if (req.method === "GET" && marketplaceParts.length === 2) {
+          let status = "certified";
+          try {
+            status = parseMarketplaceProviderPublicationStatus(url.searchParams.get("status"), {
+              allowAll: true,
+              defaultStatus: "certified"
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid provider listing status", { message: err?.message });
+          }
+          const providerId = url.searchParams.get("providerId");
+          const search = url.searchParams.get("q");
+          const toolId = url.searchParams.get("toolId");
+          const tags = url.searchParams.get("tags");
+          const { limit, offset } = parsePagination({
+            limitRaw: url.searchParams.get("limit"),
+            offsetRaw: url.searchParams.get("offset"),
+            defaultLimit: 50,
+            maxLimit: 200
+          });
+
+          const rows = listMarketplaceToolListings({ tenantId, status, providerId, toolId, search, tags });
+          const tools = rows.slice(offset, offset + limit);
+          return sendJson(res, 200, { tools, total: rows.length, limit, offset });
+        }
         return sendError(res, 404, "not found");
       }
 
@@ -29587,6 +29887,25 @@ export function createApi({
 
           const gateId = typeof body?.gateId === "string" && body.gateId.trim() !== "" ? body.gateId.trim() : null;
           if (!gateId) return sendError(res, 400, "gateId is required", null, { code: "SCHEMA_INVALID" });
+          const requestBindingModeRaw =
+            typeof body?.requestBindingMode === "string" && body.requestBindingMode.trim() !== ""
+              ? body.requestBindingMode.trim().toLowerCase()
+              : null;
+          if (requestBindingModeRaw !== null && requestBindingModeRaw !== "strict") {
+            return sendError(res, 400, "requestBindingMode must be strict when provided", null, { code: "SCHEMA_INVALID" });
+          }
+          let requestBindingSha256 = null;
+          try {
+            requestBindingSha256 = normalizeSha256HashInput(body?.requestBindingSha256 ?? null, "requestBindingSha256", { allowNull: true });
+          } catch (err) {
+            return sendError(res, 400, "invalid requestBindingSha256", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const requestBindingMode = requestBindingModeRaw ?? (requestBindingSha256 ? "strict" : null);
+          if (requestBindingMode === "strict" && !requestBindingSha256) {
+            return sendError(res, 400, "requestBindingSha256 is required when requestBindingMode=strict", null, {
+              code: "SCHEMA_INVALID"
+            });
+          }
 
           const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
           if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
@@ -29647,6 +29966,26 @@ export function createApi({
             existingToken.value.trim() !== "" &&
             Number.isFinite(tokenExpiresAtMs) &&
             tokenExpiresAtMs > nowMs;
+          let existingTokenRequestBindingMode = null;
+          let existingTokenRequestBindingSha256 = null;
+          if (hasLiveToken) {
+            try {
+              const parsedToken = parseSettldPayTokenV1(existingToken.value);
+              const payload = parsedToken?.payload && typeof parsedToken.payload === "object" ? parsedToken.payload : {};
+              existingTokenRequestBindingMode =
+                typeof payload.requestBindingMode === "string" && payload.requestBindingMode.trim() !== ""
+                  ? payload.requestBindingMode.trim().toLowerCase()
+                  : null;
+              existingTokenRequestBindingSha256 =
+                typeof payload.requestBindingSha256 === "string" && payload.requestBindingSha256.trim() !== ""
+                  ? payload.requestBindingSha256.trim().toLowerCase()
+                  : null;
+            } catch {}
+          }
+          const requestBindingMatchesLiveToken =
+            !requestBindingMode
+              ? !existingTokenRequestBindingMode && !existingTokenRequestBindingSha256
+              : requestBindingMode === existingTokenRequestBindingMode && requestBindingSha256 === existingTokenRequestBindingSha256;
           if (x402PilotKillSwitchValue === true) {
             return sendError(res, 409, "x402 pilot kill switch is active", null, { code: "X402_PILOT_KILL_SWITCH_ACTIVE" });
           }
@@ -29713,7 +30052,7 @@ export function createApi({
               }
             }
           }
-          if (hasLiveToken) {
+          if (hasLiveToken && requestBindingMatchesLiveToken) {
             const responseBody = {
               gateId,
               authorizationRef,
@@ -29844,6 +30183,7 @@ export function createApi({
             amountCents,
             currency,
             payeeProviderId: String(gate?.payeeAgentId ?? ""),
+            ...(requestBindingMode ? { requestBindingMode, requestBindingSha256 } : {}),
             iat: nowUnix,
             exp: nowUnix + settldPayTokenTtlSecondsValue
           });
@@ -30178,6 +30518,13 @@ export function createApi({
             providerSignature: body?.providerSignature ?? null,
             providerReasonCodes: reasonCodes
           });
+          const verificationMethodHashUsed = computeVerificationMethodHash(policyDecision.verificationMethod ?? {});
+          const policyDecisionFingerprint = buildPolicyDecisionFingerprint({
+            policyInput: body?.policy ?? null,
+            policyHashUsed,
+            verificationMethodHashUsed,
+            policyDecision
+          });
           const settlementBindings = {
             authorizationRef:
               typeof gateAuthorization?.authorizationRef === "string" && gateAuthorization.authorizationRef.trim() !== ""
@@ -30210,7 +30557,8 @@ export function createApi({
               mode: gateAuthorization?.reserve?.mode ?? "transfer",
               reserveId: gateAuthorization?.reserve?.reserveId ?? null,
               status: gateAuthorization?.reserve?.status ?? null
-            }
+            },
+            policyDecisionFingerprint
           };
 
           const settlementDecisionStatus = policyDecision.shouldAutoResolve
@@ -30220,7 +30568,6 @@ export function createApi({
             ? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC
             : AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW;
           const resolutionEventId = createId("x402res");
-          const verificationMethodHashUsed = computeVerificationMethodHash(policyDecision.verificationMethod ?? {});
           const resolvedKernelRefs = buildSettlementKernelRefs({
             settlement,
             run: null,
@@ -30397,7 +30744,8 @@ export function createApi({
                     authorizationRef: settlementBindings.authorizationRef,
                     requestSha256: settlementBindings.request?.sha256 ?? null,
                     responseSha256: settlementBindings.response?.sha256 ?? null,
-                    providerSig: settlementBindings.providerSig ?? null
+                    providerSig: settlementBindings.providerSig ?? null,
+                    policyDecisionFingerprint: settlementBindings.policyDecisionFingerprint ?? null
 		              },
 	              holdback:
 	                holdbackAmountCents > 0

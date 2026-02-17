@@ -275,12 +275,22 @@ test("Settlement kernel preserves x402 authorization/request/response bindings",
         mode: "transfer",
         reserveId: "circle_transfer_123",
         status: "reserved"
+      },
+      policyDecisionFingerprint: {
+        fingerprintVersion: "PolicyDecisionFingerprint.v1",
+        policyId: "policy_default_auto",
+        policyVersion: 7,
+        policyHash: "d".repeat(64),
+        verificationMethodHash: "e".repeat(64),
+        evaluationHash: "f".repeat(64)
       }
     },
     decidedAt: "2026-02-08T00:00:00.000Z"
   });
   assert.equal(decision.bindings.authorizationRef, "auth_gate_4");
   assert.equal(decision.bindings.request.sha256, "b".repeat(64));
+  assert.equal(decision.bindings.policyDecisionFingerprint.policyId, "policy_default_auto");
+  assert.equal(decision.bindings.policyDecisionFingerprint.evaluationHash, "f".repeat(64));
 
   const receipt = buildSettlementReceipt({
     receiptId: "rcpt_run_4_auto",
@@ -302,4 +312,5 @@ test("Settlement kernel preserves x402 authorization/request/response bindings",
   });
   assert.equal(receipt.bindings.response.status, 200);
   assert.equal(receipt.bindings.providerSig.verified, true);
+  assert.equal(receipt.bindings.policyDecisionFingerprint.policyVersion, 7);
 });

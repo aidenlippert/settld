@@ -62,6 +62,7 @@ Each run writes:
 
 - `payout-manifest.json`
 - `payout-manifest.meta.json` (`manifestHash` + optional signature)
+- `payout-reconciliation.json` (batch totals recomputation + gate/receipt linkage + drift check)
 - `batches/<batchId>.json` for each provider batch
 
 Default output root:

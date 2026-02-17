@@ -290,6 +290,16 @@ function collectArtifactRuns(artifactRoot) {
         : typeof gate?.authorization?.reserve?.reserveId === "string" && gate.authorization.reserve.reserveId.trim() !== ""
           ? gate.authorization.reserve.reserveId.trim()
           : null;
+    const receiptId =
+      typeof settlement?.decisionTrace?.settlementReceipt?.receiptId === "string" &&
+      settlement.decisionTrace.settlementReceipt.receiptId.trim() !== ""
+        ? settlement.decisionTrace.settlementReceipt.receiptId.trim()
+        : null;
+    const decisionId =
+      typeof settlement?.decisionTrace?.settlementReceipt?.decisionRef?.decisionId === "string" &&
+      settlement.decisionTrace.settlementReceipt.decisionRef.decisionId.trim() !== ""
+        ? settlement.decisionTrace.settlementReceipt.decisionRef.decisionId.trim()
+        : null;
 
     out.push({
       gateId,
@@ -301,6 +311,8 @@ function collectArtifactRuns(artifactRoot) {
       settlementStatus,
       resolvedAt,
       reserveId,
+      receiptId,
+      decisionId,
       artifactDir: dirPath
     });
   }
@@ -412,6 +424,8 @@ function buildNewBatch({ providerId, currency, rows, destination, nowAt, maxAtte
       refundedAmountCents: row.refundedAmountCents,
       resolvedAt: row.resolvedAt,
       reserveId: row.reserveId,
+      receiptId: row.receiptId ?? null,
+      decisionId: row.decisionId ?? null,
       artifactDir: row.artifactDir
     })),
     payout: {
@@ -426,6 +440,77 @@ function buildNewBatch({ providerId, currency, rows, destination, nowAt, maxAtte
       submittedAt: null,
       providerResponse: null
     }
+  };
+}
+
+function buildPayoutReconciliation({ batches, generatedAt, artifactRoot, registryPath, statePath }) {
+  const safeBatches = Array.isArray(batches) ? batches : [];
+  const rows = [];
+  let totalDeclaredAmountCents = 0;
+  let totalRecomputedAmountCents = 0;
+  let totalGateCount = 0;
+
+  for (const batch of safeBatches) {
+    if (!batch || typeof batch !== "object" || Array.isArray(batch)) continue;
+    const gates = Array.isArray(batch.gates) ? batch.gates : [];
+    const declaredAmountCents = normalizeNonNegativeInt(batch.totalAmountCents, 0);
+    const recomputedAmountCents = gates.reduce((sum, gate) => sum + normalizeNonNegativeInt(gate?.releasedAmountCents, 0), 0);
+    const driftCents = declaredAmountCents - recomputedAmountCents;
+    const receiptIds = [
+      ...new Set(
+        gates
+          .map((gate) => (typeof gate?.receiptId === "string" && gate.receiptId.trim() !== "" ? gate.receiptId.trim() : null))
+          .filter(Boolean)
+      )
+    ].sort((a, b) => a.localeCompare(b));
+    const decisionIds = [
+      ...new Set(
+        gates
+          .map((gate) => (typeof gate?.decisionId === "string" && gate.decisionId.trim() !== "" ? gate.decisionId.trim() : null))
+          .filter(Boolean)
+      )
+    ].sort((a, b) => a.localeCompare(b));
+    rows.push({
+      schemaVersion: "X402PayoutBatchReconciliationRow.v1",
+      batchId: batch.batchId ?? null,
+      providerId: batch.providerId ?? null,
+      currency: batch.currency ?? null,
+      gateCount: gates.length,
+      declaredAmountCents,
+      recomputedAmountCents,
+      driftCents,
+      receiptIds,
+      decisionIds,
+      gates: gates.map((gate) => ({
+        gateId: gate?.gateId ?? null,
+        runId: gate?.runId ?? null,
+        releasedAmountCents: normalizeNonNegativeInt(gate?.releasedAmountCents, 0),
+        refundedAmountCents: normalizeNonNegativeInt(gate?.refundedAmountCents, 0),
+        reserveId: gate?.reserveId ?? null,
+        receiptId: gate?.receiptId ?? null,
+        decisionId: gate?.decisionId ?? null
+      }))
+    });
+    totalDeclaredAmountCents += declaredAmountCents;
+    totalRecomputedAmountCents += recomputedAmountCents;
+    totalGateCount += gates.length;
+  }
+
+  return {
+    schemaVersion: "X402PayoutReconciliation.v1",
+    generatedAt,
+    artifactRoot,
+    registryPath,
+    statePath,
+    ok: rows.every((row) => row.driftCents === 0),
+    totals: {
+      batchCount: rows.length,
+      gateCount: totalGateCount,
+      declaredAmountCents: totalDeclaredAmountCents,
+      recomputedAmountCents: totalRecomputedAmountCents,
+      driftCents: totalDeclaredAmountCents - totalRecomputedAmountCents
+    },
+    batches: rows
   };
 }
 
@@ -949,6 +1034,13 @@ async function main() {
   };
   const manifestHash = sha256Hex(canonicalJsonStringify(manifest));
   const signature = maybeSignManifest(manifest);
+  const reconciliation = buildPayoutReconciliation({
+    batches: batchesSorted,
+    generatedAt: nowAt,
+    artifactRoot: path.resolve(process.cwd(), args.artifactRoot),
+    registryPath: registry.resolvedPath,
+    statePath: workerState.resolvedPath
+  });
 
   const outDir =
     args.outDir && String(args.outDir).trim() !== ""
@@ -962,6 +1054,7 @@ async function main() {
     manifestHash,
     signature
   });
+  writeJsonFile(path.join(outDir, "payout-reconciliation.json"), reconciliation);
   for (const batch of newBatches) {
     writeJsonFile(path.join(outDir, "batches", `${batch.batchId}.json`), batch);
   }
@@ -983,7 +1076,11 @@ async function main() {
     processedGateCount: newBatches.reduce((sum, batch) => sum + batch.gateCount, 0),
     dryRun: args.dryRun === true,
     executeCircle: args.executeCircle === true,
-    payoutExecution
+    payoutExecution,
+    reconciliation: {
+      ok: reconciliation.ok,
+      totals: reconciliation.totals
+    }
   };
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

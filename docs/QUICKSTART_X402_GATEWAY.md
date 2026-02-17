@@ -100,6 +100,10 @@ In another terminal:
 curl -fsS http://127.0.0.1:9402/healthz
 ```
 
+### Strict request binding for side-effecting tools
+
+For side-effecting tools, set provider offer `requestBindingMode: "strict"` (or `idempotency: "side_effecting"` in manifests that feed the provider wrapper). In strict mode, provider-kit computes a canonical request fingerprint and requires the SettldPay token payload to carry a matching `requestBindingSha256`. Replaying the same token with a different path/query/body is rejected with `402` and code `SETTLD_PAY_REQUEST_BINDING_MISMATCH`.
+
 ## 3.5) Provider signature key (demo)
 
 This quickstart uses provider-signed responses as a minimal correctness check:

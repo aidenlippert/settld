@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { canonicalJsonStringify } from "./internal/canonical-json.js";
 import { keyIdFromPublicKeyPem, sha256Hex } from "./internal/crypto.js";
 import { buildSettldPayKeysetV1 } from "./internal/settld-keys.js";
-import { verifySettldPayTokenV1 } from "./internal/settld-pay-token.js";
+import { computeSettldPayRequestBindingSha256V1, verifySettldPayTokenV1 } from "./internal/settld-pay-token.js";
 import { signToolProviderSignatureV1 } from "./internal/tool-provider-signature.js";
 
 function assertFn(value, name) {
@@ -50,6 +50,13 @@ function normalizeCurrency(value) {
   return out;
 }
 
+function normalizeRequestBindingMode(value, { fallback = "none" } = {}) {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!raw) return fallback;
+  if (raw === "none" || raw === "strict") return raw;
+  throw new TypeError("requestBindingMode must be none|strict");
+}
+
 function parseVerificationCode(err) {
   const code = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "SETTLD_PAY_VERIFICATION_ERROR";
   return code;
@@ -82,6 +89,36 @@ function toBodyBuffer(body) {
     bodyBuffer: Buffer.from(canonicalJsonStringify(body), "utf8"),
     contentType: "application/json; charset=utf-8"
   };
+}
+
+function methodSupportsBody(method) {
+  const m = String(method ?? "GET").toUpperCase();
+  return m !== "GET" && m !== "HEAD";
+}
+
+async function readRequestBodyBuffer(req, { maxBytes = 1_000_000 } = {}) {
+  const limit = assertPositiveSafeInt(maxBytes, "maxRequestBodyBytes");
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > limit) {
+      const err = new Error(`request body exceeds maxRequestBodyBytes (${limit})`);
+      err.code = "SETTLD_PAY_REQUEST_BODY_TOO_LARGE";
+      throw err;
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
+function computeRequestBindingSha256({ req, url, bodyBuffer }) {
+  const method = String(req?.method ?? "GET").toUpperCase();
+  const host = String(req?.headers?.host ?? url?.host ?? "").trim().toLowerCase();
+  const pathWithQuery = `${url?.pathname ?? "/"}${url?.search ?? ""}`;
+  const bodySha256 = sha256Hex(Buffer.isBuffer(bodyBuffer) ? bodyBuffer : Buffer.from("", "utf8"));
+  return computeSettldPayRequestBindingSha256V1({ method, host, pathWithQuery, bodySha256 });
 }
 
 function normalizeExecutionResult(raw) {
@@ -281,6 +318,13 @@ function normalizeOffer({ offer, req, url, providerId, providerIdForRequest, pay
   const raw = offer && typeof offer === "object" && !Array.isArray(offer) ? offer : {};
   const amountCents = assertPositiveSafeInt(raw.amountCents, "priceFor().amountCents");
   const currency = normalizeCurrency(raw.currency);
+  const idempotency =
+    typeof raw.idempotency === "string" && raw.idempotency.trim() !== "" ? raw.idempotency.trim().toLowerCase() : null;
+  const implicitBindingMode =
+    idempotency === "non_idempotent" || idempotency === "side_effecting"
+      ? "strict"
+      : "none";
+  const requestBindingMode = normalizeRequestBindingMode(raw.requestBindingMode, { fallback: implicitBindingMode });
   const rawProviderId = typeof raw.providerId === "string" && raw.providerId.trim() !== "" ? raw.providerId.trim() : null;
   const configuredProviderId = typeof providerId === "string" && providerId.trim() !== "" ? providerId.trim() : null;
   const providerFromFn =
@@ -315,7 +359,8 @@ function normalizeOffer({ offer, req, url, providerId, providerIdForRequest, pay
     providerId: resolvedProviderId,
     toolId,
     address,
-    network
+    network,
+    requestBindingMode
   };
 }
 
@@ -339,7 +384,7 @@ function sendPaymentRequired(res, { offer, code = "PAYMENT_REQUIRED", message = 
   });
 }
 
-async function verifySettldPaymentToken({ token, offer, keysetResolver }) {
+async function verifySettldPaymentToken({ token, offer, keysetResolver, expectedRequestBindingSha256 = null }) {
   let keysetResult;
   try {
     keysetResult = await keysetResolver.getKeyset();
@@ -351,7 +396,7 @@ async function verifySettldPaymentToken({ token, offer, keysetResolver }) {
 
   let verified;
   try {
-    verified = verifySettldPayTokenV1({ token, keyset });
+    verified = verifySettldPayTokenV1({ token, keyset, expectedRequestBindingSha256 });
   } catch (err) {
     return { ok: false, code: parseVerificationCode(err), message: err?.message ?? String(err ?? "") };
   }
@@ -435,6 +480,12 @@ export function createSettldPaidNodeHttpHandler({
   const privateKeyPem = assertNonEmptyString(providerPrivateKeyPem, "providerPrivateKeyPem");
   const normalizedReplayTtlBufferMs = assertNonNegativeSafeInt(replayTtlBufferMs, "replayTtlBufferMs");
   const signerKeyId = keyIdFromPublicKeyPem(publicKeyPem);
+  const maxRequestBodyBytes = (() => {
+    if (settldPay && typeof settldPay === "object" && !Array.isArray(settldPay) && settldPay.maxRequestBodyBytes !== undefined) {
+      return assertPositiveSafeInt(settldPay.maxRequestBodyBytes, "settldPay.maxRequestBodyBytes");
+    }
+    return 1_000_000;
+  })();
   const replay = replayStore ?? createInMemoryReplayStore({ maxKeys: replayMaxKeys });
   if (!replay || typeof replay.get !== "function" || typeof replay.set !== "function") {
     throw new TypeError("replayStore must implement get(key, nowMs) and set(key, row, nowMs)");
@@ -475,10 +526,28 @@ export function createSettldPaidNodeHttpHandler({
       return;
     }
 
+    const strictRequestBinding = offer.requestBindingMode === "strict";
+    let requestBodyBuffer = null;
+    let requestBindingSha256 = null;
+    if (strictRequestBinding) {
+      try {
+        requestBodyBuffer = methodSupportsBody(req?.method) ? await readRequestBodyBuffer(req, { maxBytes: maxRequestBodyBytes }) : Buffer.from("", "utf8");
+        requestBindingSha256 = computeRequestBindingSha256({ req, url, bodyBuffer: requestBodyBuffer });
+      } catch (err) {
+        sendPaymentRequired(res, {
+          offer,
+          code: typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "SETTLD_PAY_REQUEST_BINDING_INPUT_INVALID",
+          message: err?.message ?? "request binding input invalid"
+        });
+        return;
+      }
+    }
+
     const verified = await verifySettldPaymentToken({
       token,
       offer,
-      keysetResolver: resolver
+      keysetResolver: resolver,
+      expectedRequestBindingSha256: requestBindingSha256
     });
     if (!verified.ok) {
       sendPaymentRequired(res, {
@@ -512,7 +581,9 @@ export function createSettldPaidNodeHttpHandler({
         "x-settld-provider-gate-id": String(payload.gateId ?? ""),
         "x-settld-provider-token-sha256": String(verification.tokenSha256 ?? ""),
         "x-settld-keyset-source": verified.keysetSource,
-        "x-settld-provider-replay": "duplicate"
+        "x-settld-provider-replay": "duplicate",
+        "x-settld-request-binding-mode": replayExisting.requestBindingMode ?? offer.requestBindingMode ?? "none",
+        "x-settld-request-binding-sha256": replayExisting.requestBindingSha256 ?? requestBindingSha256 ?? ""
       };
       if (!replayHeaders["content-type"]) replayHeaders["content-type"] = replayExisting.contentType ?? "application/json; charset=utf-8";
       res.writeHead(replayExisting.statusCode ?? 200, replayHeaders);
@@ -522,7 +593,7 @@ export function createSettldPaidNodeHttpHandler({
 
     let execRaw;
     try {
-      execRaw = await executeFn({ req, url, offer, verification });
+      execRaw = await executeFn({ req, url, offer, verification, requestBodyBuffer, requestBindingSha256 });
     } catch (err) {
       sendJson(res, {
         statusCode: 500,
@@ -570,7 +641,9 @@ export function createSettldPaidNodeHttpHandler({
       "x-settld-provider-authorization-ref": String(payload.authorizationRef ?? ""),
       "x-settld-provider-gate-id": String(payload.gateId ?? ""),
       "x-settld-provider-token-sha256": String(verification.tokenSha256 ?? ""),
-      "x-settld-keyset-source": verified.keysetSource
+      "x-settld-keyset-source": verified.keysetSource,
+      "x-settld-request-binding-mode": offer.requestBindingMode ?? "none",
+      "x-settld-request-binding-sha256": requestBindingSha256 ?? ""
     };
     res.writeHead(execResult.statusCode, responseHeaders);
     res.end(body.bodyBuffer);
@@ -584,7 +657,9 @@ export function createSettldPaidNodeHttpHandler({
         headers: execResult.headers,
         contentType,
         bodyBuffer: body.bodyBuffer,
-        signature
+        signature,
+        requestBindingMode: offer.requestBindingMode ?? "none",
+        requestBindingSha256: requestBindingSha256 ?? null
       },
       nowMs
     );

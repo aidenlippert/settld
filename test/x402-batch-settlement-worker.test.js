@@ -39,6 +39,8 @@ function runNode({ args, cwd, env }) {
 
 function buildRunArtifacts({ gateId, providerId, releasedAmountCents, artifactDir }) {
   const settledAt = "2026-02-16T10:00:00.000Z";
+  const receiptId = `rcpt_${gateId}`;
+  const decisionId = `dec_${gateId}`;
   return {
     summary: {
       ok: true,
@@ -72,7 +74,15 @@ function buildRunArtifacts({ gateId, providerId, releasedAmountCents, artifactDi
         refundedAmountCents: 0,
         amountCents: releasedAmountCents,
         currency: "USD",
-        resolvedAt: settledAt
+        resolvedAt: settledAt,
+        decisionTrace: {
+          settlementReceipt: {
+            receiptId,
+            decisionRef: {
+              decisionId
+            }
+          }
+        }
       },
       artifactDir
     }
@@ -138,6 +148,18 @@ test("x402 batch settlement worker is idempotent across reruns", async () => {
   assert.equal(firstResult.batchCount, 1);
   assert.equal(firstResult.processedGateCount, 2);
   assert.equal(firstResult.skippedProviderCount, 1);
+  assert.equal(firstResult.reconciliation?.ok, true);
+  assert.equal(firstResult.reconciliation?.totals?.batchCount, 1);
+  assert.equal(firstResult.reconciliation?.totals?.declaredAmountCents, 800);
+  assert.equal(firstResult.reconciliation?.totals?.recomputedAmountCents, 800);
+  assert.equal(firstResult.reconciliation?.totals?.driftCents, 0);
+
+  const reconciliationFirst = JSON.parse(await readFile(path.join(outDir1, "payout-reconciliation.json"), "utf8"));
+  assert.equal(reconciliationFirst.schemaVersion, "X402PayoutReconciliation.v1");
+  assert.equal(reconciliationFirst.ok, true);
+  assert.equal(reconciliationFirst.totals?.driftCents, 0);
+  assert.deepEqual(reconciliationFirst.batches?.[0]?.receiptIds, ["rcpt_gate_1", "rcpt_gate_2"]);
+  assert.deepEqual(reconciliationFirst.batches?.[0]?.decisionIds, ["dec_gate_1", "dec_gate_2"]);
 
   const stateAfterFirst = JSON.parse(await readFile(statePath, "utf8"));
   assert.equal(stateAfterFirst.schemaVersion, "X402BatchWorkerState.v1");
@@ -168,6 +190,8 @@ test("x402 batch settlement worker is idempotent across reruns", async () => {
   assert.equal(secondResult.batchCount, 0);
   assert.equal(secondResult.processedGateCount, 0);
   assert.equal(secondResult.skippedProviderCount, 1);
+  assert.equal(secondResult.reconciliation?.ok, true);
+  assert.equal(secondResult.reconciliation?.totals?.driftCents, 0);
 
   const stateAfterSecond = JSON.parse(await readFile(statePath, "utf8"));
   assert.equal(stateAfterSecond.batches.length, 1);
@@ -231,6 +255,8 @@ test("x402 batch settlement worker executes stub payouts once and skips reruns",
   assert.equal(firstResult.payoutExecution.attempted, 1);
   assert.equal(firstResult.payoutExecution.submitted, 1);
   assert.equal(firstResult.payoutExecution.failed, 0);
+  assert.equal(firstResult.reconciliation?.ok, true);
+  assert.equal(firstResult.reconciliation?.totals?.driftCents, 0);
 
   const stateAfterFirst = JSON.parse(await readFile(statePath, "utf8"));
   assert.equal(stateAfterFirst.batches.length, 1);
@@ -259,6 +285,8 @@ test("x402 batch settlement worker executes stub payouts once and skips reruns",
   assert.equal(secondResult.payoutExecution.attempted, 0);
   assert.equal(secondResult.payoutExecution.submitted, 0);
   assert.equal(secondResult.payoutExecution.skipped, 1);
+  assert.equal(secondResult.reconciliation?.ok, true);
+  assert.equal(secondResult.reconciliation?.totals?.driftCents, 0);
 
   const stateAfterSecond = JSON.parse(await readFile(statePath, "utf8"));
   assert.equal(stateAfterSecond.batches.length, 1);

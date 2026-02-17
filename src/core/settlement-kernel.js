@@ -104,6 +104,15 @@ function normalizeNullableHttpStatus(value, name) {
   return n;
 }
 
+function normalizeNullableSafeInt(value, name, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < min || n > max) {
+    throw new TypeError(`${name} must be an integer in range ${min}..${max}`);
+  }
+  return n;
+}
+
 function normalizeSettlementBindings(value, name, { allowNull = true } = {}) {
   if (value === null || value === undefined) {
     if (allowNull) return null;
@@ -146,6 +155,35 @@ function normalizeSettlementBindings(value, name, { allowNull = true } = {}) {
             mode: normalizeNullableString(value.reserve.mode, `${name}.reserve.mode`, { max: 200 }),
             reserveId: normalizeNullableString(value.reserve.reserveId, `${name}.reserve.reserveId`, { max: 256 }),
             status: normalizeNullableString(value.reserve.status, `${name}.reserve.status`, { max: 64 })
+          }
+        : null,
+      policyDecisionFingerprint: value.policyDecisionFingerprint
+        ? {
+            fingerprintVersion: normalizeNullableString(
+              value.policyDecisionFingerprint.fingerprintVersion,
+              `${name}.policyDecisionFingerprint.fingerprintVersion`,
+              { max: 64 }
+            ),
+            policyId: normalizeNullableString(value.policyDecisionFingerprint.policyId, `${name}.policyDecisionFingerprint.policyId`, {
+              max: 200
+            }),
+            policyVersion: normalizeNullableSafeInt(value.policyDecisionFingerprint.policyVersion, `${name}.policyDecisionFingerprint.policyVersion`, {
+              min: 1,
+              max: 1_000_000_000
+            }),
+            policyHash: normalizeHexHash(value.policyDecisionFingerprint.policyHash, `${name}.policyDecisionFingerprint.policyHash`, {
+              allowNull: true
+            }),
+            verificationMethodHash: normalizeHexHash(
+              value.policyDecisionFingerprint.verificationMethodHash,
+              `${name}.policyDecisionFingerprint.verificationMethodHash`,
+              { allowNull: true }
+            ),
+            evaluationHash: normalizeHexHash(
+              value.policyDecisionFingerprint.evaluationHash,
+              `${name}.policyDecisionFingerprint.evaluationHash`,
+              { allowNull: true }
+            )
           }
         : null
     },

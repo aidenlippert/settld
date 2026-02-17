@@ -18,6 +18,30 @@ To scaffold your own paid tool server quickly:
 npx create-settld-paid-tool my-paid-tool
 ```
 
+Run provider conformance/publish with machine-readable artifacts:
+
+```bash
+npm run provider:conformance -- \
+  --manifest ./paid-tool-manifest.json \
+  --base-url http://127.0.0.1:9402 \
+  --api-url http://127.0.0.1:3000 \
+  --api-key "$SETTLD_API_KEY" \
+  --json-out artifacts/provider-conformance.json
+
+npm run provider:publish -- \
+  --manifest ./paid-tool-manifest.json \
+  --base-url http://127.0.0.1:9402 \
+  --api-url http://127.0.0.1:3000 \
+  --api-key "$SETTLD_API_KEY" \
+  --json-out artifacts/provider-publication.json \
+  --conformance-json-out artifacts/provider-conformance-from-publish.json
+```
+
+Notes:
+
+- `provider:conformance` exits non-zero when verdict is not `ok` (use `--allow-fail` to keep exit code `0`).
+- `provider:publish` exits non-zero when `runConformance` is enabled and publication is not `certified` (use `--allow-fail` to keep exit code `0`).
+
 ```bash
 npm run demo:mcp-paid-exa
 npm run demo:mcp-paid-weather

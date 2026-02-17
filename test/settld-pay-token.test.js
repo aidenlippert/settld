@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createEd25519Keypair } from "../src/core/crypto.js";
+import { createEd25519Keypair, sha256Hex } from "../src/core/crypto.js";
 import {
   buildSettldPayPayloadV1,
+  computeSettldPayRequestBindingSha256V1,
   mintSettldPayTokenV1,
   parseSettldPayTokenV1,
   verifySettldPayTokenV1
@@ -121,4 +122,60 @@ test("SettldPay token: unknown key and expiry are enforced", () => {
   });
   assert.equal(expiredResult.ok, false);
   assert.equal(expiredResult.code, "SETTLD_PAY_EXPIRED");
+});
+
+test("SettldPay token: strict request binding rejects mismatched request hash", () => {
+  const kp = createEd25519Keypair();
+  const keyset = buildSettldPayKeysetV1({
+    activeKey: { publicKeyPem: kp.publicKeyPem }
+  });
+  const nowUnix = 1_739_704_800;
+  const bodySha256 = sha256Hex(Buffer.from("{\"action\":\"send\"}", "utf8"));
+  const requestBindingSha256 = computeSettldPayRequestBindingSha256V1({
+    method: "POST",
+    host: "provider.local",
+    pathWithQuery: "/tools/send?dryRun=0",
+    bodySha256
+  });
+  const payload = buildSettldPayPayloadV1({
+    iss: "settld",
+    aud: "prov_actions",
+    gateId: "gate_tok_4",
+    authorizationRef: "auth_gate_tok_4",
+    amountCents: 700,
+    currency: "USD",
+    payeeProviderId: "prov_actions",
+    requestBindingMode: "strict",
+    requestBindingSha256,
+    iat: nowUnix,
+    exp: nowUnix + 300
+  });
+  const minted = mintSettldPayTokenV1({
+    payload,
+    publicKeyPem: kp.publicKeyPem,
+    privateKeyPem: kp.privateKeyPem
+  });
+
+  const okResult = verifySettldPayTokenV1({
+    token: minted.token,
+    keyset,
+    nowUnixSeconds: nowUnix + 10,
+    expectedRequestBindingSha256: requestBindingSha256
+  });
+  assert.equal(okResult.ok, true);
+
+  const mismatchedRequestBindingSha256 = computeSettldPayRequestBindingSha256V1({
+    method: "POST",
+    host: "provider.local",
+    pathWithQuery: "/tools/send?dryRun=1",
+    bodySha256
+  });
+  const mismatchResult = verifySettldPayTokenV1({
+    token: minted.token,
+    keyset,
+    nowUnixSeconds: nowUnix + 10,
+    expectedRequestBindingSha256: mismatchedRequestBindingSha256
+  });
+  assert.equal(mismatchResult.ok, false);
+  assert.equal(mismatchResult.code, "SETTLD_PAY_REQUEST_BINDING_MISMATCH");
 });

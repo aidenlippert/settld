@@ -67,7 +67,7 @@
     "bindings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authorizationRef", "token", "request", "response", "providerSig", "reserve"],
+      "required": ["authorizationRef", "token", "request", "response", "providerSig", "reserve", "policyDecisionFingerprint"],
       "properties": {
         "authorizationRef": { "type": ["string", "null"], "maxLength": 200 },
         "token": {
@@ -118,6 +118,26 @@
             "mode": { "type": ["string", "null"], "maxLength": 200 },
             "reserveId": { "type": ["string", "null"], "maxLength": 256 },
             "status": { "type": ["string", "null"], "maxLength": 64 }
+          }
+        },
+        "policyDecisionFingerprint": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": [
+            "fingerprintVersion",
+            "policyId",
+            "policyVersion",
+            "policyHash",
+            "verificationMethodHash",
+            "evaluationHash"
+          ],
+          "properties": {
+            "fingerprintVersion": { "type": ["string", "null"], "maxLength": 64 },
+            "policyId": { "type": ["string", "null"], "maxLength": 200 },
+            "policyVersion": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000000 },
+            "policyHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+            "verificationMethodHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+            "evaluationHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
           }
         }
       }

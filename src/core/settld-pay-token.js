@@ -35,6 +35,18 @@ function normalizeHexHash(value, name) {
   return s;
 }
 
+function normalizeOptionalHexHash(value, name) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  return normalizeHexHash(value, name);
+}
+
+function normalizeOptionalRequestBindingMode(value, name) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const mode = String(value).trim().toLowerCase();
+  if (mode !== "strict") throw new TypeError(`${name} must be strict when provided`);
+  return mode;
+}
+
 function decodeEnvelope(token) {
   const raw = assertNonEmptyString(token, "token");
   let decoded = null;
@@ -67,12 +79,21 @@ export function buildSettldPayPayloadV1({
   amountCents,
   currency = "USD",
   payeeProviderId,
+  requestBindingMode = null,
+  requestBindingSha256 = null,
   iat,
   exp
 } = {}) {
   const normalizedIat = normalizeUnixSeconds(iat, "iat");
   const normalizedExp = normalizeUnixSeconds(exp, "exp");
   if (normalizedExp <= normalizedIat) throw new TypeError("exp must be greater than iat");
+  const normalizedRequestBindingSha256 = normalizeOptionalHexHash(requestBindingSha256, "requestBindingSha256");
+  const normalizedRequestBindingMode =
+    normalizeOptionalRequestBindingMode(requestBindingMode, "requestBindingMode") ??
+    (normalizedRequestBindingSha256 ? "strict" : null);
+  if (normalizedRequestBindingMode === "strict" && !normalizedRequestBindingSha256) {
+    throw new TypeError("requestBindingSha256 is required when requestBindingMode=strict");
+  }
 
   return normalizeForCanonicalJson(
     {
@@ -83,11 +104,24 @@ export function buildSettldPayPayloadV1({
       amountCents: normalizePositiveSafeInt(amountCents, "amountCents"),
       currency: normalizeCurrency(currency, "currency"),
       payeeProviderId: assertNonEmptyString(payeeProviderId, "payeeProviderId"),
+      ...(normalizedRequestBindingMode ? { requestBindingMode: normalizedRequestBindingMode } : {}),
+      ...(normalizedRequestBindingSha256 ? { requestBindingSha256: normalizedRequestBindingSha256 } : {}),
       iat: normalizedIat,
       exp: normalizedExp
     },
     { path: "$" }
   );
+}
+
+export function computeSettldPayRequestBindingSha256V1({ method, host, pathWithQuery, bodySha256 } = {}) {
+  const normalizedMethod = assertNonEmptyString(method, "method").toUpperCase();
+  const normalizedHost = assertNonEmptyString(host, "host").toLowerCase();
+  const normalizedPathWithQuery = assertNonEmptyString(pathWithQuery, "pathWithQuery");
+  if (!normalizedPathWithQuery.startsWith("/")) {
+    throw new TypeError("pathWithQuery must start with /");
+  }
+  const normalizedBodySha256 = normalizeHexHash(bodySha256, "bodySha256");
+  return sha256Hex(`${normalizedMethod}\n${normalizedHost}\n${normalizedPathWithQuery}\n${normalizedBodySha256}`);
 }
 
 export function computeSettldPayPayloadHashV1(payload) {
@@ -144,7 +178,8 @@ export function verifySettldPayTokenV1({
   keyset,
   nowUnixSeconds = Math.floor(Date.now() / 1000),
   expectedAudience = null,
-  expectedPayeeProviderId = null
+  expectedPayeeProviderId = null,
+  expectedRequestBindingSha256 = null
 } = {}) {
   const { envelope, kid, payload, sig } = decodeEnvelope(token);
   const keyMap = keyMapFromSettldKeyset(keyset);
@@ -187,6 +222,28 @@ export function verifySettldPayTokenV1({
     String(expectedPayeeProviderId) !== String(normalizedPayload.payeeProviderId)
   ) {
     return { ok: false, code: "SETTLD_PAY_PAYEE_MISMATCH", kid, payload: normalizedPayload };
+  }
+
+  const expectedRequestBinding =
+    expectedRequestBindingSha256 === null || expectedRequestBindingSha256 === undefined || String(expectedRequestBindingSha256).trim() === ""
+      ? null
+      : normalizeHexHash(expectedRequestBindingSha256, "expectedRequestBindingSha256");
+  const payloadRequestBindingMode =
+    typeof normalizedPayload.requestBindingMode === "string" ? String(normalizedPayload.requestBindingMode).trim().toLowerCase() : null;
+  const payloadRequestBindingSha256 =
+    typeof normalizedPayload.requestBindingSha256 === "string" ? String(normalizedPayload.requestBindingSha256).trim().toLowerCase() : null;
+  if (payloadRequestBindingMode === "strict") {
+    if (!payloadRequestBindingSha256 || !/^[0-9a-f]{64}$/.test(payloadRequestBindingSha256)) {
+      return { ok: false, code: "SETTLD_PAY_REQUEST_BINDING_MISSING", kid, payload: normalizedPayload };
+    }
+    if (!expectedRequestBinding) {
+      return { ok: false, code: "SETTLD_PAY_REQUEST_BINDING_REQUIRED", kid, payload: normalizedPayload };
+    }
+    if (payloadRequestBindingSha256 !== expectedRequestBinding) {
+      return { ok: false, code: "SETTLD_PAY_REQUEST_BINDING_MISMATCH", kid, payload: normalizedPayload };
+    }
+  } else if (expectedRequestBinding && payloadRequestBindingSha256 && payloadRequestBindingSha256 !== expectedRequestBinding) {
+    return { ok: false, code: "SETTLD_PAY_REQUEST_BINDING_MISMATCH", kid, payload: normalizedPayload };
   }
 
   return {

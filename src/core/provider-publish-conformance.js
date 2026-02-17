@@ -1,7 +1,7 @@
 import { canonicalJsonStringify } from "./canonical-json.js";
 import { keyIdFromPublicKeyPem, sha256Hex } from "./crypto.js";
 import { normalizePaidToolManifestV1, validatePaidToolManifestV1 } from "./paid-tool-manifest.js";
-import { buildSettldPayPayloadV1, mintSettldPayTokenV1 } from "./settld-pay-token.js";
+import { buildSettldPayPayloadV1, computeSettldPayRequestBindingSha256V1, mintSettldPayTokenV1 } from "./settld-pay-token.js";
 import { parseX402PaymentRequired } from "./x402-gate.js";
 import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "./tool-provider-signature.js";
 
@@ -103,6 +103,22 @@ function evaluateChecks(checks) {
   };
 }
 
+function methodSupportsBody(method) {
+  const m = String(method ?? "GET").toUpperCase();
+  return m !== "GET" && m !== "HEAD";
+}
+
+function computeConformanceRequestBindingSha256({ method, requestUrl, requestBody }) {
+  const bodyBytes = requestBody === undefined || requestBody === null ? Buffer.from("", "utf8") : Buffer.from(String(requestBody), "utf8");
+  const bodySha256 = sha256Hex(bodyBytes);
+  return computeSettldPayRequestBindingSha256V1({
+    method: String(method ?? "GET").toUpperCase(),
+    host: String(requestUrl?.host ?? "").toLowerCase(),
+    pathWithQuery: `${requestUrl?.pathname ?? "/"}${requestUrl?.search ?? ""}`,
+    bodySha256
+  });
+}
+
 export async function runProviderConformanceV1({
   providerBaseUrl,
   manifest: manifestInput,
@@ -185,8 +201,11 @@ export async function runProviderConformanceV1({
   checks.push(buildCheck("conformance_tool_selected", true, { toolId: tool.toolId, method: tool.method, paidPath: tool.paidPath }));
 
   const requestUrl = new URL(tool.paidPath, safeBaseUrl);
+  const toolIdempotency = typeof tool?.idempotency === "string" ? tool.idempotency.trim().toLowerCase() : "";
+  const strictRequestBindingRequired = toolIdempotency === "non_idempotent" || toolIdempotency === "side_effecting";
+  const unpaidReqInit = requestInitForMethod(tool.method);
   const unpaidSignal = typeof AbortSignal?.timeout === "function" ? AbortSignal.timeout(timeoutMs) : undefined;
-  const unpaidResponse = await fetchImpl(requestUrl, { ...requestInitForMethod(tool.method), signal: unpaidSignal });
+  const unpaidResponse = await fetchImpl(requestUrl, { ...unpaidReqInit, signal: unpaidSignal });
   checks.push(
     buildCheck("unpaid_returns_402", unpaidResponse.status === 402, {
       statusCode: unpaidResponse.status
@@ -241,6 +260,13 @@ export async function runProviderConformanceV1({
   const authorizationRef = `auth_conformance_${sha256Hex(`${effectiveProviderId}\n${tool.toolId}\n${nowUnix}`).slice(0, 16)}`;
   const gateId = `gate_conformance_${sha256Hex(`${authorizationRef}\n${requestUrl.toString()}`).slice(0, 16)}`;
   const tokenKid = signerKeyId ?? keyIdFromPublicKeyPem(signerPublicKeyPem);
+  const conformanceRequestBindingSha256 = strictRequestBindingRequired
+    ? computeConformanceRequestBindingSha256({
+        method: tool.method,
+        requestUrl,
+        requestBody: methodSupportsBody(tool.method) ? "{}" : ""
+      })
+    : null;
   const payload = buildSettldPayPayloadV1({
     iss: "settld",
     aud: effectiveProviderId,
@@ -249,6 +275,7 @@ export async function runProviderConformanceV1({
     amountCents: expectedAmount,
     currency: expectedCurrency,
     payeeProviderId: effectiveProviderId,
+    ...(strictRequestBindingRequired ? { requestBindingMode: "strict", requestBindingSha256: conformanceRequestBindingSha256 } : {}),
     iat: nowUnix,
     exp: nowUnix + Number(ttlSeconds)
   });
@@ -272,6 +299,23 @@ export async function runProviderConformanceV1({
       paymentError: paidPaymentError,
       tokenKid
     })
+  );
+  const requestBindingModeHeader = headerValue(paidResponse.headers, "x-settld-request-binding-mode");
+  const requestBindingSha256Header = headerValue(paidResponse.headers, "x-settld-request-binding-sha256");
+  checks.push(
+    buildCheck(
+      "strict_request_binding_enforced",
+      strictRequestBindingRequired
+        ? requestBindingModeHeader === "strict" && requestBindingSha256Header === conformanceRequestBindingSha256
+        : true,
+      {
+        required: strictRequestBindingRequired,
+        observedMode: requestBindingModeHeader,
+        observedSha256Present: Boolean(requestBindingSha256Header),
+        observedSha256: requestBindingSha256Header,
+        expectedSha256: conformanceRequestBindingSha256
+      }
+    )
   );
 
   const paidBytes = Buffer.from(await paidResponse.arrayBuffer());

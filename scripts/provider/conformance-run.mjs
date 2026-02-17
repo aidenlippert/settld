@@ -74,13 +74,24 @@ function resolveProviderKeyPem({ inlinePem, filePath }) {
   return null;
 }
 
+function makeCliError(code, message, details = null) {
+  const err = new Error(message);
+  err.code = code;
+  err.details = details;
+  return err;
+}
+
+function printJson(value) {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(`${usage()}\n`);
     return;
   }
-  if (!args.apiKey) throw new Error("SETTLD_API_KEY or --api-key is required");
+  if (!args.apiKey) throw makeCliError("PROVIDER_CONFORMANCE_MISSING_API_KEY", "SETTLD_API_KEY or --api-key is required");
 
   const manifest = readJson(args.manifestPath);
   const providerSigningPublicKeyPem = resolveProviderKeyPem({ inlinePem: args.providerKeyPem, filePath: args.providerKeyFile });
@@ -108,10 +119,15 @@ async function main() {
     json = null;
   }
   if (!response.ok) {
-    throw new Error(`conformance run failed (${response.status}): ${text || "unknown"}`);
+    throw makeCliError("PROVIDER_CONFORMANCE_REQUEST_FAILED", "conformance run failed", {
+      statusCode: response.status,
+      response: json ?? text ?? null
+    });
   }
   const report = json?.report ?? null;
-  if (!report || typeof report !== "object") throw new Error("conformance response missing report");
+  if (!report || typeof report !== "object") {
+    throw makeCliError("PROVIDER_CONFORMANCE_INVALID_RESPONSE", "conformance response missing report");
+  }
 
   if (args.jsonOut) {
     const outPath = path.resolve(process.cwd(), args.jsonOut);
@@ -119,11 +135,25 @@ async function main() {
     fs.writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   }
 
-  process.stdout.write(`${JSON.stringify({ ok: true, verdict: report.verdict ?? null }, null, 2)}\n`);
-  if (report?.verdict?.ok !== true && !args.allowFail) process.exitCode = 1;
+  const verdictOk = report?.verdict?.ok === true;
+  const payload = {
+    ok: verdictOk,
+    ...(verdictOk ? {} : { code: "PROVIDER_CONFORMANCE_FAILED", message: "provider conformance failed" }),
+    allowFailApplied: !verdictOk && args.allowFail === true,
+    providerId: report?.providerId ?? null,
+    toolId: report?.tool?.toolId ?? null,
+    verdict: report?.verdict ?? null
+  };
+  printJson(payload);
+  if (!verdictOk && !args.allowFail) process.exitCode = 1;
 }
 
 main().catch((err) => {
-  process.stderr.write(`${err?.stack || err?.message || String(err)}\n`);
+  printJson({
+    ok: false,
+    code: typeof err?.code === "string" && err.code.trim() !== "" ? err.code : "PROVIDER_CONFORMANCE_CLI_ERROR",
+    message: err?.message ?? String(err ?? ""),
+    details: err?.details ?? null
+  });
   process.exit(1);
 });

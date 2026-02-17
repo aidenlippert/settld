@@ -29,6 +29,7 @@ Optional fields:
   - `response` (`status`, `sha256`)
   - `providerSig` (`required`, `present`, `verified`, `providerKeyId`, `error`)
   - `reserve` (`adapter`, `mode`, `reserveId`, `status`)
+  - `policyDecisionFingerprint` (`fingerprintVersion`, `policyId`, `policyVersion`, `policyHash`, `verificationMethodHash`, `evaluationHash`)
 
 ## Policy pinning rules
 

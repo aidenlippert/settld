@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createApi } from "../src/api/app.js";
 import { createEd25519Keypair, sha256Hex } from "../src/core/crypto.js";
 import { createCircleReserveAdapter } from "../src/core/circle-reserve-adapter.js";
-import { verifySettldPayTokenV1 } from "../src/core/settld-pay-token.js";
+import { parseSettldPayTokenV1, verifySettldPayTokenV1 } from "../src/core/settld-pay-token.js";
 import { request } from "./api-test-harness.js";
 
 async function registerAgent(api, { agentId }) {
@@ -126,6 +126,13 @@ test("API e2e: x402 authorize-payment is idempotent and token verifies via keyse
   assert.equal(verifyRes.json?.decisionRecord?.bindings?.request?.sha256, requestSha256);
   assert.equal(verifyRes.json?.decisionRecord?.bindings?.response?.sha256, responseSha256);
   assert.equal(verifyRes.json?.decisionRecord?.bindings?.reserve?.status, "reserved");
+  assert.equal(verifyRes.json?.decisionRecord?.bindings?.policyDecisionFingerprint?.fingerprintVersion, "PolicyDecisionFingerprint.v1");
+  assert.match(String(verifyRes.json?.decisionRecord?.bindings?.policyDecisionFingerprint?.policyHash ?? ""), /^[0-9a-f]{64}$/);
+  assert.match(String(verifyRes.json?.decisionRecord?.bindings?.policyDecisionFingerprint?.evaluationHash ?? ""), /^[0-9a-f]{64}$/);
+  assert.equal(
+    verifyRes.json?.decisionRecord?.bindings?.policyDecisionFingerprint?.evaluationHash,
+    verifyRes.json?.settlementReceipt?.bindings?.policyDecisionFingerprint?.evaluationHash
+  );
 });
 
 test("API e2e: reserve failure during authorize-payment rolls back wallet escrow lock", async () => {
@@ -175,6 +182,66 @@ test("API e2e: reserve failure during authorize-payment rolls back wallet escrow
   const gateRead = await request(api, { method: "GET", path: `/x402/gate/${encodeURIComponent(gateId)}` });
   assert.equal(gateRead.statusCode, 200, gateRead.body);
   assert.equal(gateRead.json?.gate?.authorization?.status, "failed");
+});
+
+test("API e2e: strict request binding mints request-bound token and reuses reserve", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payer_2b" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payee_2b" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_auth_2b" });
+
+  const gateId = "gate_auth_2b";
+  const amountCents = 700;
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_2b" },
+    body: {
+      gateId,
+      payerAgentId,
+      payeeAgentId,
+      amountCents,
+      currency: "USD"
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+
+  const requestBindingShaA = "a".repeat(64);
+  const authA = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_2b_a" },
+    body: { gateId, requestBindingMode: "strict", requestBindingSha256: requestBindingShaA }
+  });
+  assert.equal(authA.statusCode, 200, authA.body);
+  const payloadA = parseSettldPayTokenV1(authA.json?.token).payload;
+  assert.equal(payloadA.requestBindingMode, "strict");
+  assert.equal(payloadA.requestBindingSha256, requestBindingShaA);
+
+  const authAReplay = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_2b_a_replay" },
+    body: { gateId, requestBindingMode: "strict", requestBindingSha256: requestBindingShaA }
+  });
+  assert.equal(authAReplay.statusCode, 200, authAReplay.body);
+  assert.equal(authAReplay.json?.token, authA.json?.token);
+  assert.equal(authAReplay.json?.reserve?.reserveId, authA.json?.reserve?.reserveId);
+
+  const requestBindingShaB = "b".repeat(64);
+  const authB = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_2b_b" },
+    body: { gateId, requestBindingMode: "strict", requestBindingSha256: requestBindingShaB }
+  });
+  assert.equal(authB.statusCode, 200, authB.body);
+  assert.notEqual(authB.json?.token, authA.json?.token);
+  assert.equal(authB.json?.reserve?.reserveId, authA.json?.reserve?.reserveId);
+  const payloadB = parseSettldPayTokenV1(authB.json?.token).payload;
+  assert.equal(payloadB.requestBindingMode, "strict");
+  assert.equal(payloadB.requestBindingSha256, requestBindingShaB);
 });
 
 test("API e2e: production-like defaults fail closed when external reserve is unavailable", async (t) => {

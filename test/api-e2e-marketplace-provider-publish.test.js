@@ -176,6 +176,28 @@ test("API e2e: provider publish v0 certifies and lists provider", async (t) => {
   assert.equal(listed.json?.publications?.[0]?.providerId, providerId);
   assert.equal(listed.json?.publications?.[0]?.certified, true);
   assert.equal(listed.json?.publications?.[0]?.toolCount, 1);
+  assert.equal(typeof listed.json?.publications?.[0]?.certificationBadge?.badgeHash, "string");
+  assert.equal(listed.json?.publications?.[0]?.certificationBadge?.providerId, providerId);
+
+  const toolListed = await request(api, {
+    method: "GET",
+    path: "/marketplace/tools?status=certified&limit=20&offset=0"
+  });
+  assert.equal(toolListed.statusCode, 200, toolListed.body);
+  assert.equal(toolListed.json?.total, 1);
+  assert.equal(toolListed.json?.tools?.[0]?.providerId, providerId);
+  assert.equal(toolListed.json?.tools?.[0]?.toolId, "bridge.search");
+  assert.equal(toolListed.json?.tools?.[0]?.pricing?.amountCents, 500);
+  assert.equal(toolListed.json?.tools?.[0]?.pricing?.currency, "USD");
+  assert.equal(typeof toolListed.json?.tools?.[0]?.certificationBadge?.badgeHash, "string");
+
+  const toolFiltered = await request(api, {
+    method: "GET",
+    path: "/marketplace/tools?status=certified&toolId=bridge.search&tags=search&q=bridge"
+  });
+  assert.equal(toolFiltered.statusCode, 200, toolFiltered.body);
+  assert.equal(toolFiltered.json?.total, 1);
+  assert.equal(toolFiltered.json?.tools?.[0]?.toolId, "bridge.search");
 
   const fetched = await request(api, {
     method: "GET",
@@ -184,6 +206,25 @@ test("API e2e: provider publish v0 certifies and lists provider", async (t) => {
   assert.equal(fetched.statusCode, 200, fetched.body);
   assert.equal(fetched.json?.publication?.providerId, providerId);
   assert.equal(fetched.json?.publication?.conformanceReport?.verdict?.ok, true);
+  assert.equal(fetched.json?.certificationBadge?.providerId, providerId);
+  assert.equal(fetched.json?.certificationBadge?.certified, true);
+  assert.equal(typeof fetched.json?.certificationBadge?.badgeHash, "string");
+
+  const badgeOne = await request(api, {
+    method: "GET",
+    path: `/marketplace/providers/${encodeURIComponent(providerId)}/badge`
+  });
+  assert.equal(badgeOne.statusCode, 200, badgeOne.body);
+  assert.equal(badgeOne.json?.badge?.providerId, providerId);
+  assert.equal(badgeOne.json?.badge?.certified, true);
+  assert.equal(typeof badgeOne.json?.badge?.badgeHash, "string");
+
+  const badgeTwo = await request(api, {
+    method: "GET",
+    path: `/marketplace/providers/${encodeURIComponent(providerId)}/badge`
+  });
+  assert.equal(badgeTwo.statusCode, 200, badgeTwo.body);
+  assert.deepEqual(badgeTwo.json, badgeOne.json);
 
   const conformanceRun = await request(api, {
     method: "POST",
@@ -197,4 +238,8 @@ test("API e2e: provider publish v0 certifies and lists provider", async (t) => {
   });
   assert.equal(conformanceRun.statusCode, 200, conformanceRun.body);
   assert.equal(conformanceRun.json?.report?.verdict?.ok, true);
+  const strictCheck = (conformanceRun.json?.report?.checks ?? []).find((row) => row?.id === "strict_request_binding_enforced");
+  assert.ok(strictCheck);
+  assert.equal(strictCheck?.ok, true);
+  assert.equal(strictCheck?.details?.required, false);
 });
