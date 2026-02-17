@@ -23,7 +23,7 @@ export function buildSettldAgentCard({
   version = null,
   protocols = ["SettlementKernel.v1"],
   bundleTypes = ["InvoiceBundle.v1", "ClosePack.v1", "JobProofBundle.v1", "MonthProofBundle.v1", "FinancePackBundle.v1"],
-  paymentRails = ["internal_escrow", "stripe"],
+  paymentRails = ["internal_escrow", "circle_usdc"],
   disputeSupport = true,
   reputationQueries = true
 } = {}) {
@@ -67,4 +67,3 @@ export function buildSettldAgentCard({
   if (card.version === null) delete card.version;
   return normalizeForCanonicalJson(card, { path: "$" });
 }
-
