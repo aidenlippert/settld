@@ -227,3 +227,153 @@ test("API e2e: production-like defaults fail closed when external reserve is una
   assert.equal(authz.statusCode, 503, authz.body);
   assert.equal(authz.json?.code, "X402_RESERVE_UNAVAILABLE");
 });
+
+test("API e2e: x402 authorize-payment kill switch blocks authorization", async () => {
+  const api = createApi({
+    opsToken: "tok_ops",
+    x402PilotKillSwitch: true
+  });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payer_4" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payee_4" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_auth_4" });
+
+  const gateId = "gate_auth_4";
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_4" },
+    body: {
+      gateId,
+      payerAgentId,
+      payeeAgentId,
+      amountCents: 500,
+      currency: "USD"
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+
+  const authz = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_4" },
+    body: { gateId }
+  });
+  assert.equal(authz.statusCode, 409, authz.body);
+  assert.equal(authz.json?.code, "X402_PILOT_KILL_SWITCH_ACTIVE");
+});
+
+test("API e2e: x402 authorize-payment enforces provider allowlist and per-call cap", async () => {
+  const api = createApi({
+    opsToken: "tok_ops",
+    x402PilotAllowedProviderIds: ["agt_x402_auth_payee_allowed"],
+    x402PilotMaxAmountCents: 300
+  });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payer_5" });
+  const allowedPayeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payee_allowed" });
+  const disallowedPayeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payee_5_disallowed" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_auth_5" });
+
+  const disallowedGateId = "gate_auth_5_disallowed";
+  const disallowedCreate = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_5_disallowed" },
+    body: {
+      gateId: disallowedGateId,
+      payerAgentId,
+      payeeAgentId: disallowedPayeeAgentId,
+      amountCents: 200,
+      currency: "USD"
+    }
+  });
+  assert.equal(disallowedCreate.statusCode, 201, disallowedCreate.body);
+  const disallowedAuthz = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_5_disallowed" },
+    body: { gateId: disallowedGateId }
+  });
+  assert.equal(disallowedAuthz.statusCode, 409, disallowedAuthz.body);
+  assert.equal(disallowedAuthz.json?.code, "X402_PILOT_PROVIDER_NOT_ALLOWED");
+
+  const highAmountGateId = "gate_auth_5_high_amount";
+  const highAmountCreate = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_5_high_amount" },
+    body: {
+      gateId: highAmountGateId,
+      payerAgentId,
+      payeeAgentId: allowedPayeeAgentId,
+      amountCents: 500,
+      currency: "USD"
+    }
+  });
+  assert.equal(highAmountCreate.statusCode, 201, highAmountCreate.body);
+  const highAmountAuthz = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_5_high_amount" },
+    body: { gateId: highAmountGateId }
+  });
+  assert.equal(highAmountAuthz.statusCode, 409, highAmountAuthz.body);
+  assert.equal(highAmountAuthz.json?.code, "X402_PILOT_AMOUNT_LIMIT_EXCEEDED");
+});
+
+test("API e2e: x402 authorize-payment enforces daily tenant cap", async () => {
+  const api = createApi({
+    opsToken: "tok_ops",
+    x402PilotDailyLimitCents: 800
+  });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payer_6" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payee_6" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 8000, idempotencyKey: "wallet_credit_x402_auth_6" });
+
+  const gateA = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_6_a" },
+    body: {
+      gateId: "gate_auth_6_a",
+      payerAgentId,
+      payeeAgentId,
+      amountCents: 500,
+      currency: "USD"
+    }
+  });
+  assert.equal(gateA.statusCode, 201, gateA.body);
+  const authA = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_6_a" },
+    body: { gateId: "gate_auth_6_a" }
+  });
+  assert.equal(authA.statusCode, 200, authA.body);
+
+  const gateB = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_6_b" },
+    body: {
+      gateId: "gate_auth_6_b",
+      payerAgentId,
+      payeeAgentId,
+      amountCents: 400,
+      currency: "USD"
+    }
+  });
+  assert.equal(gateB.statusCode, 201, gateB.body);
+  const authB = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_6_b" },
+    body: { gateId: "gate_auth_6_b" }
+  });
+  assert.equal(authB.statusCode, 409, authB.body);
+  assert.equal(authB.json?.code, "X402_PILOT_DAILY_LIMIT_EXCEEDED");
+  assert.equal(authB.json?.details?.currentExposureCents, 500);
+  assert.equal(authB.json?.details?.projectedExposureCents, 900);
+});

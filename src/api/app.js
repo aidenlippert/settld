@@ -331,6 +331,10 @@ export function createApi({
   x402ReserveAdapter = null,
   x402RequireExternalReserve = null,
   x402ReserveMode = null,
+  x402PilotKillSwitch = null,
+  x402PilotAllowedProviderIds = null,
+  x402PilotMaxAmountCents = null,
+  x402PilotDailyLimitCents = null,
   settldPayTokenTtlSeconds = null,
   settldPayFallbackKeys = null,
   settldPayIssuer = null
@@ -994,6 +998,31 @@ export function createApi({
     throw new TypeError("boolean-like value must be true|false");
   }
 
+  function normalizeX402PilotAllowedProviderIdsInput(value, { fieldName = "X402_PILOT_ALLOWED_PROVIDER_IDS" } = {}) {
+    if (value === null || value === undefined || String(value).trim() === "") return null;
+    let parsed = value;
+    if (typeof parsed === "string") {
+      const trimmed = parsed.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith("[")) {
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch (err) {
+          throw new TypeError(`${fieldName} must be valid JSON array or comma-delimited string: ${err?.message ?? String(err ?? "")}`);
+        }
+      } else {
+        parsed = trimmed
+          .split(",")
+          .map((entry) => String(entry ?? "").trim())
+          .filter(Boolean);
+      }
+    }
+    if (!Array.isArray(parsed)) {
+      throw new TypeError(`${fieldName} must be an array, JSON array string, or comma-delimited string`);
+    }
+    return normalizeMoneyRailAllowedProviderIds(parsed, { fieldName });
+  }
+
   function isProductionLikeRuntimeEnv() {
     const nodeEnv = typeof process !== "undefined" ? String(process.env.NODE_ENV ?? "").trim().toLowerCase() : "";
     if (nodeEnv === "production") return true;
@@ -1098,7 +1127,69 @@ export function createApi({
     if (raw === null || raw === undefined || String(raw).trim() === "") return productionLikeEnv ? "production" : "stub";
     return String(raw).trim();
   })();
+  const x402PilotKillSwitchValue = (() => {
+    const raw =
+      x402PilotKillSwitch ??
+      (typeof process !== "undefined" ? process.env.X402_PILOT_KILL_SWITCH : null);
+    return parseBooleanLike(raw, false);
+  })();
+  const x402PilotAllowedProviderIdsValue = (() => {
+    const raw =
+      x402PilotAllowedProviderIds ??
+      (typeof process !== "undefined" ? process.env.X402_PILOT_ALLOWED_PROVIDER_IDS : null);
+    return normalizeX402PilotAllowedProviderIdsInput(raw, { fieldName: "X402_PILOT_ALLOWED_PROVIDER_IDS" });
+  })();
+  const x402PilotMaxAmountCentsValue = (() => {
+    const raw =
+      x402PilotMaxAmountCents ??
+      (typeof process !== "undefined" ? process.env.X402_PILOT_MAX_AMOUNT_CENTS : null);
+    return normalizeOptionalNonNegativeSafeInt(raw, { fieldName: "X402_PILOT_MAX_AMOUNT_CENTS", allowNull: true });
+  })();
+  const x402PilotDailyLimitCentsValue = (() => {
+    const raw =
+      x402PilotDailyLimitCents ??
+      (typeof process !== "undefined" ? process.env.X402_PILOT_DAILY_LIMIT_CENTS : null);
+    return normalizeOptionalNonNegativeSafeInt(raw, { fieldName: "X402_PILOT_DAILY_LIMIT_CENTS", allowNull: true });
+  })();
   const circleReserveAdapter = x402ReserveAdapter ?? createCircleReserveAdapter({ mode: x402ReserveModeValue, now: nowIso });
+
+  function computeX402DailyAuthorizedExposureCents({ tenantId, dayKey, excludeGateId = null } = {}) {
+    if (!dayKey || !(store?.x402Gates instanceof Map)) return 0;
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    let total = 0;
+    for (const row of store.x402Gates.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+      const rowGateId = typeof row.gateId === "string" ? row.gateId : "";
+      if (excludeGateId && rowGateId === excludeGateId) continue;
+
+      const authorization = row.authorization && typeof row.authorization === "object" && !Array.isArray(row.authorization) ? row.authorization : null;
+      if (!authorization) continue;
+      const authStatus = String(authorization.status ?? "").toLowerCase();
+      if (authStatus !== "reserved" && authStatus !== "settled") continue;
+      const reserve = authorization.reserve && typeof authorization.reserve === "object" && !Array.isArray(authorization.reserve)
+        ? authorization.reserve
+        : null;
+      const reserveStatus = String(reserve?.status ?? "").toLowerCase();
+      if (reserveStatus !== "reserved" && reserveStatus !== "settled" && reserveStatus !== "voided") continue;
+      const reserveId = typeof reserve?.reserveId === "string" ? reserve.reserveId.trim() : "";
+      if (!reserveId) continue;
+      const reserveAtRaw =
+        (typeof reserve?.reservedAt === "string" && reserve.reservedAt.trim() !== "" ? reserve.reservedAt : null) ??
+        (typeof authorization?.updatedAt === "string" && authorization.updatedAt.trim() !== "" ? authorization.updatedAt : null) ??
+        (typeof row?.updatedAt === "string" && row.updatedAt.trim() !== "" ? row.updatedAt : null);
+      if (!reserveAtRaw) continue;
+      const reserveAtMs = Date.parse(reserveAtRaw);
+      if (!Number.isFinite(reserveAtMs)) continue;
+      if (new Date(reserveAtMs).toISOString().slice(0, 10) !== dayKey) continue;
+
+      const amountCents = Number(row?.terms?.amountCents ?? authorization?.walletEscrow?.amountCents ?? 0);
+      if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+      total += amountCents;
+      if (!Number.isSafeInteger(total)) throw new Error("x402 daily authorized exposure overflow");
+    }
+    return total;
+  }
 
   function buildSettldPayKeyset() {
     return buildSettldPayKeysetV1({
@@ -29545,15 +29636,83 @@ export function createApi({
           const tokenExpiresAtMs = Number.isFinite(Date.parse(String(existingToken?.expiresAt ?? "")))
             ? Date.parse(String(existingToken.expiresAt))
             : Number.NaN;
-          const hasLiveToken =
+          const hasReservedAuthorization =
             String(existingAuthorization?.status ?? "").toLowerCase() === "reserved" &&
-            typeof existingToken?.value === "string" &&
-            existingToken.value.trim() !== "" &&
-            Number.isFinite(tokenExpiresAtMs) &&
-            tokenExpiresAtMs > nowMs &&
             String(existingReserve?.status ?? "").toLowerCase() === "reserved" &&
             typeof existingReserve?.reserveId === "string" &&
             existingReserve.reserveId.trim() !== "";
+          const hasLiveToken =
+            hasReservedAuthorization &&
+            typeof existingToken?.value === "string" &&
+            existingToken.value.trim() !== "" &&
+            Number.isFinite(tokenExpiresAtMs) &&
+            tokenExpiresAtMs > nowMs;
+          if (x402PilotKillSwitchValue === true) {
+            return sendError(res, 409, "x402 pilot kill switch is active", null, { code: "X402_PILOT_KILL_SWITCH_ACTIVE" });
+          }
+          if (!hasReservedAuthorization) {
+            const payeeProviderId =
+              typeof gate?.payeeAgentId === "string" && gate.payeeAgentId.trim() !== ""
+                ? gate.payeeAgentId.trim()
+                : typeof gate?.terms?.providerId === "string" && gate.terms.providerId.trim() !== ""
+                  ? gate.terms.providerId.trim()
+                  : null;
+            if (
+              Array.isArray(x402PilotAllowedProviderIdsValue) &&
+              x402PilotAllowedProviderIdsValue.length > 0 &&
+              !x402PilotAllowedProviderIdsValue.includes(String(payeeProviderId ?? ""))
+            ) {
+              return sendError(
+                res,
+                409,
+                "x402 pilot provider is not allowed",
+                {
+                  gateId,
+                  payeeProviderId,
+                  allowedProviderIds: x402PilotAllowedProviderIdsValue
+                },
+                { code: "X402_PILOT_PROVIDER_NOT_ALLOWED" }
+              );
+            }
+            if (
+              Number.isSafeInteger(x402PilotMaxAmountCentsValue) &&
+              x402PilotMaxAmountCentsValue > 0 &&
+              amountCents > x402PilotMaxAmountCentsValue
+            ) {
+              return sendError(
+                res,
+                409,
+                "x402 pilot single-call amount exceeds limit",
+                {
+                  gateId,
+                  amountCents,
+                  maxAmountCents: x402PilotMaxAmountCentsValue
+                },
+                { code: "X402_PILOT_AMOUNT_LIMIT_EXCEEDED" }
+              );
+            }
+            if (Number.isSafeInteger(x402PilotDailyLimitCentsValue) && x402PilotDailyLimitCentsValue > 0) {
+              const dayKey = nowAt.slice(0, 10);
+              const currentExposureCents = computeX402DailyAuthorizedExposureCents({ tenantId, dayKey, excludeGateId: gateId });
+              const projectedExposureCents = currentExposureCents + amountCents;
+              if (projectedExposureCents > x402PilotDailyLimitCentsValue) {
+                return sendError(
+                  res,
+                  409,
+                  "x402 pilot daily authorization limit exceeded",
+                  {
+                    gateId,
+                    dayKey,
+                    amountCents,
+                    currentExposureCents,
+                    projectedExposureCents,
+                    dailyLimitCents: x402PilotDailyLimitCentsValue
+                  },
+                  { code: "X402_PILOT_DAILY_LIMIT_EXCEEDED" }
+                );
+              }
+            }
+          }
           if (hasLiveToken) {
             const responseBody = {
               gateId,

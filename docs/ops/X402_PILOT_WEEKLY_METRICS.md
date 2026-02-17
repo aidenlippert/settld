@@ -52,7 +52,7 @@ If threshold gates are supplied, command exit code is non-zero when any gate fai
   - `tokenVerifyFailRate`
   - `providerSigFailRate`
   - `settlementSuccessRate`
-  - `replayDuplicateRate` (placeholder until replay telemetry is exported in run artifacts)
+  - `replayDuplicateRate`
 - `samples`
   - run ids for reserve/token/signature/settlement failures
 - `verdict`
@@ -62,7 +62,7 @@ If threshold gates are supplied, command exit code is non-zero when any gate fai
 
 - `reserveFailRate` is inferred from attempted runs with `gateway_error` today.
 - Infrastructure boot failures are excluded from economic reliability denominators.
-- `replayDuplicateRate` requires provider-side replay counters (or conformance replay telemetry artifacts) and is currently reported as unavailable.
+- `replayDuplicateRate` uses provider replay counters emitted by paid demo artifacts (`provider-replay-probe.json` or `summary.replayCounters`).
 
 ## Recommended weekly publish set
 
@@ -71,5 +71,6 @@ If threshold gates are supplied, command exit code is non-zero when any gate fai
 - `tokenVerifyFailRate`
 - `providerSigFailRate`
 - `settlementSuccessRate`
+- `replayDuplicateRate`
 
 Keep provider expansion gated on these metrics, not on raw demo volume.

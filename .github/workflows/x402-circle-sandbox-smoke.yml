@@ -70,6 +70,28 @@ jobs:
       - name: Run Circle sandbox smoke gate
         run: npm run test:x402:circle:sandbox:smoke
 
+      - name: Run paid tool demo (Circle sandbox)
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/mcp-paid-exa
+          SETTLD_DEMO_CIRCLE_MODE=sandbox \
+          SETTLD_DEMO_RUN_BATCH_SETTLEMENT=1 \
+          X402_REQUIRE_EXTERNAL_RESERVE=1 \
+          SETTLD_PRICE_AMOUNT_CENTS=100 \
+          npm run demo:mcp-paid-exa -- --circle=sandbox
+
+      - name: Enforce x402 weekly reliability thresholds
+        run: |
+          set -euo pipefail
+          npm run ops:x402:pilot:weekly-report -- \
+            --artifact-root artifacts/mcp-paid-exa \
+            --days 7 \
+            --out artifacts/ops/x402-pilot-reliability-report.json \
+            --max-reserve-fail-rate 0.10 \
+            --max-token-verify-fail-rate 0.01 \
+            --max-provider-sig-fail-rate 0.01 \
+            --min-settlement-success-rate 0.98
+
       - name: Upload Circle smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,4 +100,5 @@ jobs:
           path: |
             artifacts/gates/x402-circle-sandbox-smoke.json
             artifacts/mcp-paid-exa
+            artifacts/ops/x402-pilot-reliability-report.json
           if-no-files-found: warn

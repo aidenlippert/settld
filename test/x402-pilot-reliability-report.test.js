@@ -27,6 +27,9 @@ test("x402 pilot reliability report computes core rates from artifact runs", asy
   writeJson(path.join(runSuccess, "mcp-call.parsed.json"), { tool: "settld.exa_search_paid", durationMs: 800 });
   writeJson(path.join(runSuccess, "settld-pay-token-verification.json"), { ok: true });
   writeJson(path.join(runSuccess, "provider-signature-verification.json"), { ok: true });
+  writeJson(path.join(runSuccess, "provider-replay-probe.json"), {
+    replayCounters: { totalRequests: 1, duplicateResponses: 1 }
+  });
 
   const runGatewayFail = path.join(artifactRoot, "2026-02-10T10:10:00.000Z");
   writeJson(path.join(runGatewayFail, "summary.json"), {
@@ -72,6 +75,10 @@ test("x402 pilot reliability report computes core rates from artifact runs", asy
   assert.equal(report.metrics.settlementSuccessRate.numerator, 1);
   assert.equal(report.metrics.settlementSuccessRate.denominator, 1);
   assert.equal(report.metrics.settlementSuccessRate.value, 1);
+
+  assert.equal(report.metrics.replayDuplicateRate.numerator, 1);
+  assert.equal(report.metrics.replayDuplicateRate.denominator, 1);
+  assert.equal(report.metrics.replayDuplicateRate.value, 1);
 
   assert.equal(report.metrics.timeToFirstPaidCallMs, 2000);
 });

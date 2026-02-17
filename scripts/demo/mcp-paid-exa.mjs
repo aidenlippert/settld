@@ -156,6 +156,35 @@ function normalizeWorkload(value) {
   throw new Error("workload must be exa|weather|llm");
 }
 
+function buildWorkloadUpstreamUrl({ upstreamBaseUrl, workload, toolArgs }) {
+  if (workload === "weather") {
+    const url = new URL("/weather/current", upstreamBaseUrl);
+    url.searchParams.set("city", String(toolArgs?.city ?? "Chicago"));
+    url.searchParams.set("unit", String(toolArgs?.unit ?? "f"));
+    return url;
+  }
+  if (workload === "llm") {
+    const url = new URL("/llm/completions", upstreamBaseUrl);
+    url.searchParams.set("prompt", String(toolArgs?.prompt ?? ""));
+    url.searchParams.set("model", String(toolArgs?.model ?? "gpt-4o-mini"));
+    url.searchParams.set("maxTokens", String(toolArgs?.maxTokens ?? 128));
+    return url;
+  }
+  const url = new URL("/exa/search", upstreamBaseUrl);
+  url.searchParams.set("q", String(toolArgs?.query ?? ""));
+  url.searchParams.set("numResults", String(toolArgs?.numResults ?? 3));
+  return url;
+}
+
+function pickSettldHeaders(headers) {
+  const out = {};
+  if (!headers || typeof headers.entries !== "function") return out;
+  for (const [key, value] of headers.entries()) {
+    if (String(key).toLowerCase().startsWith("x-settld-")) out[key] = value;
+  }
+  return out;
+}
+
 function readEnvString(name, fallback = null) {
   const raw = process.env[name];
   if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
@@ -817,6 +846,57 @@ async function main() {
     })();
     await writeArtifactJson(artifactDir, "settld-pay-token-verification.json", tokenVerification);
 
+    const replayProbe = await (async () => {
+      const token = gateState?.gate?.authorization?.token?.value;
+      if (typeof token !== "string" || token.trim() === "") {
+        return {
+          attempted: false,
+          skipped: true,
+          reason: "token_missing"
+        };
+      }
+      const probeUrl = buildWorkloadUpstreamUrl({
+        upstreamBaseUrl: upstreamUrl,
+        workload,
+        toolArgs: workloadConfig.toolArgs
+      });
+      const res = await fetch(probeUrl, {
+        method: "GET",
+        headers: {
+          authorization: `SettldPay ${token}`,
+          "x-proxy-tenant-id": tenantId
+        }
+      });
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        json = null;
+      }
+      const headers = pickSettldHeaders(res.headers);
+      const duplicate = String(headers["x-settld-provider-replay"] ?? "").toLowerCase() === "duplicate";
+      return {
+        attempted: true,
+        skipped: false,
+        url: probeUrl.toString(),
+        statusCode: res.status,
+        duplicate,
+        headers,
+        body: json ?? text
+      };
+    })();
+    const replayCounters = {
+      schemaVersion: "X402ProviderReplayCounters.v1",
+      totalRequests: replayProbe.attempted ? 1 : 0,
+      duplicateResponses: replayProbe.attempted && replayProbe.duplicate ? 1 : 0,
+      duplicateRate: replayProbe.attempted ? (replayProbe.duplicate ? 1 : 0) : null
+    };
+    await writeArtifactJson(artifactDir, "provider-replay-probe.json", {
+      replayProbe,
+      replayCounters
+    });
+
     const batchSettlement = await runBatchSettlementDemo({
       artifactDir,
       providerId,
@@ -849,6 +929,8 @@ async function main() {
       circleReserveId: reserveState.circleReserveId,
       reserveTransitions: reserveState.transitions,
       payoutDestination: reserveState.payoutDestination,
+      replayCounters,
+      replayProbe,
       batchSettlement,
       artifactFiles: [
         "mcp-call.raw.json",
@@ -858,6 +940,7 @@ async function main() {
         "reserve-state.json",
         "provider-signature-verification.json",
         "settld-pay-token-verification.json",
+        "provider-replay-probe.json",
         ...(runBatchSettlement ? ["batch-payout-registry.json", "batch-worker-state.json", "batch-settlement.json"] : [])
       ],
       timestamps: {

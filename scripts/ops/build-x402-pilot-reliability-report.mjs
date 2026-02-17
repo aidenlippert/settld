@@ -164,6 +164,33 @@ function settlementFromSummary(summary, runDirPath) {
   return { eligible, ok: fromFile.ok === true };
 }
 
+function replayFromSummary(summary, runDirPath) {
+  const fromSummary =
+    summary?.replayCounters && typeof summary.replayCounters === "object" && !Array.isArray(summary.replayCounters)
+      ? summary.replayCounters
+      : null;
+  const fromFileRaw = safeReadJson(path.join(runDirPath, "provider-replay-probe.json"));
+  const fromFile =
+    fromFileRaw?.replayCounters && typeof fromFileRaw.replayCounters === "object" && !Array.isArray(fromFileRaw.replayCounters)
+      ? fromFileRaw.replayCounters
+      : null;
+  const row = fromSummary ?? fromFile;
+  if (!row) return { eligible: false, duplicateResponses: 0, totalRequests: 0 };
+  const totalRequests = Number(row.totalRequests ?? row.denominator ?? 0);
+  const duplicateResponses = Number(row.duplicateResponses ?? row.numerator ?? 0);
+  if (!Number.isSafeInteger(totalRequests) || totalRequests <= 0) {
+    return { eligible: false, duplicateResponses: 0, totalRequests: 0 };
+  }
+  if (!Number.isSafeInteger(duplicateResponses) || duplicateResponses < 0) {
+    return { eligible: false, duplicateResponses: 0, totalRequests: 0 };
+  }
+  return {
+    eligible: true,
+    duplicateResponses: Math.min(duplicateResponses, totalRequests),
+    totalRequests
+  };
+}
+
 function classifyRun({ runDirPath, summary }) {
   const mcpParsed = safeReadJson(path.join(runDirPath, "mcp-call.parsed.json"));
   const tokenVerify = safeReadJson(path.join(runDirPath, "settld-pay-token-verification.json"));
@@ -186,6 +213,7 @@ function classifyRun({ runDirPath, summary }) {
   else if (typeof providerSigVerify?.ok === "boolean") providerSignatureVerified = providerSigVerify.ok;
 
   const settlement = settlementFromSummary(summary, runDirPath);
+  const replay = replayFromSummary(summary, runDirPath);
 
   return {
     runId: String(summary?.runId ?? path.basename(runDirPath)),
@@ -198,7 +226,8 @@ function classifyRun({ runDirPath, summary }) {
     reserveFailureLikely,
     tokenVerified,
     providerSignatureVerified,
-    settlement
+    settlement,
+    replay
   };
 }
 
@@ -252,6 +281,18 @@ export function buildX402PilotReliabilityReport({
   const settlementEligible = attempted.filter((row) => row.settlement.eligible === true && typeof row.settlement.ok === "boolean");
   const settlementSuccess = settlementEligible.filter((row) => row.settlement.ok === true);
   const settlementFailures = settlementEligible.filter((row) => row.settlement.ok !== true);
+  const replayEligible = attempted.filter((row) => row.replay?.eligible === true);
+  const replayTotals = replayEligible.reduce(
+    (acc, row) => {
+      acc.duplicateResponses += Number(row.replay?.duplicateResponses ?? 0);
+      acc.totalRequests += Number(row.replay?.totalRequests ?? 0);
+      return acc;
+    },
+    { duplicateResponses: 0, totalRequests: 0 }
+  );
+  const replayMissingDuplicate = replayEligible.filter(
+    (row) => Number(row.replay?.duplicateResponses ?? 0) < Number(row.replay?.totalRequests ?? 0)
+  );
 
   const firstAttempt = attempted[0] ?? null;
   const firstSuccess = successful[0] ?? null;
@@ -300,22 +341,23 @@ export function buildX402PilotReliabilityReport({
         denominator: settlementEligible.length
       },
       replayDuplicateRate: {
-        value: null,
-        numerator: null,
-        denominator: null,
-        note: "not available from current paid-demo artifacts; requires provider-side replay counters or conformance replay telemetry."
+        value: rate(replayTotals.duplicateResponses, replayTotals.totalRequests),
+        numerator: replayTotals.duplicateResponses,
+        denominator: replayTotals.totalRequests
       }
     },
     samples: {
       reserveFailureLikelyRunIds: reserveFailureLikely.map((row) => row.runId),
       tokenVerifyFailureRunIds: tokenFailures.map((row) => row.runId),
       providerSigFailureRunIds: providerSigFailures.map((row) => row.runId),
-      settlementFailureRunIds: settlementFailures.map((row) => row.runId)
+      settlementFailureRunIds: settlementFailures.map((row) => row.runId),
+      replayMissingDuplicateRunIds: replayMissingDuplicate.map((row) => row.runId)
     },
     notes: [
       "reserveFailRate is inferred from attempted runs with gateway_error.",
       "infra boot failures are excluded from economic reliability denominators.",
-      "token/provider signature failure rates only include runs with explicit verification artifacts/checks."
+      "token/provider signature failure rates only include runs with explicit verification artifacts/checks.",
+      "replayDuplicateRate is computed from provider replay counters emitted by paid demo artifacts."
     ]
   };
 
