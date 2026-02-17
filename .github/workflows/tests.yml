@@ -129,7 +129,6 @@ jobs:
           PROXY_PG_SCHEMA="deploy_safety_ci" \
           PROXY_MIGRATE_ON_STARTUP=1 \
           PROXY_OPS_TOKENS="ops_ci:ops_read,ops_write,finance_read,finance_write,audit_read" \
-          PROXY_BILLING_STRIPE_SYNC_ENABLED=1 \
           PROXY_FINANCE_RECONCILE_ENABLED=1 \
           PROXY_MONEY_RAIL_RECONCILE_ENABLED=1 \
           PORT=3000 \

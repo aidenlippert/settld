@@ -10,7 +10,6 @@ This checklist is the “no surprises” gate for shipping Settld as a product (
 - Staging billing smoke secrets are configured for `.github/workflows/release.yml`:
   - `SETTLD_STAGING_BASE_URL`
   - `SETTLD_STAGING_OPS_TOKEN`
-  - optional: `SETTLD_STAGING_STRIPE_SECRET_KEY`
 - npm publish secret is configured for `.github/workflows/release.yml` if you want direct registry distribution:
   - `NPM_TOKEN`
 - PyPI Trusted Publisher is configured for `.github/workflows/release.yml` and the `pypi` GitHub environment is allowed.

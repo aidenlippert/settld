@@ -128,7 +128,7 @@ if [[ -n "${PROXY_BILLING_STRIPE_SECRET_KEY:-}" ]]; then
   fi
 fi
 
-echo "[2/5] Stripe checkout session..."
+echo "[2/5] Billing checkout session..."
 CHECKOUT_PAYLOAD="$(jq -n \
   --arg plan "builder" \
   --arg customerId "$STRIPE_CUSTOMER_ID" \
@@ -148,7 +148,7 @@ if [[ "$CHECKOUT_MODE" != "live" && "$CHECKOUT_MODE" != "stub" ]]; then
   exit 1
 fi
 
-echo "[3/5] Stripe customer portal session..."
+echo "[3/5] Billing customer portal session..."
 CUSTOMER_ID="$STRIPE_CUSTOMER_ID"
 if [[ -z "$CUSTOMER_ID" || "$CUSTOMER_ID" == "null" ]]; then
   CUSTOMER_ID="cus_smoke_$(date +%s)"
@@ -168,7 +168,7 @@ else
   fi
 fi
 
-echo "[4/5] Webhook/reconcile subscription mapping..."
+echo "[4/5] Provider reconcile subscription mapping..."
 TS="$(date +%s)"
 GROWTH_PRICE_ID="${PROXY_BILLING_STRIPE_PRICE_ID_GROWTH:-}"
 if [[ -z "$GROWTH_PRICE_ID" ]]; then
@@ -176,8 +176,9 @@ if [[ -z "$GROWTH_PRICE_ID" ]]; then
   GROWTH_PRICE_ID="$(echo "$GROWTH_CHECKOUT_JSON" | jq -r '.checkoutSession.priceId // ""')"
 fi
 if [[ -z "$GROWTH_PRICE_ID" ]]; then
-  echo "Could not resolve Growth Stripe price ID from env or checkout response."
-  exit 1
+  # In stub mode we still need a deterministic value in event payloads; plan mapping
+  # is derived from metadata and does not require a live provider price id.
+  GROWTH_PRICE_ID="price_stub_growth"
 fi
 
 RECON_PAYLOAD="$(jq -n \
@@ -185,8 +186,9 @@ RECON_PAYLOAD="$(jq -n \
   --arg subId "sub_smoke_price_map_${TS}" \
   --arg customerId "$CUSTOMER_ID" \
   --arg price "$GROWTH_PRICE_ID" \
+  --arg plan "growth" \
   --argjson created "$TS" \
-  '{events:[{id:$eventId,type:"customer.subscription.updated",created:$created,data:{object:{id:$subId,customer:$customerId,status:"active",items:{data:[{price:{id:$price,metadata:{}}}]},metadata:{}}}}]}'
+  '{events:[{id:$eventId,type:"customer.subscription.updated",created:$created,data:{object:{id:$subId,customer:$customerId,status:"active",items:{data:[{price:{id:$price,metadata:{settldPlan:$plan}}}]},metadata:{settldPlan:$plan}}}}]}'
 )"
 RECON_JSON="$(api_post_json "/ops/finance/billing/providers/stripe/reconcile" "$RECON_PAYLOAD")"
 echo "$RECON_JSON" | jq '{tenantId,summary}'

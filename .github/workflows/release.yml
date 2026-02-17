@@ -67,7 +67,6 @@ jobs:
           PROXY_PG_SCHEMA="release_gate_ci" \
           PROXY_MIGRATE_ON_STARTUP=1 \
           PROXY_OPS_TOKENS="ops_ci:ops_read,ops_write,finance_read,finance_write,audit_read" \
-          PROXY_BILLING_STRIPE_SYNC_ENABLED=1 \
           PROXY_FINANCE_RECONCILE_ENABLED=1 \
           PROXY_MONEY_RAIL_RECONCILE_ENABLED=1 \
           PORT=3000 \
@@ -132,7 +131,6 @@ jobs:
         env:
           SETTLD_BASE_URL: ${{ secrets.SETTLD_STAGING_BASE_URL }}
           PROXY_OPS_TOKEN: ${{ secrets.SETTLD_STAGING_OPS_TOKEN }}
-          PROXY_BILLING_STRIPE_SECRET_KEY: ${{ secrets.SETTLD_STAGING_STRIPE_SECRET_KEY }}
           SETTLD_TENANT_ID: tenant_release_${{ github.run_id }}
         run: |
           set -euo pipefail
