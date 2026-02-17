@@ -436,7 +436,7 @@ async function createSettledJob({ baseUrl, robotId, robotKeyId, robotPrivateKeyP
           destinationId: "d1",
           url: receiver.url,
           secret: "sek",
-          artifactTypes: ["WorkCertificate.v1"]
+          artifactTypes: ["WorkCertificate.v1", "SettlementStatement.v1"]
         }
       ]
     };
