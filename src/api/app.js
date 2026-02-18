@@ -8242,6 +8242,78 @@ export function createApi({
     };
   }
 
+  function buildVerificationKeyEvidence(signatureLike) {
+    if (!signatureLike || typeof signatureLike !== "object" || Array.isArray(signatureLike)) return null;
+    const publicKeyPem =
+      typeof signatureLike.publicKeyPem === "string" && signatureLike.publicKeyPem.trim() !== "" ? signatureLike.publicKeyPem.trim() : null;
+    if (!publicKeyPem) return null;
+    try {
+      const key = crypto.createPublicKey(publicKeyPem);
+      const exported = key.export({ format: "jwk" });
+      if (!exported || typeof exported !== "object" || Array.isArray(exported)) return null;
+      if (String(exported.kty ?? "") !== "OKP") return null;
+      if (String(exported.crv ?? "") !== "Ed25519") return null;
+      if (typeof exported.x !== "string" || exported.x.trim() === "") return null;
+      const jwk = normalizeForCanonicalJson(
+        {
+          kty: "OKP",
+          crv: "Ed25519",
+          x: exported.x.trim()
+        },
+        { path: "$" }
+      );
+      const jwkThumbprintSha256 = sha256Hex(canonicalJsonStringify(jwk));
+      return {
+        schemaVersion: "VerificationKeyEvidence.v1",
+        keyId:
+          typeof signatureLike.keyId === "string" && signatureLike.keyId.trim() !== ""
+            ? signatureLike.keyId.trim()
+            : keyIdFromPublicKeyPem(publicKeyPem),
+        publicKeyPem,
+        jwk,
+        jwkThumbprintSha256
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function parseX402ReceiptListQuery(url) {
+    const parseBound = (raw, name) => {
+      if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+      const text = String(raw).trim();
+      if (!Number.isFinite(Date.parse(text))) throw new TypeError(`${name} must be an ISO date-time`);
+      return new Date(text).toISOString();
+    };
+    const parseNullableTrimmed = (raw) => {
+      if (raw === null || raw === undefined) return null;
+      const text = String(raw).trim();
+      return text === "" ? null : text;
+    };
+    const parsePositiveInt = (raw, fallback, { min = 1, max = 1000, name = "limit" } = {}) => {
+      if (raw === null || raw === undefined || String(raw).trim() === "") return fallback;
+      const n = Number(raw);
+      if (!Number.isSafeInteger(n) || n < min || n > max) throw new TypeError(`${name} must be an integer within ${min}..${max}`);
+      return n;
+    };
+    const parseNonNegativeInt = (raw, fallback, { max = 100_000, name = "offset" } = {}) => {
+      if (raw === null || raw === undefined || String(raw).trim() === "") return fallback;
+      const n = Number(raw);
+      if (!Number.isSafeInteger(n) || n < 0 || n > max) throw new TypeError(`${name} must be an integer within 0..${max}`);
+      return n;
+    };
+    return {
+      agentId: parseNullableTrimmed(url.searchParams.get("agent_id") ?? url.searchParams.get("agentId")),
+      sponsorId: parseNullableTrimmed(url.searchParams.get("sponsor_id") ?? url.searchParams.get("sponsorId")),
+      toolId: parseNullableTrimmed(url.searchParams.get("tool_id") ?? url.searchParams.get("toolId")),
+      state: parseNullableTrimmed(url.searchParams.get("state")),
+      from: parseBound(url.searchParams.get("from"), "from"),
+      to: parseBound(url.searchParams.get("to"), "to"),
+      limit: parsePositiveInt(url.searchParams.get("limit"), 200, { name: "limit" }),
+      offset: parseNonNegativeInt(url.searchParams.get("offset"), 0, { name: "offset" })
+    };
+  }
+
   function normalizePolicyDecisionId(value) {
     if (typeof value !== "string") return null;
     const trimmed = value.trim();
@@ -29886,6 +29958,63 @@ export function createApi({
 	      {
 	        const parts = path.split("/").filter(Boolean);
 
+        if (parts[0] === "x402" && parts[1] === "receipts" && parts[2] === "export" && parts.length === 3 && req.method === "GET") {
+          if (typeof store.listX402Receipts !== "function") return sendError(res, 501, "x402 receipts are not supported for this store");
+          let query;
+          try {
+            query = parseX402ReceiptListQuery(url);
+          } catch (err) {
+            return sendError(res, 400, "invalid receipt export query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const rows = await store.listX402Receipts({
+            tenantId,
+            agentId: query.agentId,
+            sponsorId: query.sponsorId,
+            toolId: query.toolId,
+            state: query.state,
+            from: query.from,
+            to: query.to,
+            limit: Math.min(5000, query.limit),
+            offset: query.offset
+          });
+          const ndjson = rows.map((row) => JSON.stringify(row)).join("\n");
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+          res.setHeader("cache-control", "no-store");
+          res.end(ndjson ? `${ndjson}\n` : "");
+          return;
+        }
+
+        if (parts[0] === "x402" && parts[1] === "receipts" && parts[2] && parts.length === 3 && req.method === "GET") {
+          if (typeof store.getX402Receipt !== "function") return sendError(res, 501, "x402 receipts are not supported for this store");
+          const receiptId = parts[2];
+          const receipt = await store.getX402Receipt({ tenantId, receiptId });
+          if (!receipt) return sendError(res, 404, "receipt not found", null, { code: "NOT_FOUND" });
+          return sendJson(res, 200, { ok: true, receipt });
+        }
+
+        if (parts[0] === "x402" && parts[1] === "receipts" && parts.length === 2 && req.method === "GET") {
+          if (typeof store.listX402Receipts !== "function") return sendError(res, 501, "x402 receipts are not supported for this store");
+          let query;
+          try {
+            query = parseX402ReceiptListQuery(url);
+          } catch (err) {
+            return sendError(res, 400, "invalid receipt query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const receipts = await store.listX402Receipts({
+            tenantId,
+            agentId: query.agentId,
+            sponsorId: query.sponsorId,
+            toolId: query.toolId,
+            state: query.state,
+            from: query.from,
+            to: query.to,
+            limit: query.limit,
+            offset: query.offset
+          });
+          return sendJson(res, 200, { receipts, limit: query.limit, offset: query.offset });
+        }
+
         if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "create" && parts.length === 3 && req.method === "POST") {
           if (!requireProtocolHeaderForWrite(req, res)) return;
 
@@ -31009,8 +31138,6 @@ export function createApi({
 	            // Deterministic ordering for receipts/logs.
 	            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
 	          })();
-          const requestSha256 = parseEvidenceRefSha256(evidenceRefs, "http:request_sha256:");
-          const responseSha256 = parseEvidenceRefSha256(evidenceRefs, "http:response_sha256:");
           const providerSigReasonCodes = reasonCodes.filter(
             (code) =>
               code === "X402_PROVIDER_SIGNATURE_MISSING" ||
@@ -31020,6 +31147,8 @@ export function createApi({
               code === "X402_PROVIDER_KEY_ID_UNKNOWN"
           );
           const providerQuoteReasonCodes = reasonCodes.filter((code) => code.startsWith("X402_PROVIDER_QUOTE_"));
+          const providerSigKeyEvidence = buildVerificationKeyEvidence(body?.providerSignature ?? null);
+          const providerQuoteSigKeyEvidence = buildVerificationKeyEvidence(body?.providerQuoteSignature ?? null);
           const providerSigStatus = normalizeProviderSignatureStatus({
             providerSignatureRequired: verificationSource === "provider_signature_v1",
             providerSignature: body?.providerSignature ?? null,
@@ -31030,6 +31159,25 @@ export function createApi({
             providerQuoteSignature: body?.providerQuoteSignature ?? null,
             providerReasonCodes: providerQuoteReasonCodes
           });
+          if (providerSigKeyEvidence?.jwkThumbprintSha256) {
+            providerSigStatus.keyJwkThumbprintSha256 = providerSigKeyEvidence.jwkThumbprintSha256;
+          }
+          if (providerQuoteSigKeyEvidence?.jwkThumbprintSha256) {
+            providerQuoteSigStatus.keyJwkThumbprintSha256 = providerQuoteSigKeyEvidence.jwkThumbprintSha256;
+          }
+          const enrichedEvidenceRefs = Array.from(
+            new Set([
+              ...evidenceRefs,
+              ...(providerSigKeyEvidence?.jwkThumbprintSha256
+                ? [`provider:key_jwk_thumbprint_sha256:${providerSigKeyEvidence.jwkThumbprintSha256}`]
+                : []),
+              ...(providerQuoteSigKeyEvidence?.jwkThumbprintSha256
+                ? [`provider_quote:key_jwk_thumbprint_sha256:${providerQuoteSigKeyEvidence.jwkThumbprintSha256}`]
+                : [])
+            ])
+          ).sort((left, right) => String(left).localeCompare(String(right)));
+          const requestSha256 = parseEvidenceRefSha256(enrichedEvidenceRefs, "http:request_sha256:");
+          const responseSha256 = parseEvidenceRefSha256(enrichedEvidenceRefs, "http:response_sha256:");
           const verificationMethodHashUsed = computeVerificationMethodHash(policyDecision.verificationMethod ?? {});
           const policyDecisionFingerprint = buildPolicyDecisionFingerprint({
             policyInput: body?.policy ?? null,
@@ -31179,6 +31327,11 @@ export function createApi({
             releaseRatePct: immediateReleaseRatePct,
             verificationMethod: policyDecision.verificationMethod,
             bindings: settlementBindings,
+            verificationContext: {
+              schemaVersion: "X402GateVerificationContext.v1",
+              providerSigningKey: providerSigKeyEvidence,
+              providerQuoteSigningKey: providerQuoteSigKeyEvidence
+            },
             decisionRecord: resolvedKernelRefs.decisionRecord,
             settlementReceipt: resolvedKernelRefs.settlementReceipt
           };
@@ -31318,6 +31471,11 @@ export function createApi({
                     providerQuoteSig: settlementBindings.providerQuoteSig ?? null,
                     policyDecisionFingerprint: settlementBindings.policyDecisionFingerprint ?? null
 		              },
+                  verificationContext: {
+                    schemaVersion: "X402GateVerificationContext.v1",
+                    providerSigningKey: providerSigKeyEvidence,
+                    providerQuoteSigningKey: providerQuoteSigKeyEvidence
+                  },
 	              holdback:
 	                holdbackAmountCents > 0
 	                  ? {
@@ -31330,8 +31488,9 @@ export function createApi({
 	                      releasedAt: holdbackSettlementResolved ? at : null
 	                    }
 	                  : null,
-		              evidenceRefs,
+		              evidenceRefs: enrichedEvidenceRefs,
 		              providerSignature: body?.providerSignature ?? null,
+                  providerQuoteSignature: body?.providerQuoteSignature ?? null,
 		              updatedAt: at
 		            },
 	            { path: "$" }

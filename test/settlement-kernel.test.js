@@ -268,6 +268,7 @@ test("Settlement kernel preserves x402 authorization/request/response bindings",
         present: true,
         verified: true,
         providerKeyId: "provkey_1",
+        keyJwkThumbprintSha256: "6".repeat(64),
         error: null
       },
       providerQuoteSig: {
@@ -277,6 +278,7 @@ test("Settlement kernel preserves x402 authorization/request/response bindings",
         providerKeyId: "provkey_1",
         quoteId: "x402quote_1",
         quoteSha256: "7".repeat(64),
+        keyJwkThumbprintSha256: "8".repeat(64),
         error: null
       },
       reserve: {
@@ -342,7 +344,9 @@ test("Settlement kernel preserves x402 authorization/request/response bindings",
   });
   assert.equal(receipt.bindings.response.status, 200);
   assert.equal(receipt.bindings.providerSig.verified, true);
+  assert.equal(receipt.bindings.providerSig.keyJwkThumbprintSha256, "6".repeat(64));
   assert.equal(receipt.bindings.providerQuoteSig.verified, true);
+  assert.equal(receipt.bindings.providerQuoteSig.keyJwkThumbprintSha256, "8".repeat(64));
   assert.equal(receipt.bindings.quote.requestBindingMode, "strict");
   assert.equal(receipt.bindings.spendAuthorization.sponsorRef, "sponsor_acme");
   assert.equal(receipt.bindings.policyDecisionFingerprint.policyVersion, 7);

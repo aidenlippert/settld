@@ -999,6 +999,176 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.x402Gates.get(key) ?? null;
   };
 
+  function toX402ReceiptRecord({ tenantId, gate } = {}) {
+    if (!gate || typeof gate !== "object" || Array.isArray(gate)) return null;
+    const runId = typeof gate.runId === "string" && gate.runId.trim() !== "" ? gate.runId.trim() : null;
+    const settlement =
+      runId && store.agentRunSettlements instanceof Map
+        ? store.agentRunSettlements.get(makeScopedKey({ tenantId, id: runId })) ?? null
+        : null;
+    const decisionTrace =
+      settlement?.decisionTrace && typeof settlement.decisionTrace === "object" && !Array.isArray(settlement.decisionTrace)
+        ? settlement.decisionTrace
+        : gate.decisionTrace && typeof gate.decisionTrace === "object" && !Array.isArray(gate.decisionTrace)
+          ? gate.decisionTrace
+          : null;
+    const settlementReceipt =
+      decisionTrace?.settlementReceipt && typeof decisionTrace.settlementReceipt === "object" && !Array.isArray(decisionTrace.settlementReceipt)
+        ? decisionTrace.settlementReceipt
+        : null;
+    if (!settlementReceipt) return null;
+    const receiptId = typeof settlementReceipt.receiptId === "string" ? settlementReceipt.receiptId.trim() : "";
+    if (!receiptId) return null;
+    const bindings = decisionTrace?.bindings && typeof decisionTrace.bindings === "object" && !Array.isArray(decisionTrace.bindings) ? decisionTrace.bindings : null;
+    const verificationContext =
+      gate?.verificationContext && typeof gate.verificationContext === "object" && !Array.isArray(gate.verificationContext)
+        ? gate.verificationContext
+        : gate?.decision?.verificationContext &&
+            typeof gate.decision.verificationContext === "object" &&
+            !Array.isArray(gate.decision.verificationContext)
+          ? gate.decision.verificationContext
+          : null;
+    const sponsorRef =
+      typeof bindings?.spendAuthorization?.sponsorRef === "string" && bindings.spendAuthorization.sponsorRef.trim() !== ""
+        ? bindings.spendAuthorization.sponsorRef.trim()
+        : null;
+    const sponsorWalletRef =
+      typeof bindings?.spendAuthorization?.sponsorWalletRef === "string" && bindings.spendAuthorization.sponsorWalletRef.trim() !== ""
+        ? bindings.spendAuthorization.sponsorWalletRef.trim()
+        : null;
+    const agentKeyId =
+      typeof bindings?.spendAuthorization?.agentKeyId === "string" && bindings.spendAuthorization.agentKeyId.trim() !== ""
+        ? bindings.spendAuthorization.agentKeyId.trim()
+        : null;
+    const settledAt =
+      typeof settlementReceipt.settledAt === "string" && settlementReceipt.settledAt.trim() !== ""
+        ? settlementReceipt.settledAt.trim()
+        : typeof gate.resolvedAt === "string" && gate.resolvedAt.trim() !== ""
+          ? gate.resolvedAt.trim()
+          : null;
+    return {
+      schemaVersion: "X402ReceiptRecord.v1",
+      tenantId,
+      receiptId,
+      gateId: typeof gate.gateId === "string" ? gate.gateId : null,
+      runId,
+      payerAgentId: typeof gate.payerAgentId === "string" ? gate.payerAgentId : null,
+      providerId: typeof gate.payeeAgentId === "string" ? gate.payeeAgentId : null,
+      toolId:
+        typeof gate.toolId === "string" && gate.toolId.trim() !== ""
+          ? gate.toolId.trim()
+          : typeof gate?.quote?.toolId === "string" && gate.quote.toolId.trim() !== ""
+            ? gate.quote.toolId.trim()
+            : null,
+      sponsorRef,
+      sponsorWalletRef,
+      agentKeyId,
+      settlementState:
+        typeof settlementReceipt.status === "string" && settlementReceipt.status.trim() !== ""
+          ? settlementReceipt.status.trim().toLowerCase()
+          : typeof settlement?.status === "string" && settlement.status.trim() !== ""
+            ? settlement.status.trim().toLowerCase()
+          : null,
+      verificationStatus:
+        typeof decisionTrace?.verificationStatus === "string" && decisionTrace.verificationStatus.trim() !== ""
+          ? decisionTrace.verificationStatus.trim().toLowerCase()
+          : null,
+      settledAt,
+      createdAt:
+        typeof settlementReceipt.createdAt === "string" && settlementReceipt.createdAt.trim() !== ""
+          ? settlementReceipt.createdAt.trim()
+          : null,
+      updatedAt:
+        typeof gate.updatedAt === "string" && gate.updatedAt.trim() !== ""
+          ? gate.updatedAt.trim()
+          : typeof settledAt === "string"
+            ? settledAt
+            : null,
+      evidenceRefs: Array.isArray(gate.evidenceRefs) ? gate.evidenceRefs.slice() : [],
+      verificationContext,
+      bindings,
+      decisionRecord:
+        decisionTrace?.decisionRecord && typeof decisionTrace.decisionRecord === "object" && !Array.isArray(decisionTrace.decisionRecord)
+          ? decisionTrace.decisionRecord
+          : null,
+      settlementReceipt
+    };
+  }
+
+  store.getX402Receipt = async function getX402Receipt({ tenantId = DEFAULT_TENANT_ID, receiptId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof receiptId !== "string" || receiptId.trim() === "") throw new TypeError("receiptId is required");
+    const wanted = receiptId.trim();
+    for (const gate of store.x402Gates.values()) {
+      if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
+      if (normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      const receipt = toX402ReceiptRecord({ tenantId, gate });
+      if (!receipt) continue;
+      if (String(receipt.receiptId ?? "") === wanted) return receipt;
+    }
+    return null;
+  };
+
+  store.listX402Receipts = async function listX402Receipts({
+    tenantId = DEFAULT_TENANT_ID,
+    agentId = null,
+    sponsorId = null,
+    toolId = null,
+    state = null,
+    from = null,
+    to = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (agentId !== null && (typeof agentId !== "string" || agentId.trim() === "")) throw new TypeError("agentId must be null or a non-empty string");
+    if (sponsorId !== null && (typeof sponsorId !== "string" || sponsorId.trim() === "")) throw new TypeError("sponsorId must be null or a non-empty string");
+    if (toolId !== null && (typeof toolId !== "string" || toolId.trim() === "")) throw new TypeError("toolId must be null or a non-empty string");
+    if (state !== null && (typeof state !== "string" || state.trim() === "")) throw new TypeError("state must be null or a non-empty string");
+    if (from !== null && !Number.isFinite(Date.parse(String(from)))) throw new TypeError("from must be null or an ISO date-time");
+    if (to !== null && !Number.isFinite(Date.parse(String(to)))) throw new TypeError("to must be null or an ISO date-time");
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const normalizedAgentId = agentId ? agentId.trim() : null;
+    const normalizedSponsorId = sponsorId ? sponsorId.trim() : null;
+    const normalizedToolId = toolId ? toolId.trim() : null;
+    const normalizedState = state ? state.trim().toLowerCase() : null;
+    const fromMs = from ? Date.parse(String(from)) : null;
+    const toMs = to ? Date.parse(String(to)) : null;
+    const out = [];
+
+    for (const gate of store.x402Gates.values()) {
+      if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
+      if (normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      const receipt = toX402ReceiptRecord({ tenantId, gate });
+      if (!receipt) continue;
+      if (
+        normalizedAgentId &&
+        String(receipt.payerAgentId ?? "") !== normalizedAgentId &&
+        String(receipt.providerId ?? "") !== normalizedAgentId &&
+        String(receipt.agentKeyId ?? "") !== normalizedAgentId
+      ) {
+        continue;
+      }
+      if (normalizedSponsorId && String(receipt.sponsorRef ?? "") !== normalizedSponsorId) continue;
+      if (normalizedToolId && String(receipt.toolId ?? "") !== normalizedToolId) continue;
+      if (normalizedState && String(receipt.settlementState ?? "").toLowerCase() !== normalizedState) continue;
+      const settledAtMs = Number.isFinite(Date.parse(String(receipt.settledAt ?? ""))) ? Date.parse(String(receipt.settledAt)) : Number.NaN;
+      if (fromMs !== null && (!Number.isFinite(settledAtMs) || settledAtMs < fromMs)) continue;
+      if (toMs !== null && (!Number.isFinite(settledAtMs) || settledAtMs > toMs)) continue;
+      out.push(receipt);
+    }
+
+    out.sort((left, right) => {
+      const leftMs = Number.isFinite(Date.parse(String(left?.settledAt ?? ""))) ? Date.parse(String(left.settledAt)) : Number.NaN;
+      const rightMs = Number.isFinite(Date.parse(String(right?.settledAt ?? ""))) ? Date.parse(String(right.settledAt)) : Number.NaN;
+      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return rightMs - leftMs;
+      return String(left?.receiptId ?? "").localeCompare(String(right?.receiptId ?? ""));
+    });
+    return out.slice(offset, offset + Math.min(1000, limit));
+  };
+
   store.listArbitrationCases = async function listArbitrationCases({
     tenantId = DEFAULT_TENANT_ID,
     runId = null,

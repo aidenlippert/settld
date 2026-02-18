@@ -146,6 +146,9 @@ function normalizeSettlementBindings(value, name, { allowNull = true } = {}) {
             present: normalizeNullableBoolean(value.providerSig.present, `${name}.providerSig.present`),
             verified: normalizeNullableBoolean(value.providerSig.verified, `${name}.providerSig.verified`),
             providerKeyId: normalizeNullableString(value.providerSig.providerKeyId, `${name}.providerSig.providerKeyId`, { max: 200 }),
+            keyJwkThumbprintSha256: normalizeHexHash(value.providerSig.keyJwkThumbprintSha256, `${name}.providerSig.keyJwkThumbprintSha256`, {
+              allowNull: true
+            }),
             error: normalizeNullableString(value.providerSig.error, `${name}.providerSig.error`, { max: 4000 })
           }
         : null,
@@ -159,6 +162,11 @@ function normalizeSettlementBindings(value, name, { allowNull = true } = {}) {
             }),
             quoteId: normalizeNullableString(value.providerQuoteSig.quoteId, `${name}.providerQuoteSig.quoteId`, { max: 200 }),
             quoteSha256: normalizeHexHash(value.providerQuoteSig.quoteSha256, `${name}.providerQuoteSig.quoteSha256`, { allowNull: true }),
+            keyJwkThumbprintSha256: normalizeHexHash(
+              value.providerQuoteSig.keyJwkThumbprintSha256,
+              `${name}.providerQuoteSig.keyJwkThumbprintSha256`,
+              { allowNull: true }
+            ),
             error: normalizeNullableString(value.providerQuoteSig.error, `${name}.providerQuoteSig.error`, { max: 4000 })
           }
         : null,
