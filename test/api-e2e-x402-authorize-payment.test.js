@@ -35,6 +35,37 @@ async function creditWallet(api, { agentId, amountCents, idempotencyKey }) {
   return response.json.wallet;
 }
 
+async function upsertX402WalletPolicy(api, { policy, idempotencyKey }) {
+  const response = await request(api, {
+    method: "POST",
+    path: "/ops/x402/wallet-policies",
+    headers: {
+      "x-idempotency-key": idempotencyKey,
+      "x-settld-protocol": "1.0"
+    },
+    body: { policy }
+  });
+  return response;
+}
+
+async function issueWalletAuthorizationDecision(
+  api,
+  { sponsorWalletRef, gateId, quoteId = null, requestBindingMode = null, requestBindingSha256 = null, idempotencyKey }
+) {
+  const response = await request(api, {
+    method: "POST",
+    path: `/x402/wallets/${encodeURIComponent(sponsorWalletRef)}/authorize`,
+    headers: { "x-idempotency-key": idempotencyKey },
+    body: {
+      gateId,
+      ...(quoteId ? { quoteId } : {}),
+      ...(requestBindingMode ? { requestBindingMode } : {}),
+      ...(requestBindingSha256 ? { requestBindingSha256 } : {})
+    }
+  });
+  return response;
+}
+
 test("API e2e: x402 authorize-payment is idempotent and token verifies via keyset", async () => {
   const api = createApi({ opsToken: "tok_ops" });
 
@@ -250,6 +281,21 @@ test("API e2e: quote-bound authorization carries spend claims into settlement bi
   const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payer_quote_1" });
   const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_payee_quote_1" });
   await creditWallet(api, { agentId: payerAgentId, amountCents: 8000, idempotencyKey: "wallet_credit_x402_auth_quote_1" });
+  const policyUpsert = await upsertX402WalletPolicy(api, {
+    policy: {
+      schemaVersion: "X402WalletPolicy.v1",
+      sponsorRef: "sponsor_acme",
+      sponsorWalletRef: "wallet_sponsor_1",
+      policyRef: "policy_alpha",
+      policyVersion: 3,
+      status: "active",
+      requireQuote: true,
+      requireStrictRequestBinding: true,
+      requireAgentKeyMatch: false
+    },
+    idempotencyKey: "x402_wallet_policy_upsert_auth_quote_1"
+  });
+  assert.equal(policyUpsert.statusCode, 201, policyUpsert.body);
 
   const gateId = "gate_auth_quote_1";
   const createGate = await request(api, {
@@ -303,8 +349,33 @@ test("API e2e: quote-bound authorization carries spend claims into settlement bi
       requestBindingSha256
     }
   });
-  assert.equal(authorized.statusCode, 200, authorized.body);
-  const payload = parseSettldPayTokenV1(authorized.json?.token).payload;
+  assert.equal(authorized.statusCode, 409, authorized.body);
+  assert.equal(authorized.json?.code, "X402_WALLET_ISSUER_DECISION_REQUIRED");
+
+  const issuerDecision = await issueWalletAuthorizationDecision(api, {
+    sponsorWalletRef: "wallet_sponsor_1",
+    gateId,
+    quoteId,
+    requestBindingMode: "strict",
+    requestBindingSha256,
+    idempotencyKey: "x402_wallet_issuer_auth_quote_1"
+  });
+  assert.equal(issuerDecision.statusCode, 200, issuerDecision.body);
+
+  const authorizedWithDecision = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_auth_quote_1b" },
+    body: {
+      gateId,
+      quoteId,
+      requestBindingMode: "strict",
+      requestBindingSha256,
+      walletAuthorizationDecisionToken: issuerDecision.json?.walletAuthorizationDecisionToken
+    }
+  });
+  assert.equal(authorizedWithDecision.statusCode, 200, authorizedWithDecision.body);
+  const payload = parseSettldPayTokenV1(authorizedWithDecision.json?.token).payload;
   assert.equal(payload.requestBindingMode, "strict");
   assert.equal(payload.requestBindingSha256, requestBindingSha256);
   assert.equal(payload.quoteId, quoteId);
