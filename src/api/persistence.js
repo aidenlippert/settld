@@ -9,6 +9,7 @@ import { reduceMonthClose } from "../core/month-close.js";
 import { AGENT_RUN_EVENT_SCHEMA_VERSION, reduceAgentRun } from "../core/agent-runs.js";
 import { normalizeInteractionDirection } from "../core/interaction-directions.js";
 import { DEFAULT_TENANT_ID, normalizeTenantId, makeScopedKey } from "../core/tenancy.js";
+import { canonicalJsonStringify } from "../core/canonical-json.js";
 
 export const TX_LOG_VERSION = 1;
 
@@ -436,6 +437,65 @@ export function applyTxRecord(store, record) {
       if (!(store.x402Gates instanceof Map)) store.x402Gates = new Map();
       const key = makeScopedKey({ tenantId, id: String(gateId) });
       store.x402Gates.set(key, { ...gate, tenantId, gateId: String(gateId) });
+      continue;
+    }
+
+    if (kind === "X402_RECEIPT_PUT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const receipt = op.receipt ?? null;
+      if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
+        throw new TypeError("X402_RECEIPT_PUT requires receipt");
+      }
+      const receiptId = receipt.receiptId ?? op.receiptId ?? null;
+      if (!receiptId) throw new TypeError("X402_RECEIPT_PUT requires receipt.receiptId");
+      if (!(store.x402Receipts instanceof Map)) store.x402Receipts = new Map();
+      const key = makeScopedKey({ tenantId, id: String(receiptId) });
+      const normalized = {
+        ...receipt,
+        tenantId,
+        receiptId: String(receiptId),
+        reversal: null,
+        reversalEvents: []
+      };
+      const existing = store.x402Receipts.get(key) ?? null;
+      if (existing) {
+        const existingCanonical = canonicalJsonStringify(existing);
+        const incomingCanonical = canonicalJsonStringify(normalized);
+        if (existingCanonical !== incomingCanonical) {
+          const err = new Error("x402 receipt is immutable and cannot be changed");
+          err.code = "X402_RECEIPT_IMMUTABLE";
+          err.receiptId = String(receiptId);
+          throw err;
+        }
+        continue;
+      }
+      store.x402Receipts.set(key, normalized);
+      continue;
+    }
+
+    if (kind === "X402_WALLET_POLICY_UPSERT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const policy = op.policy ?? null;
+      if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+        throw new TypeError("X402_WALLET_POLICY_UPSERT requires policy");
+      }
+      const sponsorWalletRef = typeof policy.sponsorWalletRef === "string" ? policy.sponsorWalletRef.trim() : "";
+      const policyRef = typeof policy.policyRef === "string" ? policy.policyRef.trim() : "";
+      const policyVersion = Number(policy.policyVersion);
+      if (!sponsorWalletRef) throw new TypeError("X402_WALLET_POLICY_UPSERT requires policy.sponsorWalletRef");
+      if (!policyRef) throw new TypeError("X402_WALLET_POLICY_UPSERT requires policy.policyRef");
+      if (!Number.isSafeInteger(policyVersion) || policyVersion <= 0) {
+        throw new TypeError("X402_WALLET_POLICY_UPSERT requires policy.policyVersion >= 1");
+      }
+      if (!(store.x402WalletPolicies instanceof Map)) store.x402WalletPolicies = new Map();
+      const key = makeScopedKey({ tenantId, id: `${sponsorWalletRef}::${policyRef}::${policyVersion}` });
+      store.x402WalletPolicies.set(key, {
+        ...policy,
+        tenantId,
+        sponsorWalletRef,
+        policyRef,
+        policyVersion
+      });
       continue;
     }
 

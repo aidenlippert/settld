@@ -159,6 +159,10 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.agreementDelegations.clear();
     if (!(store.x402Gates instanceof Map)) store.x402Gates = new Map();
     store.x402Gates.clear();
+    if (!(store.x402Receipts instanceof Map)) store.x402Receipts = new Map();
+    store.x402Receipts.clear();
+    if (!(store.x402WalletPolicies instanceof Map)) store.x402WalletPolicies = new Map();
+    store.x402WalletPolicies.clear();
     if (!(store.x402ReversalEvents instanceof Map)) store.x402ReversalEvents = new Map();
     store.x402ReversalEvents.clear();
     if (!(store.x402ReversalNonceUsage instanceof Map)) store.x402ReversalNonceUsage = new Map();
@@ -203,6 +207,29 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           tenantId: snap?.tenantId ?? tenantId,
           gateId: snap?.gateId ?? String(id)
         });
+      }
+      if (type === "x402_receipt") {
+        store.x402Receipts.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          receiptId: snap?.receiptId ?? String(id),
+          reversal: null,
+          reversalEvents: []
+        });
+      }
+      if (type === "x402_wallet_policy") {
+        const sponsorWalletRef = typeof snap?.sponsorWalletRef === "string" ? snap.sponsorWalletRef : null;
+        const policyRef = typeof snap?.policyRef === "string" ? snap.policyRef : null;
+        const policyVersion = parseSafeIntegerOrNull(snap?.policyVersion);
+        if (sponsorWalletRef && policyRef && policyVersion !== null && policyVersion > 0) {
+          store.x402WalletPolicies.set(makeScopedKey({ tenantId, id: `${sponsorWalletRef}::${policyRef}::${policyVersion}` }), {
+            ...snap,
+            tenantId: snap?.tenantId ?? tenantId,
+            sponsorWalletRef,
+            policyRef,
+            policyVersion
+          });
+        }
       }
       if (type === "x402_reversal_event") {
         store.x402ReversalEvents.set(key, {
@@ -1257,6 +1284,98 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     );
   }
 
+  async function persistX402Receipt(client, { tenantId, receiptId, receipt }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
+      throw new TypeError("receipt is required");
+    }
+    const normalizedReceiptId =
+      receiptId ? String(receiptId) : receipt.receiptId ? String(receipt.receiptId) : null;
+    if (!normalizedReceiptId) throw new TypeError("receiptId is required");
+
+    const updatedAt =
+      parseIsoOrNull(receipt.createdAt) ??
+      parseIsoOrNull(receipt.settledAt) ??
+      parseIsoOrNull(receipt.updatedAt) ??
+      new Date().toISOString();
+    const normalizedReceipt = {
+      ...receipt,
+      tenantId,
+      receiptId: normalizedReceiptId,
+      reversal: null,
+      reversalEvents: [],
+      updatedAt
+    };
+
+    const inserted = await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_receipt', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO NOTHING
+        RETURNING aggregate_id
+      `,
+      [tenantId, normalizedReceiptId, JSON.stringify(normalizedReceipt), updatedAt]
+    );
+    if (inserted.rows.length > 0) return;
+
+    const existing = await client.query(
+      `
+        SELECT snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'x402_receipt' AND aggregate_id = $2
+        LIMIT 1
+      `,
+      [tenantId, normalizedReceiptId]
+    );
+    if (!existing.rows.length) return;
+
+    const existingCanonical = canonicalJsonStringify(existing.rows[0]?.snapshot_json ?? null);
+    const incomingCanonical = canonicalJsonStringify(normalizedReceipt);
+    if (existingCanonical !== incomingCanonical) {
+      const err = new Error("x402 receipt is immutable and cannot be changed");
+      err.code = "X402_RECEIPT_IMMUTABLE";
+      err.receiptId = normalizedReceiptId;
+      throw err;
+    }
+  }
+
+  async function persistX402WalletPolicy(client, { tenantId, policy }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+      throw new TypeError("policy is required");
+    }
+    const sponsorWalletRef =
+      policy.sponsorWalletRef && String(policy.sponsorWalletRef).trim() !== ""
+        ? String(policy.sponsorWalletRef).trim()
+        : null;
+    const policyRef = policy.policyRef && String(policy.policyRef).trim() !== "" ? String(policy.policyRef).trim() : null;
+    const policyVersion = parseSafeIntegerOrNull(policy.policyVersion);
+    if (!sponsorWalletRef) throw new TypeError("policy.sponsorWalletRef is required");
+    if (!policyRef) throw new TypeError("policy.policyRef is required");
+    if (policyVersion === null || policyVersion <= 0) throw new TypeError("policy.policyVersion must be >= 1");
+    const aggregateId = `${sponsorWalletRef}::${policyRef}::${policyVersion}`;
+    const updatedAt = parseIsoOrNull(policy.updatedAt) ?? new Date().toISOString();
+    const normalizedPolicy = {
+      ...policy,
+      tenantId,
+      sponsorWalletRef,
+      policyRef,
+      policyVersion,
+      updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_wallet_policy', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, aggregateId, JSON.stringify(normalizedPolicy), updatedAt]
+    );
+  }
+
   async function persistX402ReversalEvent(client, { tenantId, gateId, eventId, event }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     if (!event || typeof event !== "object" || Array.isArray(event)) {
@@ -1849,6 +1968,8 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "ARBITRATION_CASE_UPSERT",
       "AGREEMENT_DELEGATION_UPSERT",
       "X402_GATE_UPSERT",
+      "X402_RECEIPT_PUT",
+      "X402_WALLET_POLICY_UPSERT",
       "X402_REVERSAL_EVENT_APPEND",
       "X402_REVERSAL_NONCE_PUT",
       "X402_REVERSAL_COMMAND_PUT",
@@ -2682,6 +2803,14 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
         if (op.kind === "X402_GATE_UPSERT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.gate?.tenantId ?? DEFAULT_TENANT_ID);
           await persistX402Gate(client, { tenantId, gateId: op.gateId, gate: op.gate });
+        }
+        if (op.kind === "X402_RECEIPT_PUT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.receipt?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402Receipt(client, { tenantId, receiptId: op.receiptId, receipt: op.receipt });
+        }
+        if (op.kind === "X402_WALLET_POLICY_UPSERT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.policy?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402WalletPolicy(client, { tenantId, policy: op.policy });
         }
         if (op.kind === "X402_REVERSAL_EVENT_APPEND") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.event?.tenantId ?? DEFAULT_TENANT_ID);
