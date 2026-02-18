@@ -4,6 +4,7 @@ import { canonicalJsonStringify } from "./internal/canonical-json.js";
 import { keyIdFromPublicKeyPem, sha256Hex } from "./internal/crypto.js";
 import { buildSettldPayKeysetV1 } from "./internal/settld-keys.js";
 import { computeSettldPayRequestBindingSha256V1, verifySettldPayTokenV1 } from "./internal/settld-pay-token.js";
+import { buildToolProviderQuotePayloadV1, signToolProviderQuoteSignatureV1 } from "./internal/provider-quote-signature.js";
 import { signToolProviderSignatureV1 } from "./internal/tool-provider-signature.js";
 
 function assertFn(value, name) {
@@ -32,6 +33,13 @@ function sanitizeIdSegment(text, { maxLen = 96 } = {}) {
   const raw = String(text ?? "").trim();
   const safe = raw.replaceAll(/[^A-Za-z0-9:_-]/g, "_").slice(0, maxLen);
   return safe || "unknown";
+}
+
+const PROVIDER_QUOTE_HEADER = "x-settld-provider-quote";
+const PROVIDER_QUOTE_SIGNATURE_HEADER = "x-settld-provider-quote-signature";
+
+function toBase64UrlJson(value) {
+  return Buffer.from(canonicalJsonStringify(value), "utf8").toString("base64url");
 }
 
 function parseCacheControlMaxAgeMs(value, fallbackMs) {
@@ -396,14 +404,79 @@ function normalizeOffer({ offer, req, url, providerId, providerIdForRequest, pay
   };
 }
 
-function sendPaymentRequired(res, { offer, code = "PAYMENT_REQUIRED", message = "payment required", details = null }) {
+function deriveQuoteId({ offer, req, url, requestBindingSha256 = null } = {}) {
+  const seed = canonicalJsonStringify({
+    providerId: offer.providerId,
+    toolId: offer.toolId,
+    amountCents: offer.amountCents,
+    currency: offer.currency,
+    requestBindingMode: offer.requestBindingMode ?? "none",
+    requestBindingSha256: requestBindingSha256 ?? "",
+    method: String(req?.method ?? "GET").toUpperCase(),
+    pathWithQuery: `${url?.pathname ?? "/"}${url?.search ?? ""}`
+  });
+  return `pquote_${sha256Hex(seed).slice(0, 32)}`;
+}
+
+function buildSignedQuoteChallenge({
+  offer,
+  req,
+  url,
+  requestBindingSha256 = null,
+  quoteTtlSeconds,
+  publicKeyPem,
+  privateKeyPem
+} = {}) {
+  const nowMs = Date.now();
+  const quotedAt = new Date(nowMs).toISOString();
+  const expiresAt = new Date(nowMs + quoteTtlSeconds * 1000).toISOString();
+  const quoteId =
+    typeof offer.quoteId === "string" && offer.quoteId.trim() !== "" ? offer.quoteId.trim() : deriveQuoteId({ offer, req, url, requestBindingSha256 });
+  const quote = buildToolProviderQuotePayloadV1({
+    providerId: offer.providerId,
+    toolId: offer.toolId,
+    amountCents: offer.amountCents,
+    currency: offer.currency,
+    address: offer.address,
+    network: offer.network,
+    requestBindingMode: offer.requestBindingMode ?? "none",
+    requestBindingSha256,
+    quoteRequired: offer.quoteRequired === true,
+    quoteId,
+    spendAuthorizationMode: offer.spendAuthorizationMode ?? "optional",
+    quotedAt,
+    expiresAt
+  });
+  const signature = signToolProviderQuoteSignatureV1({
+    quote,
+    nonce: crypto.randomBytes(16).toString("hex"),
+    signedAt: quotedAt,
+    publicKeyPem,
+    privateKeyPem
+  });
+  return {
+    offer,
+    quote,
+    signature
+  };
+}
+
+function sendPaymentRequired(res, { offer, quoteAttestation = null, code = "PAYMENT_REQUIRED", message = "payment required", details = null }) {
   const headerValue = buildPaymentRequiredHeaderValue(offer);
+  const quoteHeaders =
+    quoteAttestation && quoteAttestation.quote && quoteAttestation.signature
+      ? {
+          [PROVIDER_QUOTE_HEADER]: toBase64UrlJson(quoteAttestation.quote),
+          [PROVIDER_QUOTE_SIGNATURE_HEADER]: toBase64UrlJson(quoteAttestation.signature)
+        }
+      : {};
   sendJson(res, {
     statusCode: 402,
     headers: {
       "x-payment-required": headerValue,
       "PAYMENT-REQUIRED": headerValue,
-      "x-settld-payment-error": String(code)
+      "x-settld-payment-error": String(code),
+      ...quoteHeaders
     },
     payload: {
       ok: false,
@@ -411,6 +484,7 @@ function sendPaymentRequired(res, { offer, code = "PAYMENT_REQUIRED", message = 
       code,
       message,
       offer,
+      ...(quoteAttestation ? { quote: quoteAttestation.quote } : {}),
       ...(details ? { details } : {})
     }
   });
@@ -544,6 +618,7 @@ export function createSettldPaidNodeHttpHandler({
   replayStore = null,
   replayTtlBufferMs = 60_000,
   replayMaxKeys = 10_000,
+  quoteTtlSeconds = 300,
   keysetResolver = null,
   settldPay = {},
   mutateSignature = null
@@ -553,6 +628,7 @@ export function createSettldPaidNodeHttpHandler({
   const publicKeyPem = assertNonEmptyString(providerPublicKeyPem, "providerPublicKeyPem");
   const privateKeyPem = assertNonEmptyString(providerPrivateKeyPem, "providerPrivateKeyPem");
   const normalizedReplayTtlBufferMs = assertNonNegativeSafeInt(replayTtlBufferMs, "replayTtlBufferMs");
+  const normalizedQuoteTtlSeconds = assertPositiveSafeInt(quoteTtlSeconds, "quoteTtlSeconds");
   const signerKeyId = keyIdFromPublicKeyPem(publicKeyPem);
   const maxRequestBodyBytes = (() => {
     if (settldPay && typeof settldPay === "object" && !Array.isArray(settldPay) && settldPay.maxRequestBodyBytes !== undefined) {
@@ -594,12 +670,6 @@ export function createSettldPaidNodeHttpHandler({
       return;
     }
 
-    const token = parseSettldPayAuthorizationHeader(req.headers?.authorization);
-    if (!token) {
-      sendPaymentRequired(res, { offer, code: "PAYMENT_REQUIRED", message: "missing or invalid SettldPay authorization" });
-      return;
-    }
-
     const strictRequestBinding = offer.requestBindingMode === "strict";
     let requestBodyBuffer = null;
     let requestBindingSha256 = null;
@@ -616,6 +686,27 @@ export function createSettldPaidNodeHttpHandler({
         return;
       }
     }
+    const quoteAttestation = buildSignedQuoteChallenge({
+      offer,
+      req,
+      url,
+      requestBindingSha256,
+      quoteTtlSeconds: normalizedQuoteTtlSeconds,
+      publicKeyPem,
+      privateKeyPem
+    });
+    offer = quoteAttestation.offer;
+
+    const token = parseSettldPayAuthorizationHeader(req.headers?.authorization);
+    if (!token) {
+      sendPaymentRequired(res, {
+        offer,
+        quoteAttestation,
+        code: "PAYMENT_REQUIRED",
+        message: "missing or invalid SettldPay authorization"
+      });
+      return;
+    }
 
     const verified = await verifySettldPaymentToken({
       token,
@@ -626,6 +717,7 @@ export function createSettldPaidNodeHttpHandler({
     if (!verified.ok) {
       sendPaymentRequired(res, {
         offer,
+        quoteAttestation,
         code: verified.code,
         message: verified.message ?? "payment token rejected",
         details: verified.details ?? null

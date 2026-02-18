@@ -7,6 +7,7 @@ Provider middleware for paid tool endpoints using SettldPay.
 - `HTTP 402` challenge flow with both `x-payment-required` and `PAYMENT-REQUIRED`
 - Offline SettldPay verification (`Authorization: SettldPay <token>`)
 - Cached `/.well-known/settld-keys.json` resolution with pinned-key fallback
+- Provider-signed quote challenges on `402` (`x-settld-provider-quote*` headers)
 - Provider response signing (`x-settld-provider-*` headers)
 - Replay dedupe keyed by `authorizationRef` (fallback `gateId`)
 

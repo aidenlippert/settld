@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { canonicalJsonStringify } from "../src/core/canonical-json.js";
 import { createEd25519Keypair, keyIdFromPublicKeyPem, sha256Hex } from "../src/core/crypto.js";
+import { verifyToolProviderQuoteSignatureV1 } from "../src/core/provider-quote-signature.js";
 import { buildSettldPayPayloadV1, mintSettldPayTokenV1 } from "../src/core/settld-pay-token.js";
 import { buildSettldPayKeysetV1 } from "../src/core/settld-keys.js";
 import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "../src/core/tool-provider-signature.js";
@@ -79,6 +80,11 @@ function mintSettldPay({ signer, providerId, amountCents = 500, currency = "USD"
   return minted.token;
 }
 
+function parseBase64UrlJson(raw) {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  return JSON.parse(Buffer.from(raw.trim(), "base64url").toString("utf8"));
+}
+
 test("provider kit hardening: offline SettldPay verification, replay handling, and key rotation", async (t) => {
   const providerId = "prov_exa_mock";
 
@@ -142,6 +148,12 @@ test("provider kit hardening: offline SettldPay verification, replay handling, a
   const providerKey = await providerKeyRes.json();
   const providerPublicKeyPem = String(providerKey?.publicKeyPem ?? "");
   assert.ok(providerPublicKeyPem.includes("BEGIN PUBLIC KEY"));
+  const providerJwksRes = await fetch(`${upstreamBase}/.well-known/settld-provider-keys.json`);
+  assert.equal(providerJwksRes.status, 200);
+  const providerJwks = await providerJwksRes.json();
+  assert.equal(providerJwks?.schemaVersion, "ToolProviderKeyset.v1");
+  assert.equal(Array.isArray(providerJwks?.keys), true);
+  assert.equal(providerJwks.keys[0]?.kid, providerKey.keyId);
 
   const challengeMissing = await fetch(`${upstreamBase}/exa/search?q=dentist&numResults=2`);
   assert.equal(challengeMissing.status, 402);
@@ -152,6 +164,14 @@ test("provider kit hardening: offline SettldPay verification, replay handling, a
   assert.match(challengeHeader, /currency=USD/);
   assert.match(challengeHeader, /providerId=prov_exa_mock/);
   assert.match(challengeHeader, /toolId=exa\.search/);
+  const quotePayload = parseBase64UrlJson(challengeMissing.headers.get("x-settld-provider-quote"));
+  const quoteSignature = parseBase64UrlJson(challengeMissing.headers.get("x-settld-provider-quote-signature"));
+  assert.ok(quotePayload && quoteSignature);
+  assert.equal(quotePayload.providerId, providerId);
+  assert.equal(quotePayload.toolId, "exa.search");
+  assert.equal(quotePayload.amountCents, 500);
+  assert.equal(quotePayload.currency, "USD");
+  assert.equal(verifyToolProviderQuoteSignatureV1({ quote: quotePayload, signature: quoteSignature, publicKeyPem: providerPublicKeyPem }), true);
 
   const malformed = await fetch(`${upstreamBase}/exa/search?q=dentist`, {
     headers: { authorization: "SettldPay not_a_token" }

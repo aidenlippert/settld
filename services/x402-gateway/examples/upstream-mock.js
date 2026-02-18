@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 
 import { keyIdFromPublicKeyPem } from "../../../src/core/crypto.js";
 import { createSettldPaidNodeHttpHandler } from "../../../packages/provider-kit/src/index.js";
@@ -94,6 +95,17 @@ const PROVIDER_PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIJzGRPeTwBQESqFfShXcFhPhq7tUm1V9X92FU7ucZ+H4
 -----END PRIVATE KEY-----`;
 const PROVIDER_KEY_ID = keyIdFromPublicKeyPem(PROVIDER_PUBLIC_KEY_PEM);
+const PROVIDER_PUBLIC_JWK = (() => {
+  const jwk = crypto.createPublicKey(PROVIDER_PUBLIC_KEY_PEM).export({ format: "jwk" });
+  return {
+    kty: "OKP",
+    crv: "Ed25519",
+    x: String(jwk.x ?? ""),
+    kid: PROVIDER_KEY_ID,
+    use: "sig",
+    alg: "EdDSA"
+  };
+})();
 
 function providerIdForRequest(req) {
   if (PROVIDER_ID_CONFIG) return PROVIDER_ID_CONFIG;
@@ -275,6 +287,21 @@ async function handleRequest(req, res) {
         algorithm: "ed25519",
         keyId: PROVIDER_KEY_ID,
         publicKeyPem: PROVIDER_PUBLIC_KEY_PEM
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/.well-known/settld-provider-keys.json") {
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=86400"
+    });
+    res.end(
+      JSON.stringify({
+        schemaVersion: "ToolProviderKeyset.v1",
+        refreshedAt: new Date().toISOString(),
+        keys: [PROVIDER_PUBLIC_JWK]
       })
     );
     return;

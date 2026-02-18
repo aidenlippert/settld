@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { parseX402PaymentRequired } from "../../../src/core/x402-gate.js";
 import { canonicalJsonStringify } from "../../../src/core/canonical-json.js";
 import { keyIdFromPublicKeyPem } from "../../../src/core/crypto.js";
+import { buildToolProviderQuotePayloadV1, verifyToolProviderQuoteSignatureV1 } from "../../../src/core/provider-quote-signature.js";
 import { computeSettldPayRequestBindingSha256V1 } from "../../../src/core/settld-pay-token.js";
 import { computeToolProviderSignaturePayloadHashV1, verifyToolProviderSignatureV1 } from "../../../src/core/tool-provider-signature.js";
 
@@ -101,6 +102,138 @@ function computeStrictRequestBindingSha256ForRetry({ reqMethod, upstreamUrl }) {
   const pathWithQuery = `${upstreamUrl.pathname}${upstreamUrl.search}`;
   const emptyBodySha256 = sha256Hex(Buffer.from("", "utf8"));
   return computeSettldPayRequestBindingSha256V1({ method, host, pathWithQuery, bodySha256: emptyBodySha256 });
+}
+
+function parseBase64UrlJson(rawValue) {
+  const raw = typeof rawValue === "string" ? rawValue.trim() : "";
+  if (!raw) return null;
+  try {
+    const text = Buffer.from(raw, "base64url").toString("utf8");
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseProviderQuoteHeaders(headers) {
+  return {
+    quote: parseBase64UrlJson(headers?.["x-settld-provider-quote"] ?? headers?.["X-Settld-Provider-Quote"] ?? null),
+    signature: parseBase64UrlJson(
+      headers?.["x-settld-provider-quote-signature"] ?? headers?.["X-Settld-Provider-Quote-Signature"] ?? null
+    )
+  };
+}
+
+function verifyProviderQuoteChallenge({
+  offerFields,
+  amountCents,
+  currency,
+  requestBindingMode,
+  requestBindingSha256,
+  providerPublicKeyPem,
+  quoteHeaders
+} = {}) {
+  if (!providerPublicKeyPem) {
+    return { ok: true, quote: null };
+  }
+  const quote = quoteHeaders?.quote;
+  const signature = quoteHeaders?.signature;
+  if (!quote || !signature) {
+    return {
+      ok: false,
+      code: "X402_PROVIDER_QUOTE_SIGNATURE_MISSING",
+      message: "provider quote signature is required but missing"
+    };
+  }
+  let normalizedQuote;
+  try {
+    normalizedQuote = buildToolProviderQuotePayloadV1(quote);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "X402_PROVIDER_QUOTE_INVALID",
+      message: err?.message ?? "provider quote payload invalid"
+    };
+  }
+  let signatureValid = false;
+  try {
+    signatureValid = verifyToolProviderQuoteSignatureV1({
+      quote: normalizedQuote,
+      signature,
+      publicKeyPem: providerPublicKeyPem
+    });
+  } catch {
+    signatureValid = false;
+  }
+  if (!signatureValid) {
+    return {
+      ok: false,
+      code: "X402_PROVIDER_QUOTE_SIGNATURE_INVALID",
+      message: "provider quote signature verification failed"
+    };
+  }
+
+  const offerProviderId = normalizeOfferRef(offerFields?.providerId);
+  const offerToolId = normalizeOfferRef(offerFields?.toolId);
+  const offerQuoteId = normalizeOfferRef(offerFields?.quoteId);
+  const offerQuoteRequired = normalizeOfferBool(offerFields?.quoteRequired, { fallback: false });
+  const offerSpendAuthorizationMode = normalizeOfferRef(offerFields?.spendAuthorizationMode, { maxLen: 32 });
+  const expectedBindingMode = requestBindingMode ?? "none";
+
+  if (offerProviderId && normalizedQuote.providerId !== offerProviderId) {
+    return { ok: false, code: "X402_PROVIDER_QUOTE_PROVIDER_MISMATCH", message: "provider quote providerId mismatch" };
+  }
+  if (offerToolId && normalizedQuote.toolId !== offerToolId) {
+    return { ok: false, code: "X402_PROVIDER_QUOTE_TOOL_MISMATCH", message: "provider quote toolId mismatch" };
+  }
+  if (normalizedQuote.amountCents !== amountCents) {
+    return { ok: false, code: "X402_PROVIDER_QUOTE_AMOUNT_MISMATCH", message: "provider quote amount mismatch" };
+  }
+  if (String(normalizedQuote.currency).toUpperCase() !== String(currency).toUpperCase()) {
+    return { ok: false, code: "X402_PROVIDER_QUOTE_CURRENCY_MISMATCH", message: "provider quote currency mismatch" };
+  }
+  if (normalizedQuote.requestBindingMode !== expectedBindingMode) {
+    return {
+      ok: false,
+      code: "X402_PROVIDER_QUOTE_BINDING_MODE_MISMATCH",
+      message: "provider quote request binding mode mismatch"
+    };
+  }
+  if (expectedBindingMode === "strict") {
+    if (String(normalizedQuote.requestBindingSha256 ?? "") !== String(requestBindingSha256 ?? "")) {
+      return {
+        ok: false,
+        code: "X402_PROVIDER_QUOTE_BINDING_HASH_MISMATCH",
+        message: "provider quote request binding hash mismatch"
+      };
+    }
+  }
+  if (offerQuoteRequired && normalizedQuote.quoteRequired !== true) {
+    return { ok: false, code: "X402_PROVIDER_QUOTE_REQUIRED_MISMATCH", message: "provider quoteRequired mismatch" };
+  }
+  if (offerQuoteId && String(normalizedQuote.quoteId ?? "") !== offerQuoteId) {
+    return { ok: false, code: "X402_PROVIDER_QUOTE_ID_MISMATCH", message: "provider quoteId mismatch" };
+  }
+  if (offerSpendAuthorizationMode && String(normalizedQuote.spendAuthorizationMode ?? "") !== offerSpendAuthorizationMode) {
+    return {
+      ok: false,
+      code: "X402_PROVIDER_QUOTE_SPEND_AUTH_MODE_MISMATCH",
+      message: "provider quote spendAuthorizationMode mismatch"
+    };
+  }
+  if (Date.parse(String(normalizedQuote.expiresAt ?? "")) <= Date.now()) {
+    return {
+      ok: false,
+      code: "X402_PROVIDER_QUOTE_EXPIRED",
+      message: "provider quote expired"
+    };
+  }
+  return {
+    ok: true,
+    quote: normalizedQuote
+  };
 }
 
 async function readBodyWithLimit(res, { maxBytes }) {
@@ -225,10 +358,40 @@ async function handleProxy(req, res) {
       const offerQuoteId = normalizeOfferRef(offerFields.quoteId);
       const offerProviderId = normalizeOfferRef(offerFields.providerId);
       const offerToolId = normalizeOfferRef(offerFields.toolId);
+      const parsedAmount = extractAmountAndCurrency(offerFields);
+      if (!parsedAmount.ok) {
+        res.writeHead(502, { "content-type": "application/json; charset=utf-8", "x-settld-gate-id": gateId });
+        res.end(JSON.stringify({ ok: false, error: "gateway_offer_invalid", gateId, reason: parsedAmount.error }));
+        return;
+      }
       let requestBindingSha256 = null;
       if (requestBindingMode === "strict") {
         requestBindingSha256 = computeStrictRequestBindingSha256ForRetry({ reqMethod: req.method, upstreamUrl });
       }
+      const quoteHeaders = parseProviderQuoteHeaders(paymentRequiredHeaders);
+      const quoteVerified = verifyProviderQuoteChallenge({
+        offerFields,
+        amountCents: parsedAmount.amountCents,
+        currency: parsedAmount.currency,
+        requestBindingMode,
+        requestBindingSha256,
+        providerPublicKeyPem: X402_PROVIDER_PUBLIC_KEY_PEM,
+        quoteHeaders
+      });
+      if (!quoteVerified.ok) {
+        res.writeHead(502, { "content-type": "application/json; charset=utf-8", "x-settld-gate-id": gateId });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "gateway_provider_quote_verification_failed",
+            gateId,
+            code: quoteVerified.code,
+            message: quoteVerified.message
+          })
+        );
+        return;
+      }
+      const verifiedQuote = quoteVerified.quote;
       let quoted = null;
       const shouldFetchQuote = quoteRequired || requestBindingMode === "strict" || Boolean(offerQuoteId);
       if (shouldFetchQuote) {
@@ -249,7 +412,7 @@ async function handleProxy(req, res) {
               : {}),
             ...(offerProviderId ? { providerId: offerProviderId } : {}),
             ...(offerToolId ? { toolId: offerToolId } : {}),
-            ...(offerQuoteId ? { quoteId: offerQuoteId } : {})
+            ...(verifiedQuote?.quoteId ? { quoteId: String(verifiedQuote.quoteId) } : offerQuoteId ? { quoteId: offerQuoteId } : {})
           }
         });
       }
@@ -259,7 +422,7 @@ async function handleProxy(req, res) {
         idempotencyKey: stableIdemKey(
           "x402_authz",
           `${gateId}\n${requestBindingMode ?? "none"}\n${requestBindingSha256 ?? ""}\n${
-            quoted?.quote?.quoteId ?? offerQuoteId ?? ""
+            quoted?.quote?.quoteId ?? verifiedQuote?.quoteId ?? offerQuoteId ?? ""
           }`
         ),
         body: {
@@ -267,10 +430,16 @@ async function handleProxy(req, res) {
           ...(requestBindingMode === "strict"
             ? {
                 requestBindingMode: "strict",
-                requestBindingSha256
-              }
-            : {}),
-          ...(quoted?.quote?.quoteId ? { quoteId: String(quoted.quote.quoteId) } : offerQuoteId ? { quoteId: offerQuoteId } : {})
+            requestBindingSha256
+            }
+          : {}),
+          ...(quoted?.quote?.quoteId
+            ? { quoteId: String(quoted.quote.quoteId) }
+            : verifiedQuote?.quoteId
+              ? { quoteId: String(verifiedQuote.quoteId) }
+              : offerQuoteId
+                ? { quoteId: offerQuoteId }
+                : {})
         }
       });
       const token = typeof authz?.token === "string" ? authz.token.trim() : "";
