@@ -159,6 +159,12 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.agreementDelegations.clear();
     if (!(store.x402Gates instanceof Map)) store.x402Gates = new Map();
     store.x402Gates.clear();
+    if (!(store.x402ReversalEvents instanceof Map)) store.x402ReversalEvents = new Map();
+    store.x402ReversalEvents.clear();
+    if (!(store.x402ReversalNonceUsage instanceof Map)) store.x402ReversalNonceUsage = new Map();
+    store.x402ReversalNonceUsage.clear();
+    if (!(store.x402ReversalCommandUsage instanceof Map)) store.x402ReversalCommandUsage = new Map();
+    store.x402ReversalCommandUsage.clear();
     if (!(store.toolCallHolds instanceof Map)) store.toolCallHolds = new Map();
     store.toolCallHolds.clear();
     if (!(store.settlementAdjustments instanceof Map)) store.settlementAdjustments = new Map();
@@ -196,6 +202,33 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           ...snap,
           tenantId: snap?.tenantId ?? tenantId,
           gateId: snap?.gateId ?? String(id)
+        });
+      }
+      if (type === "x402_reversal_event") {
+        store.x402ReversalEvents.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          eventId: snap?.eventId ?? String(id)
+        });
+      }
+      if (type === "x402_reversal_nonce") {
+        const sponsorRef = typeof snap?.sponsorRef === "string" ? snap.sponsorRef : null;
+        const nonce = typeof snap?.nonce === "string" ? snap.nonce : null;
+        if (sponsorRef && nonce) {
+          const nonceKey = `${tenantId}\n${sponsorRef}\n${nonce}`;
+          store.x402ReversalNonceUsage.set(nonceKey, {
+            ...snap,
+            tenantId,
+            sponsorRef,
+            nonce
+          });
+        }
+      }
+      if (type === "x402_reversal_command") {
+        store.x402ReversalCommandUsage.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          commandId: snap?.commandId ?? String(id)
         });
       }
       if (type === "tool_call_hold") {
@@ -1224,6 +1257,102 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     );
   }
 
+  async function persistX402ReversalEvent(client, { tenantId, gateId, eventId, event }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new TypeError("event is required");
+    }
+    const normalizedEventId = eventId ? String(eventId) : event.eventId ? String(event.eventId) : event.id ? String(event.id) : null;
+    if (!normalizedEventId) throw new TypeError("eventId is required");
+    const normalizedGateId = gateId ? String(gateId) : event.gateId ? String(event.gateId) : null;
+    if (!normalizedGateId) throw new TypeError("gateId is required");
+    const updatedAt = parseIsoOrNull(event.occurredAt ?? event.createdAt) ?? new Date().toISOString();
+    const normalizedEvent = {
+      ...event,
+      tenantId,
+      gateId: normalizedGateId,
+      eventId: normalizedEventId,
+      occurredAt: parseIsoOrNull(event.occurredAt) ?? updatedAt
+    };
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_reversal_event', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedEventId, JSON.stringify(normalizedEvent), updatedAt]
+    );
+  }
+
+  async function persistX402ReversalNonceUsage(client, { tenantId, sponsorRef, nonce, usage }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) throw new TypeError("usage is required");
+    const normalizedSponsorRef =
+      sponsorRef && String(sponsorRef).trim() !== ""
+        ? String(sponsorRef).trim()
+        : usage.sponsorRef && String(usage.sponsorRef).trim() !== ""
+          ? String(usage.sponsorRef).trim()
+          : null;
+    const normalizedNonce =
+      nonce && String(nonce).trim() !== ""
+        ? String(nonce).trim()
+        : usage.nonce && String(usage.nonce).trim() !== ""
+          ? String(usage.nonce).trim()
+          : null;
+    if (!normalizedSponsorRef) throw new TypeError("sponsorRef is required");
+    if (!normalizedNonce) throw new TypeError("nonce is required");
+    const aggregateId = `${normalizedSponsorRef}::${normalizedNonce}`;
+    const updatedAt = parseIsoOrNull(usage.usedAt) ?? new Date().toISOString();
+    const normalizedUsage = {
+      ...usage,
+      tenantId,
+      sponsorRef: normalizedSponsorRef,
+      nonce: normalizedNonce,
+      usedAt: parseIsoOrNull(usage.usedAt) ?? updatedAt
+    };
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_reversal_nonce', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, aggregateId, JSON.stringify(normalizedUsage), updatedAt]
+    );
+  }
+
+  async function persistX402ReversalCommandUsage(client, { tenantId, commandId, usage }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) throw new TypeError("usage is required");
+    const normalizedCommandId =
+      commandId && String(commandId).trim() !== ""
+        ? String(commandId).trim()
+        : usage.commandId && String(usage.commandId).trim() !== ""
+          ? String(usage.commandId).trim()
+          : null;
+    if (!normalizedCommandId) throw new TypeError("commandId is required");
+    const updatedAt = parseIsoOrNull(usage.usedAt) ?? new Date().toISOString();
+    const normalizedUsage = {
+      ...usage,
+      tenantId,
+      commandId: normalizedCommandId,
+      usedAt: parseIsoOrNull(usage.usedAt) ?? updatedAt
+    };
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_reversal_command', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedCommandId, JSON.stringify(normalizedUsage), updatedAt]
+    );
+  }
+
   async function persistToolCallHold(client, { tenantId, holdHash, hold }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     if (!hold || typeof hold !== "object" || Array.isArray(hold)) {
@@ -1720,6 +1849,9 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "ARBITRATION_CASE_UPSERT",
       "AGREEMENT_DELEGATION_UPSERT",
       "X402_GATE_UPSERT",
+      "X402_REVERSAL_EVENT_APPEND",
+      "X402_REVERSAL_NONCE_PUT",
+      "X402_REVERSAL_COMMAND_PUT",
       "TOOL_CALL_HOLD_UPSERT",
       "SETTLEMENT_ADJUSTMENT_PUT",
       "MARKETPLACE_RFQ_UPSERT",
@@ -2550,6 +2682,32 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
         if (op.kind === "X402_GATE_UPSERT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.gate?.tenantId ?? DEFAULT_TENANT_ID);
           await persistX402Gate(client, { tenantId, gateId: op.gateId, gate: op.gate });
+        }
+        if (op.kind === "X402_REVERSAL_EVENT_APPEND") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.event?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402ReversalEvent(client, {
+            tenantId,
+            gateId: op.gateId,
+            eventId: op.eventId,
+            event: op.event
+          });
+        }
+        if (op.kind === "X402_REVERSAL_NONCE_PUT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.usage?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402ReversalNonceUsage(client, {
+            tenantId,
+            sponsorRef: op.sponsorRef,
+            nonce: op.nonce,
+            usage: op.usage
+          });
+        }
+        if (op.kind === "X402_REVERSAL_COMMAND_PUT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.usage?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402ReversalCommandUsage(client, {
+            tenantId,
+            commandId: op.commandId,
+            usage: op.usage
+          });
         }
         if (op.kind === "TOOL_CALL_HOLD_UPSERT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.hold?.tenantId ?? DEFAULT_TENANT_ID);

@@ -439,6 +439,66 @@ export function applyTxRecord(store, record) {
       continue;
     }
 
+    if (kind === "X402_REVERSAL_EVENT_APPEND") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const event = op.event ?? null;
+      if (!event || typeof event !== "object" || Array.isArray(event)) {
+        throw new TypeError("X402_REVERSAL_EVENT_APPEND requires event");
+      }
+      const eventId = op.eventId ?? event.eventId ?? event.id ?? null;
+      const gateId = op.gateId ?? event.gateId ?? null;
+      if (!eventId) throw new TypeError("X402_REVERSAL_EVENT_APPEND requires event.eventId");
+      if (!gateId) throw new TypeError("X402_REVERSAL_EVENT_APPEND requires event.gateId");
+      if (!(store.x402ReversalEvents instanceof Map)) store.x402ReversalEvents = new Map();
+      const key = makeScopedKey({ tenantId, id: String(eventId) });
+      store.x402ReversalEvents.set(key, {
+        ...event,
+        tenantId,
+        eventId: String(eventId),
+        gateId: String(gateId)
+      });
+      continue;
+    }
+
+    if (kind === "X402_REVERSAL_NONCE_PUT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const usage = op.usage ?? null;
+      if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
+        throw new TypeError("X402_REVERSAL_NONCE_PUT requires usage");
+      }
+      const sponsorRef = op.sponsorRef ?? usage.sponsorRef ?? null;
+      const nonce = op.nonce ?? usage.nonce ?? null;
+      if (!sponsorRef) throw new TypeError("X402_REVERSAL_NONCE_PUT requires sponsorRef");
+      if (!nonce) throw new TypeError("X402_REVERSAL_NONCE_PUT requires nonce");
+      if (!(store.x402ReversalNonceUsage instanceof Map)) store.x402ReversalNonceUsage = new Map();
+      const key = `${tenantId}\n${String(sponsorRef)}\n${String(nonce)}`;
+      store.x402ReversalNonceUsage.set(key, {
+        ...usage,
+        tenantId,
+        sponsorRef: String(sponsorRef),
+        nonce: String(nonce)
+      });
+      continue;
+    }
+
+    if (kind === "X402_REVERSAL_COMMAND_PUT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const usage = op.usage ?? null;
+      if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
+        throw new TypeError("X402_REVERSAL_COMMAND_PUT requires usage");
+      }
+      const commandId = op.commandId ?? usage.commandId ?? null;
+      if (!commandId) throw new TypeError("X402_REVERSAL_COMMAND_PUT requires commandId");
+      if (!(store.x402ReversalCommandUsage instanceof Map)) store.x402ReversalCommandUsage = new Map();
+      const key = makeScopedKey({ tenantId, id: String(commandId) });
+      store.x402ReversalCommandUsage.set(key, {
+        ...usage,
+        tenantId,
+        commandId: String(commandId)
+      });
+      continue;
+    }
+
     if (kind === "TOOL_CALL_HOLD_UPSERT") {
       const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
       const hold = op.hold ?? null;

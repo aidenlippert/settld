@@ -311,6 +311,9 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     arbitrationCases: new Map(), // `${tenantId}\n${caseId}` -> ArbitrationCase.v1 snapshot
     agreementDelegations: new Map(), // `${tenantId}\n${delegationId}` -> AgreementDelegation.v1
     x402Gates: new Map(), // `${tenantId}\n${gateId}` -> X402 gate record (internal API surface)
+    x402ReversalEvents: new Map(), // `${tenantId}\n${eventId}` -> X402GateReversalEvent.v1
+    x402ReversalNonceUsage: new Map(), // `${tenantId}\n${sponsorRef}\n${nonce}` -> X402ReversalNonceUsage.v1
+    x402ReversalCommandUsage: new Map(), // `${tenantId}\n${commandId}` -> X402ReversalCommandUsage.v1
     toolCallHolds: new Map(), // `${tenantId}\n${holdHash}` -> FundingHold.v1 snapshot
     settlementAdjustments: new Map(), // `${tenantId}\n${adjustmentId}` -> SettlementAdjustment.v1 snapshot
     moneyRailOperations: new Map(), // `${tenantId}\n${providerId}\n${operationId}` -> MoneyRailOperation.v1
@@ -999,6 +1002,143 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.x402Gates.get(key) ?? null;
   };
 
+  function x402ReversalNonceStoreKey({ tenantId, sponsorRef, nonce }) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedSponsorRef = typeof sponsorRef === "string" ? sponsorRef.trim() : "";
+    const normalizedNonce = typeof nonce === "string" ? nonce.trim() : "";
+    if (!normalizedSponsorRef) throw new TypeError("sponsorRef is required");
+    if (!normalizedNonce) throw new TypeError("nonce is required");
+    return `${normalizedTenantId}\n${normalizedSponsorRef}\n${normalizedNonce}`;
+  }
+
+  function listX402ReversalEventsForGateSync({ tenantId = DEFAULT_TENANT_ID, gateId } = {}) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedGateId = typeof gateId === "string" ? gateId.trim() : "";
+    if (!normalizedGateId) return [];
+    const out = [];
+    for (const row of store.x402ReversalEvents.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+      if (String(row.gateId ?? "") !== normalizedGateId) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => {
+      const leftMs = Number.isFinite(Date.parse(String(left?.occurredAt ?? ""))) ? Date.parse(String(left.occurredAt)) : Number.NaN;
+      const rightMs = Number.isFinite(Date.parse(String(right?.occurredAt ?? ""))) ? Date.parse(String(right.occurredAt)) : Number.NaN;
+      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
+      return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
+    });
+    return out;
+  }
+
+  store.putX402ReversalEvent = async function putX402ReversalEvent({ tenantId = DEFAULT_TENANT_ID, gateId, event, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof gateId !== "string" || gateId.trim() === "") throw new TypeError("gateId is required");
+    if (!event || typeof event !== "object" || Array.isArray(event)) throw new TypeError("event is required");
+    const eventId = event.eventId ?? event.id ?? null;
+    if (typeof eventId !== "string" || eventId.trim() === "") throw new TypeError("event.eventId is required");
+    const at = event.occurredAt ?? event.createdAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [{ kind: "X402_REVERSAL_EVENT_APPEND", tenantId, gateId: String(gateId), eventId: String(eventId), event: { ...event, tenantId, gateId: String(gateId), eventId: String(eventId) } }],
+      audit
+    });
+    return store.x402ReversalEvents.get(makeScopedKey({ tenantId, id: String(eventId) })) ?? null;
+  };
+
+  store.getX402ReversalEvent = async function getX402ReversalEvent({ tenantId = DEFAULT_TENANT_ID, eventId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof eventId !== "string" || eventId.trim() === "") throw new TypeError("eventId is required");
+    return store.x402ReversalEvents.get(makeScopedKey({ tenantId, id: String(eventId) })) ?? null;
+  };
+
+  store.listX402ReversalEvents = async function listX402ReversalEvents({
+    tenantId = DEFAULT_TENANT_ID,
+    gateId = null,
+    receiptId = null,
+    action = null,
+    from = null,
+    to = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (gateId !== null && (typeof gateId !== "string" || gateId.trim() === "")) throw new TypeError("gateId must be null or a non-empty string");
+    if (receiptId !== null && (typeof receiptId !== "string" || receiptId.trim() === "")) throw new TypeError("receiptId must be null or a non-empty string");
+    if (action !== null && (typeof action !== "string" || action.trim() === "")) throw new TypeError("action must be null or a non-empty string");
+    if (from !== null && !Number.isFinite(Date.parse(String(from)))) throw new TypeError("from must be null or an ISO date-time");
+    if (to !== null && !Number.isFinite(Date.parse(String(to)))) throw new TypeError("to must be null or an ISO date-time");
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const normalizedGateId = gateId ? gateId.trim() : null;
+    const normalizedReceiptId = receiptId ? receiptId.trim() : null;
+    const normalizedAction = action ? action.trim().toLowerCase() : null;
+    const fromMs = from ? Date.parse(String(from)) : null;
+    const toMs = to ? Date.parse(String(to)) : null;
+
+    const out = [];
+    for (const row of store.x402ReversalEvents.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (normalizedGateId && String(row.gateId ?? "") !== normalizedGateId) continue;
+      if (normalizedReceiptId && String(row.receiptId ?? "") !== normalizedReceiptId) continue;
+      if (normalizedAction && String(row.action ?? "").toLowerCase() !== normalizedAction) continue;
+      const occurredAtMs = Number.isFinite(Date.parse(String(row.occurredAt ?? ""))) ? Date.parse(String(row.occurredAt)) : Number.NaN;
+      if (fromMs !== null && (!Number.isFinite(occurredAtMs) || occurredAtMs < fromMs)) continue;
+      if (toMs !== null && (!Number.isFinite(occurredAtMs) || occurredAtMs > toMs)) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => {
+      const leftMs = Number.isFinite(Date.parse(String(left?.occurredAt ?? ""))) ? Date.parse(String(left.occurredAt)) : Number.NaN;
+      const rightMs = Number.isFinite(Date.parse(String(right?.occurredAt ?? ""))) ? Date.parse(String(right.occurredAt)) : Number.NaN;
+      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return rightMs - leftMs;
+      return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
+    });
+    return out.slice(offset, offset + Math.min(1000, limit));
+  };
+
+  store.putX402ReversalNonceUsage = async function putX402ReversalNonceUsage({ tenantId = DEFAULT_TENANT_ID, usage, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) throw new TypeError("usage is required");
+    const sponsorRef = typeof usage.sponsorRef === "string" ? usage.sponsorRef.trim() : "";
+    const nonce = typeof usage.nonce === "string" ? usage.nonce.trim() : "";
+    if (!sponsorRef) throw new TypeError("usage.sponsorRef is required");
+    if (!nonce) throw new TypeError("usage.nonce is required");
+    const at = usage.usedAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [{ kind: "X402_REVERSAL_NONCE_PUT", tenantId, sponsorRef, nonce, usage: { ...usage, tenantId, sponsorRef, nonce } }],
+      audit
+    });
+    return store.x402ReversalNonceUsage.get(x402ReversalNonceStoreKey({ tenantId, sponsorRef, nonce })) ?? null;
+  };
+
+  store.getX402ReversalNonceUsage = async function getX402ReversalNonceUsage({ tenantId = DEFAULT_TENANT_ID, sponsorRef, nonce } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    return store.x402ReversalNonceUsage.get(x402ReversalNonceStoreKey({ tenantId, sponsorRef, nonce })) ?? null;
+  };
+
+  store.putX402ReversalCommandUsage = async function putX402ReversalCommandUsage({ tenantId = DEFAULT_TENANT_ID, usage, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) throw new TypeError("usage is required");
+    const commandId = typeof usage.commandId === "string" ? usage.commandId.trim() : "";
+    if (!commandId) throw new TypeError("usage.commandId is required");
+    const at = usage.usedAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [{ kind: "X402_REVERSAL_COMMAND_PUT", tenantId, commandId, usage: { ...usage, tenantId, commandId } }],
+      audit
+    });
+    return store.x402ReversalCommandUsage.get(makeScopedKey({ tenantId, id: commandId })) ?? null;
+  };
+
+  store.getX402ReversalCommandUsage = async function getX402ReversalCommandUsage({ tenantId = DEFAULT_TENANT_ID, commandId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof commandId !== "string" || commandId.trim() === "") throw new TypeError("commandId is required");
+    return store.x402ReversalCommandUsage.get(makeScopedKey({ tenantId, id: commandId.trim() })) ?? null;
+  };
+
   function toX402ReceiptRecord({ tenantId, gate } = {}) {
     if (!gate || typeof gate !== "object" || Array.isArray(gate)) return null;
     const runId = typeof gate.runId === "string" && gate.runId.trim() !== "" ? gate.runId.trim() : null;
@@ -1103,6 +1243,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
         gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
           ? gate.reversal
           : null,
+      reversalEvents: listX402ReversalEventsForGateSync({ tenantId, gateId: typeof gate.gateId === "string" ? gate.gateId : null }),
       decisionRecord:
         decisionTrace?.decisionRecord && typeof decisionTrace.decisionRecord === "object" && !Array.isArray(decisionTrace.decisionRecord)
           ? decisionTrace.decisionRecord

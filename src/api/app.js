@@ -118,6 +118,8 @@ import {
 import { buildSettldAgentCard } from "../core/agent-card.js";
 import { buildX402SettlementTerms, parseX402PaymentRequired } from "../core/x402-gate.js";
 import { createCircleReserveAdapter } from "../core/circle-reserve-adapter.js";
+import { verifyX402ReversalCommandV1 } from "../core/x402-reversal-command.js";
+import { verifyX402ProviderRefundDecisionV1 } from "../core/x402-provider-refund-decision.js";
 import {
   REPUTATION_EVENT_KIND,
   REPUTATION_EVENT_SCHEMA_VERSION,
@@ -8228,13 +8230,133 @@ export function createApi({
     return out;
   }
 
+  function normalizeX402ReversalCommandInput(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new TypeError("command is required");
+    }
+    return value;
+  }
+
+  function normalizeX402ProviderRefundDecisionEnvelopeInput(value) {
+    if (value === null || value === undefined) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new TypeError("providerDecisionArtifact must be an object when provided");
+    }
+    return value;
+  }
+
+  function x402SettlementReceiptIdFromSettlement(settlement) {
+    const receiptId =
+      settlement?.decisionTrace?.settlementReceipt &&
+      typeof settlement.decisionTrace.settlementReceipt === "object" &&
+      !Array.isArray(settlement.decisionTrace.settlementReceipt) &&
+      typeof settlement.decisionTrace.settlementReceipt.receiptId === "string" &&
+      settlement.decisionTrace.settlementReceipt.receiptId.trim() !== ""
+        ? settlement.decisionTrace.settlementReceipt.receiptId.trim()
+        : null;
+    return receiptId;
+  }
+
+  function resolveX402GateQuoteBinding({ gate, settlement } = {}) {
+    const bindings =
+      settlement?.decisionTrace?.bindings && typeof settlement.decisionTrace.bindings === "object" && !Array.isArray(settlement.decisionTrace.bindings)
+        ? settlement.decisionTrace.bindings
+        : null;
+    const quoteId =
+      typeof bindings?.quote?.quoteId === "string" && bindings.quote.quoteId.trim() !== ""
+        ? bindings.quote.quoteId.trim()
+        : typeof gate?.quote?.quoteId === "string" && gate.quote.quoteId.trim() !== ""
+          ? gate.quote.quoteId.trim()
+          : null;
+    const requestSha256 =
+      typeof bindings?.request?.sha256 === "string" && /^[0-9a-f]{64}$/i.test(bindings.request.sha256.trim())
+        ? bindings.request.sha256.trim().toLowerCase()
+        : null;
+    const sponsorRef =
+      typeof bindings?.spendAuthorization?.sponsorRef === "string" && bindings.spendAuthorization.sponsorRef.trim() !== ""
+        ? bindings.spendAuthorization.sponsorRef.trim()
+        : typeof gate?.agentPassport?.sponsorRef === "string" && gate.agentPassport.sponsorRef.trim() !== ""
+          ? gate.agentPassport.sponsorRef.trim()
+          : null;
+    return { quoteId, requestSha256, sponsorRef };
+  }
+
+  function buildX402ReversalEventRecord({
+    tenantId,
+    gateId,
+    receiptId,
+    action,
+    eventType,
+    occurredAt,
+    reason = null,
+    providerDecision = null,
+    evidenceRefs = [],
+    command = null,
+    commandVerification = null,
+    providerDecisionArtifact = null,
+    providerDecisionVerification = null,
+    settlementStatusBefore = null,
+    settlementStatusAfter = null,
+    previousEventHash = null,
+    eventId = null
+  } = {}) {
+    const normalizedEvent = normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402GateReversalEvent.v1",
+        eventId: typeof eventId === "string" && eventId.trim() !== "" ? eventId.trim() : createId("x402rev"),
+        tenantId: normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID),
+        gateId: String(gateId ?? "").trim(),
+        receiptId: String(receiptId ?? "").trim(),
+        action: String(action ?? "").trim().toLowerCase(),
+        eventType: String(eventType ?? "").trim(),
+        occurredAt: String(occurredAt ?? nowIso()),
+        ...(reason ? { reason: String(reason) } : {}),
+        ...(providerDecision ? { providerDecision: String(providerDecision).toLowerCase() } : {}),
+        ...(Array.isArray(evidenceRefs) && evidenceRefs.length > 0 ? { evidenceRefs: evidenceRefs.slice() } : {}),
+        ...(command && typeof command === "object" && !Array.isArray(command) ? { command } : {}),
+        ...(commandVerification && typeof commandVerification === "object" && !Array.isArray(commandVerification)
+          ? { commandVerification }
+          : {}),
+        ...(providerDecisionArtifact && typeof providerDecisionArtifact === "object" && !Array.isArray(providerDecisionArtifact)
+          ? { providerDecisionArtifact }
+          : {}),
+        ...(providerDecisionVerification && typeof providerDecisionVerification === "object" && !Array.isArray(providerDecisionVerification)
+          ? { providerDecisionVerification }
+          : {}),
+        ...(settlementStatusBefore ? { settlementStatusBefore: String(settlementStatusBefore).toLowerCase() } : {}),
+        ...(settlementStatusAfter ? { settlementStatusAfter: String(settlementStatusAfter).toLowerCase() } : {}),
+        ...(typeof previousEventHash === "string" && previousEventHash.trim() !== "" ? { prevEventHash: previousEventHash.trim() } : {})
+      },
+      { path: "$" }
+    );
+    const hashInput = normalizeForCanonicalJson(
+      {
+        ...normalizedEvent
+      },
+      { path: "$" }
+    );
+    const eventHash = sha256Hex(canonicalJsonStringify(hashInput));
+    return normalizeForCanonicalJson(
+      {
+        ...normalizedEvent,
+        eventHash
+      },
+      { path: "$" }
+    );
+  }
+
   function appendX402GateReversalTimeline({
     gate,
     eventType,
     at,
     reason = null,
     providerDecision = null,
-    evidenceRefs = []
+    evidenceRefs = [],
+    eventId = null,
+    eventHash = null,
+    prevEventHash = null,
+    action = null,
+    commandId = null
   } = {}) {
     const previousReversal =
       gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
@@ -8248,6 +8370,11 @@ export function createApi({
         at,
         ...(reason ? { reason } : {}),
         ...(providerDecision ? { providerDecision } : {}),
+        ...(action ? { action: String(action).toLowerCase() } : {}),
+        ...(eventId ? { eventId } : {}),
+        ...(eventHash ? { eventHash } : {}),
+        ...(prevEventHash ? { prevEventHash } : {}),
+        ...(commandId ? { commandId } : {}),
         ...(normalizedEvidenceRefs.length ? { evidenceRefs: normalizedEvidenceRefs } : {})
       },
       { path: "$" }
@@ -31650,11 +31777,15 @@ export function createApi({
           let providerDecision = null;
           let reason = null;
           let reversalEvidenceRefs = [];
+          let commandEnvelope = null;
+          let providerDecisionArtifact = null;
           try {
             action = normalizeX402ReversalActionInput(body?.action);
             providerDecision = normalizeX402ReversalDecisionInput(body?.providerDecision ?? null);
             reason = normalizeX402ReversalReasonInput(body?.reason ?? null);
             reversalEvidenceRefs = normalizeX402ReversalEvidenceRefsInput(body?.evidenceRefs ?? null);
+            commandEnvelope = normalizeX402ReversalCommandInput(body?.command);
+            providerDecisionArtifact = normalizeX402ProviderRefundDecisionEnvelopeInput(body?.providerDecisionArtifact ?? null);
           } catch (err) {
             return sendError(res, 400, "invalid reversal request", { message: err?.message }, { code: "SCHEMA_INVALID" });
           }
@@ -31664,6 +31795,7 @@ export function createApi({
           const runId = String(gate.runId ?? "");
           const settlement = typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
           if (!settlement) return sendError(res, 404, "settlement not found for gate", null, { code: "NOT_FOUND" });
+
           const amountCents = Number(settlement.amountCents ?? gate?.terms?.amountCents ?? 0);
           if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
             return sendError(res, 409, "gate amount invalid", null, { code: "X402_GATE_INVALID" });
@@ -31678,24 +31810,207 @@ export function createApi({
           const payeeAgentId = typeof gate?.payeeAgentId === "string" && gate.payeeAgentId.trim() !== "" ? gate.payeeAgentId.trim() : null;
           if (!payerAgentId || !payeeAgentId) return sendError(res, 409, "gate actors missing", null, { code: "X402_GATE_INVALID" });
 
+          const settlementReceiptId = x402SettlementReceiptIdFromSettlement(settlement);
+          const authorizationRef =
+            gate?.authorization &&
+            typeof gate.authorization === "object" &&
+            !Array.isArray(gate.authorization) &&
+            typeof gate.authorization.authorizationRef === "string" &&
+            gate.authorization.authorizationRef.trim() !== ""
+              ? gate.authorization.authorizationRef.trim()
+              : null;
+          const reversalReceiptId =
+            settlementReceiptId ??
+            (action === "void_authorization" ? authorizationRef ?? `auth_${gateId}` : null);
+          if (!reversalReceiptId) {
+            return sendError(res, 409, "receipt is not available for gate reversal", null, { code: "X402_REVERSAL_RECEIPT_MISSING" });
+          }
+
+          const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+          const payeeIdentity = await getAgentIdentityRecord({ tenantId, agentId: payeeAgentId });
+          if (!payerIdentity || !payeeIdentity) return sendError(res, 409, "agent identities missing for reversal", null, { code: "X402_GATE_INVALID" });
+          const payerKeyId =
+            payerIdentity?.keys && typeof payerIdentity.keys === "object" && !Array.isArray(payerIdentity.keys)
+              ? String(payerIdentity.keys.keyId ?? "").trim()
+              : "";
+          const payerPublicKeyPem =
+            payerIdentity?.keys && typeof payerIdentity.keys === "object" && !Array.isArray(payerIdentity.keys)
+              ? String(payerIdentity.keys.publicKeyPem ?? "")
+              : "";
+          if (!payerKeyId || !payerPublicKeyPem.trim()) {
+            return sendError(res, 409, "payer signature key is not configured", null, { code: "X402_REVERSAL_COMMAND_KEY_MISSING" });
+          }
+
+          const payeeKeyId =
+            payeeIdentity?.keys && typeof payeeIdentity.keys === "object" && !Array.isArray(payeeIdentity.keys)
+              ? String(payeeIdentity.keys.keyId ?? "").trim()
+              : "";
+          const payeePublicKeyPem =
+            payeeIdentity?.keys && typeof payeeIdentity.keys === "object" && !Array.isArray(payeeIdentity.keys)
+              ? String(payeeIdentity.keys.publicKeyPem ?? "")
+              : "";
+          if (!payeeKeyId || !payeePublicKeyPem.trim()) {
+            return sendError(res, 409, "provider signature key is not configured", null, { code: "X402_PROVIDER_DECISION_KEY_MISSING" });
+          }
+
+          const quoteBinding = resolveX402GateQuoteBinding({ gate, settlement });
+          const expectedSponsorRef = quoteBinding.sponsorRef ?? payerAgentId;
+          const commandSignatureKeyId =
+            commandEnvelope?.signature && typeof commandEnvelope.signature === "object" && !Array.isArray(commandEnvelope.signature)
+              ? String(commandEnvelope.signature.keyId ?? "").trim()
+              : "";
+          if (!commandSignatureKeyId) {
+            return sendError(res, 400, "command.signature.keyId is required", null, { code: "SCHEMA_INVALID" });
+          }
+          if (commandSignatureKeyId !== payerKeyId) {
+            return sendError(res, 409, "command signer key does not match payer key", null, { code: "X402_REVERSAL_COMMAND_SIGNER_MISMATCH" });
+          }
+
           const nowAt = nowIso();
-          const reversalEventId = createId("x402rev");
+          const commandVerification = verifyX402ReversalCommandV1({
+            command: commandEnvelope,
+            publicKeyPem: payerPublicKeyPem,
+            nowAt,
+            expectedAction: action,
+            expectedSponsorRef: expectedSponsorRef,
+            expectedGateId: gateId,
+            expectedReceiptId: reversalReceiptId,
+            expectedQuoteId: quoteBinding.quoteId,
+            expectedRequestSha256: quoteBinding.requestSha256
+          });
+          if (commandVerification.ok !== true) {
+            const statusCode = String(commandVerification.code ?? "").endsWith("_SCHEMA_INVALID") ? 400 : 409;
+            return sendError(
+              res,
+              statusCode,
+              "reversal command verification failed",
+              { message: commandVerification.error ?? null, code: commandVerification.code ?? null },
+              { code: commandVerification.code ?? "X402_REVERSAL_COMMAND_INVALID" }
+            );
+          }
+          const commandPayload = commandVerification.payload;
+
+          const existingCommandUsage =
+            typeof store.getX402ReversalCommandUsage === "function"
+              ? await store.getX402ReversalCommandUsage({ tenantId, commandId: commandPayload.commandId })
+              : store.x402ReversalCommandUsage instanceof Map
+                ? store.x402ReversalCommandUsage.get(makeScopedKey({ tenantId, id: commandPayload.commandId })) ?? null
+                : null;
+          if (existingCommandUsage) {
+            return sendError(res, 409, "reversal command already used", null, { code: "X402_REVERSAL_COMMAND_REPLAY" });
+          }
+          const existingNonceUsage =
+            typeof store.getX402ReversalNonceUsage === "function"
+              ? await store.getX402ReversalNonceUsage({ tenantId, sponsorRef: commandPayload.sponsorRef, nonce: commandPayload.nonce })
+              : store.x402ReversalNonceUsage instanceof Map
+                ? store.x402ReversalNonceUsage.get(`${normalizeTenantId(tenantId)}\n${commandPayload.sponsorRef}\n${commandPayload.nonce}`) ?? null
+                : null;
+          if (existingNonceUsage) {
+            return sendError(res, 409, "reversal command nonce already used", null, { code: "X402_REVERSAL_NONCE_REPLAY" });
+          }
+
+          let priorReversalEvents = [];
+          if (typeof store.listX402ReversalEvents === "function") {
+            priorReversalEvents = await store.listX402ReversalEvents({ tenantId, gateId, limit: 1000, offset: 0 });
+          } else if (store.x402ReversalEvents instanceof Map) {
+            for (const row of store.x402ReversalEvents.values()) {
+              if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+              if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizeTenantId(tenantId)) continue;
+              if (String(row.gateId ?? "") !== gateId) continue;
+              priorReversalEvents.push(row);
+            }
+          }
+          priorReversalEvents.sort((left, right) => {
+            const leftMs = Number.isFinite(Date.parse(String(left?.occurredAt ?? ""))) ? Date.parse(String(left.occurredAt)) : Number.NaN;
+            const rightMs = Number.isFinite(Date.parse(String(right?.occurredAt ?? ""))) ? Date.parse(String(right.occurredAt)) : Number.NaN;
+            if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
+            return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
+          });
+          const previousReversalEvent = priorReversalEvents.length > 0 ? priorReversalEvents[priorReversalEvents.length - 1] : null;
+          const previousEventHash =
+            typeof previousReversalEvent?.eventHash === "string" && previousReversalEvent.eventHash.trim() !== ""
+              ? previousReversalEvent.eventHash.trim()
+              : null;
+
+          const commandArtifact = normalizeForCanonicalJson(
+            {
+              schemaVersion: "X402ReversalCommand.v1",
+              commandId: commandPayload.commandId,
+              sponsorRef: commandPayload.sponsorRef,
+              ...(commandPayload.agentKeyId ? { agentKeyId: commandPayload.agentKeyId } : {}),
+              target: commandPayload.target,
+              action: commandPayload.action,
+              nonce: commandPayload.nonce,
+              idempotencyKey: commandPayload.idempotencyKey,
+              exp: commandPayload.exp,
+              signature:
+                commandEnvelope?.signature && typeof commandEnvelope.signature === "object" && !Array.isArray(commandEnvelope.signature)
+                  ? commandEnvelope.signature
+                  : null
+            },
+            { path: "$" }
+          );
+          const commandVerificationRecord = normalizeForCanonicalJson(
+            {
+              schemaVersion: "X402ReversalCommandVerification.v1",
+              verified: true,
+              keyId: commandSignatureKeyId,
+              publicKeyPem: payerPublicKeyPem,
+              payloadHash: commandVerification.payloadHash,
+              checkedAt: nowAt,
+              code: null,
+              error: null
+            },
+            { path: "$" }
+          );
+
           const existingReversal =
             gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal) ? gate.reversal : null;
           const baseBindings =
             settlement?.decisionTrace?.bindings && typeof settlement.decisionTrace.bindings === "object" && !Array.isArray(settlement.decisionTrace.bindings)
               ? settlement.decisionTrace.bindings
               : null;
+
+          let decisionArtifactVerification = null;
+          if (action === "resolve_refund") {
+            if (!providerDecisionArtifact) {
+              return sendError(res, 400, "providerDecisionArtifact is required for resolve_refund", null, { code: "SCHEMA_INVALID" });
+            }
+            decisionArtifactVerification = verifyX402ProviderRefundDecisionV1({
+              decision: providerDecisionArtifact,
+              publicKeyPem: payeePublicKeyPem,
+              expectedReceiptId: reversalReceiptId,
+              expectedGateId: gateId,
+              expectedQuoteId: quoteBinding.quoteId,
+              expectedRequestSha256: quoteBinding.requestSha256,
+              expectedDecision: providerDecision
+            });
+            if (decisionArtifactVerification.ok !== true) {
+              const statusCode = String(decisionArtifactVerification.code ?? "").endsWith("_SCHEMA_INVALID") ? 400 : 409;
+              return sendError(
+                res,
+                statusCode,
+                "provider refund decision verification failed",
+                { message: decisionArtifactVerification.error ?? null, code: decisionArtifactVerification.code ?? null },
+                { code: decisionArtifactVerification.code ?? "X402_PROVIDER_DECISION_INVALID" }
+              );
+            }
+            providerDecision = decisionArtifactVerification.payload?.decision ?? providerDecision;
+          }
+
           let nextGate = gate;
           let nextSettlement = settlement;
           let payerWallet = null;
           let payeeWallet = null;
+          let reversalEventRecord = null;
           const ops = [];
           let responseStatusCode = 200;
           let kernelRefs = null;
+          const reversalEventId = createId("x402rev");
+          const settlementStatusBefore = String(settlement.status ?? "").toLowerCase();
 
           if (action === "void_authorization") {
-            if (String(settlement.status ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_STATUS.LOCKED) {
+            if (settlementStatusBefore !== AGENT_RUN_SETTLEMENT_STATUS.LOCKED) {
               return sendError(res, 409, "void is only allowed while settlement is locked", null, { code: "X402_REVERSAL_INVALID_STATE" });
             }
             const existingAuthorization =
@@ -31759,13 +32074,35 @@ export function createApi({
               createdAt: nowAt,
               bindings: baseBindings
             });
+            reversalEventRecord = buildX402ReversalEventRecord({
+              tenantId,
+              gateId,
+              receiptId: reversalReceiptId,
+              action,
+              eventType: "authorization_voided",
+              occurredAt: nowAt,
+              reason,
+              providerDecision: "accepted",
+              evidenceRefs: reversalEvidenceRefs,
+              command: commandArtifact,
+              commandVerification: commandVerificationRecord,
+              settlementStatusBefore,
+              settlementStatusAfter: AGENT_RUN_SETTLEMENT_STATUS.REFUNDED,
+              previousEventHash,
+              eventId: reversalEventId
+            });
             const reversalWithEvent = appendX402GateReversalTimeline({
               gate,
               eventType: "authorization_voided",
               at: nowAt,
               reason,
               providerDecision: "accepted",
-              evidenceRefs: reversalEvidenceRefs
+              evidenceRefs: reversalEvidenceRefs,
+              action,
+              eventId: reversalEventRecord.eventId,
+              eventHash: reversalEventRecord.eventHash,
+              prevEventHash: reversalEventRecord.prevEventHash ?? null,
+              commandId: commandPayload.commandId
             });
             const reversal = normalizeForCanonicalJson(
               {
@@ -31863,7 +32200,7 @@ export function createApi({
             ops.push({ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement: nextSettlement });
             ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
           } else if (action === "request_refund") {
-            if (String(settlement.status ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
+            if (settlementStatusBefore !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
               return sendError(res, 409, "refund request is only allowed after settlement release", null, {
                 code: "X402_REVERSAL_INVALID_STATE"
               });
@@ -31871,13 +32208,35 @@ export function createApi({
             if (String(existingReversal?.status ?? "").toLowerCase() === "refunded") {
               return sendError(res, 409, "gate is already refunded", null, { code: "X402_REVERSAL_INVALID_STATE" });
             }
+            reversalEventRecord = buildX402ReversalEventRecord({
+              tenantId,
+              gateId,
+              receiptId: reversalReceiptId,
+              action,
+              eventType: "refund_requested",
+              occurredAt: nowAt,
+              reason,
+              providerDecision: null,
+              evidenceRefs: reversalEvidenceRefs,
+              command: commandArtifact,
+              commandVerification: commandVerificationRecord,
+              settlementStatusBefore,
+              settlementStatusAfter: AGENT_RUN_SETTLEMENT_STATUS.RELEASED,
+              previousEventHash,
+              eventId: reversalEventId
+            });
             const reversalWithEvent = appendX402GateReversalTimeline({
               gate,
               eventType: "refund_requested",
               at: nowAt,
               reason,
               providerDecision: null,
-              evidenceRefs: reversalEvidenceRefs
+              evidenceRefs: reversalEvidenceRefs,
+              action,
+              eventId: reversalEventRecord.eventId,
+              eventHash: reversalEventRecord.eventHash,
+              prevEventHash: reversalEventRecord.prevEventHash ?? null,
+              commandId: commandPayload.commandId
             });
             const reversal = normalizeForCanonicalJson(
               {
@@ -31908,14 +32267,53 @@ export function createApi({
             if (!providerDecision) {
               return sendError(res, 400, "providerDecision is required for resolve_refund", null, { code: "SCHEMA_INVALID" });
             }
+            const providerDecisionVerificationRecord = decisionArtifactVerification
+              ? normalizeForCanonicalJson(
+                  {
+                    schemaVersion: "X402ProviderRefundDecisionVerification.v1",
+                    verified: true,
+                    keyId: payeeKeyId,
+                    publicKeyPem: payeePublicKeyPem,
+                    payloadHash: decisionArtifactVerification.payloadHash,
+                    checkedAt: nowAt,
+                    code: null,
+                    error: null
+                  },
+                  { path: "$" }
+                )
+              : null;
             if (providerDecision === "denied") {
+              reversalEventRecord = buildX402ReversalEventRecord({
+                tenantId,
+                gateId,
+                receiptId: reversalReceiptId,
+                action,
+                eventType: "refund_resolved",
+                occurredAt: nowAt,
+                reason,
+                providerDecision: "denied",
+                evidenceRefs: reversalEvidenceRefs,
+                command: commandArtifact,
+                commandVerification: commandVerificationRecord,
+                providerDecisionArtifact,
+                providerDecisionVerification: providerDecisionVerificationRecord,
+                settlementStatusBefore,
+                settlementStatusAfter: AGENT_RUN_SETTLEMENT_STATUS.RELEASED,
+                previousEventHash,
+                eventId: reversalEventId
+              });
               const reversalWithEvent = appendX402GateReversalTimeline({
                 gate,
                 eventType: "refund_resolved",
                 at: nowAt,
                 reason,
                 providerDecision: "denied",
-                evidenceRefs: reversalEvidenceRefs
+                evidenceRefs: reversalEvidenceRefs,
+                action,
+                eventId: reversalEventRecord.eventId,
+                eventHash: reversalEventRecord.eventHash,
+                prevEventHash: reversalEventRecord.prevEventHash ?? null,
+                commandId: commandPayload.commandId
               });
               const reversal = normalizeForCanonicalJson(
                 {
@@ -31939,7 +32337,7 @@ export function createApi({
               );
               ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
             } else {
-              if (String(settlement.status ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
+              if (settlementStatusBefore !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
                 return sendError(res, 409, "refund resolution requires released settlement", null, {
                   code: "X402_REVERSAL_INVALID_STATE"
                 });
@@ -31966,13 +32364,37 @@ export function createApi({
                 }
                 throw err;
               }
+              reversalEventRecord = buildX402ReversalEventRecord({
+                tenantId,
+                gateId,
+                receiptId: reversalReceiptId,
+                action,
+                eventType: "refund_resolved",
+                occurredAt: nowAt,
+                reason,
+                providerDecision: "accepted",
+                evidenceRefs: reversalEvidenceRefs,
+                command: commandArtifact,
+                commandVerification: commandVerificationRecord,
+                providerDecisionArtifact,
+                providerDecisionVerification: providerDecisionVerificationRecord,
+                settlementStatusBefore,
+                settlementStatusAfter: AGENT_RUN_SETTLEMENT_STATUS.REFUNDED,
+                previousEventHash,
+                eventId: reversalEventId
+              });
               const reversalWithEvent = appendX402GateReversalTimeline({
                 gate,
                 eventType: "refund_resolved",
                 at: nowAt,
                 reason,
                 providerDecision: "accepted",
-                evidenceRefs: reversalEvidenceRefs
+                evidenceRefs: reversalEvidenceRefs,
+                action,
+                eventId: reversalEventRecord.eventId,
+                eventHash: reversalEventRecord.eventHash,
+                prevEventHash: reversalEventRecord.prevEventHash ?? null,
+                commandId: commandPayload.commandId
               });
               const reversal = normalizeForCanonicalJson(
                 {
@@ -32068,12 +32490,66 @@ export function createApi({
             }
           }
 
+          const commandUsageRecord = normalizeForCanonicalJson(
+            {
+              schemaVersion: "X402ReversalCommandUsage.v1",
+              tenantId,
+              commandId: commandPayload.commandId,
+              sponsorRef: commandPayload.sponsorRef,
+              nonce: commandPayload.nonce,
+              action,
+              gateId,
+              receiptId: reversalReceiptId,
+              eventId: reversalEventRecord?.eventId ?? reversalEventId,
+              usedAt: nowAt
+            },
+            { path: "$" }
+          );
+          const nonceUsageRecord = normalizeForCanonicalJson(
+            {
+              schemaVersion: "X402ReversalNonceUsage.v1",
+              tenantId,
+              sponsorRef: commandPayload.sponsorRef,
+              nonce: commandPayload.nonce,
+              commandId: commandPayload.commandId,
+              action,
+              gateId,
+              receiptId: reversalReceiptId,
+              eventId: reversalEventRecord?.eventId ?? reversalEventId,
+              usedAt: nowAt
+            },
+            { path: "$" }
+          );
+          if (reversalEventRecord) {
+            ops.push({
+              kind: "X402_REVERSAL_EVENT_APPEND",
+              tenantId,
+              gateId,
+              eventId: reversalEventRecord.eventId,
+              event: reversalEventRecord
+            });
+          }
+          ops.push({
+            kind: "X402_REVERSAL_COMMAND_PUT",
+            tenantId,
+            commandId: commandUsageRecord.commandId,
+            usage: commandUsageRecord
+          });
+          ops.push({
+            kind: "X402_REVERSAL_NONCE_PUT",
+            tenantId,
+            sponsorRef: nonceUsageRecord.sponsorRef,
+            nonce: nonceUsageRecord.nonce,
+            usage: nonceUsageRecord
+          });
+
           const responseBody = {
             ok: true,
             action,
             gate: nextGate,
             settlement: nextSettlement,
             reversal: nextGate?.reversal ?? null,
+            reversalEvent: reversalEventRecord,
             ...(kernelRefs?.decisionRecord ? { decisionRecord: kernelRefs.decisionRecord } : {}),
             ...(kernelRefs?.settlementReceipt ? { settlementReceipt: kernelRefs.settlementReceipt } : {})
           };
@@ -32082,6 +32558,46 @@ export function createApi({
           }
           if (ops.length > 0) await store.commitTx({ at: nowAt, ops });
           return sendJson(res, responseStatusCode, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "reversal-events" && parts.length === 2 && req.method === "GET") {
+          if (typeof store.listX402ReversalEvents !== "function") {
+            return sendError(res, 501, "x402 reversal events not supported for this store");
+          }
+          const gateId = typeof url.searchParams.get("gateId") === "string" && url.searchParams.get("gateId").trim() !== "" ? url.searchParams.get("gateId").trim() : null;
+          const receiptId =
+            typeof url.searchParams.get("receiptId") === "string" && url.searchParams.get("receiptId").trim() !== ""
+              ? url.searchParams.get("receiptId").trim()
+              : null;
+          const action = typeof url.searchParams.get("action") === "string" && url.searchParams.get("action").trim() !== "" ? url.searchParams.get("action").trim() : null;
+          const from = typeof url.searchParams.get("from") === "string" && url.searchParams.get("from").trim() !== "" ? url.searchParams.get("from").trim() : null;
+          const to = typeof url.searchParams.get("to") === "string" && url.searchParams.get("to").trim() !== "" ? url.searchParams.get("to").trim() : null;
+          const limitRaw = url.searchParams.get("limit");
+          const offsetRaw = url.searchParams.get("offset");
+          const limit = limitRaw ? Number(limitRaw) : 200;
+          const offset = offsetRaw ? Number(offsetRaw) : 0;
+          let events = [];
+          try {
+            events = await store.listX402ReversalEvents({ tenantId, gateId, receiptId, action, from, to, limit, offset });
+          } catch (err) {
+            return sendError(res, 400, "invalid reversal event query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          return sendJson(res, 200, { events, limit, offset });
+        }
+
+        if (parts[0] === "x402" && parts[1] === "reversal-events" && parts[2] && parts.length === 3 && req.method === "GET") {
+          if (typeof store.getX402ReversalEvent !== "function") {
+            return sendError(res, 501, "x402 reversal events not supported for this store");
+          }
+          const eventId = parts[2];
+          let event = null;
+          try {
+            event = await store.getX402ReversalEvent({ tenantId, eventId });
+          } catch (err) {
+            return sendError(res, 400, "invalid reversal event id", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          if (!event) return sendError(res, 404, "reversal event not found", null, { code: "NOT_FOUND" });
+          return sendJson(res, 200, { event });
         }
 
 	        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] && parts.length === 3 && req.method === "GET") {
