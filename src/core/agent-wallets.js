@@ -368,6 +368,39 @@ export function refundAgentWalletEscrow({ wallet, amountCents, at = new Date().t
   );
 }
 
+export function transferAgentWalletAvailable({ fromWallet, toWallet, amountCents, at = new Date().toISOString() }) {
+  assertIsoDate(at, "at");
+  assertAmountCents(amountCents, "amountCents");
+  const from = normalizeWalletRecord(fromWallet);
+  const to = normalizeWalletRecord(toWallet);
+  if (from.currency !== to.currency) throw new TypeError("wallet currencies must match");
+  if (from.tenantId !== to.tenantId) throw new TypeError("wallet tenants must match");
+  const debited = withWalletUpdate(
+    from,
+    (base) => {
+      if (base.availableCents < amountCents) {
+        const err = new Error("insufficient wallet balance");
+        err.code = "INSUFFICIENT_WALLET_BALANCE";
+        throw err;
+      }
+      return {
+        availableCents: base.availableCents - amountCents,
+        totalDebitedCents: base.totalDebitedCents + amountCents
+      };
+    },
+    { at }
+  );
+  const credited = withWalletUpdate(
+    to,
+    (base) => ({
+      availableCents: base.availableCents + amountCents,
+      totalCreditedCents: base.totalCreditedCents + amountCents
+    }),
+    { at }
+  );
+  return { fromWallet: debited, toWallet: credited };
+}
+
 export function validateAgentRunSettlementRequest(payload) {
   assertPlainObject(payload, "settlement");
   assertNonEmptyString(payload.payerAgentId, "settlement.payerAgentId");
@@ -699,6 +732,70 @@ export function resolveAgentRunSettlement({
     decisionUpdatedAt: at,
     resolvedAt: at,
     resolutionEventId: resolutionEventId ?? null,
+    revision: current.revision + 1,
+    updatedAt: at
+  });
+}
+
+export function refundReleasedAgentRunSettlement({
+  settlement,
+  runStatus = "refunded",
+  decisionStatus = AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_RESOLVED,
+  decisionMode = AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+  decisionPolicyHash = null,
+  decisionReason = "x402_refund_resolved",
+  decisionTrace = null,
+  resolutionEventId = null,
+  at = new Date().toISOString()
+}) {
+  const current = normalizeSettlementRecord(settlement);
+  if (current.status !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
+    throw new TypeError("refundReleasedAgentRunSettlement requires status=released");
+  }
+  assertNonEmptyString(runStatus, "runStatus");
+  assertIsoDate(at, "at");
+  if (resolutionEventId !== null && resolutionEventId !== undefined) assertNonEmptyString(resolutionEventId, "resolutionEventId");
+  const normalizedDecisionStatus = String(decisionStatus ?? AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_RESOLVED).toLowerCase();
+  if (!Object.values(AGENT_RUN_SETTLEMENT_DECISION_STATUS).includes(normalizedDecisionStatus)) {
+    throw new TypeError("decisionStatus must be pending|auto_resolved|manual_review_required|manual_resolved");
+  }
+  const normalizedDecisionMode = String(decisionMode ?? AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW).toLowerCase();
+  if (!Object.values(AGENT_RUN_SETTLEMENT_DECISION_MODE).includes(normalizedDecisionMode)) {
+    throw new TypeError("decisionMode must be automatic|manual-review");
+  }
+  const normalizedDecisionPolicyHash =
+    decisionPolicyHash === null || decisionPolicyHash === undefined ? null : String(decisionPolicyHash).trim();
+  if (normalizedDecisionPolicyHash !== null && normalizedDecisionPolicyHash === "") {
+    throw new TypeError("decisionPolicyHash must be a non-empty string when provided");
+  }
+  const normalizedDecisionReason = decisionReason === null || decisionReason === undefined ? null : String(decisionReason).trim();
+  if (normalizedDecisionReason !== null && normalizedDecisionReason === "") {
+    throw new TypeError("decisionReason must be a non-empty string when provided");
+  }
+  if (decisionTrace !== null && decisionTrace !== undefined) {
+    assertPlainObject(decisionTrace, "decisionTrace");
+  }
+  return normalizeSettlementRecord({
+    ...current,
+    status: AGENT_RUN_SETTLEMENT_STATUS.REFUNDED,
+    runStatus: String(runStatus),
+    releasedAmountCents: 0,
+    refundedAmountCents: current.amountCents,
+    releaseRatePct: 0,
+    disputeStatus: AGENT_RUN_SETTLEMENT_DISPUTE_STATUS.NONE,
+    disputeId: null,
+    disputeOpenedAt: null,
+    disputeClosedAt: null,
+    disputeContext: null,
+    disputeResolution: null,
+    decisionStatus: normalizedDecisionStatus,
+    decisionMode: normalizedDecisionMode,
+    decisionPolicyHash: normalizedDecisionPolicyHash,
+    decisionReason: normalizedDecisionReason,
+    decisionTrace: decisionTrace ?? current.decisionTrace ?? null,
+    decisionUpdatedAt: at,
+    resolvedAt: at,
+    resolutionEventId: resolutionEventId ?? current.resolutionEventId ?? null,
     revision: current.revision + 1,
     updatedAt: at
   });

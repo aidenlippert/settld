@@ -91,9 +91,11 @@ import {
   creditAgentWallet,
   ensureAgentWallet,
   lockAgentWalletEscrow,
+  refundReleasedAgentRunSettlement,
   refundAgentWalletEscrow,
   releaseAgentWalletEscrowToPayee,
   resolveAgentRunSettlement,
+  transferAgentWalletAvailable,
   patchAgentRunSettlementDisputeContext,
   updateAgentRunSettlementDecision,
   updateAgentRunSettlementDispute,
@@ -8183,6 +8185,102 @@ export function createApi({
       if (/^[0-9a-f]{64}$/.test(candidate)) return candidate;
     }
     return null;
+  }
+
+  function normalizeX402ReversalActionInput(value) {
+    const action = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (!action) throw new TypeError("action is required");
+    if (action !== "void_authorization" && action !== "request_refund" && action !== "resolve_refund") {
+      throw new TypeError("action must be void_authorization|request_refund|resolve_refund");
+    }
+    return action;
+  }
+
+  function normalizeX402ReversalDecisionInput(value) {
+    if (value === null || value === undefined || String(value).trim() === "") return null;
+    const out = String(value).trim().toLowerCase();
+    if (out !== "accepted" && out !== "denied") {
+      throw new TypeError("providerDecision must be accepted|denied when provided");
+    }
+    return out;
+  }
+
+  function normalizeX402ReversalReasonInput(value) {
+    if (value === null || value === undefined || String(value).trim() === "") return null;
+    const out = String(value).trim();
+    if (out.length > 1000) throw new TypeError("reason must be <= 1000 chars");
+    return out;
+  }
+
+  function normalizeX402ReversalEvidenceRefsInput(value) {
+    if (value === null || value === undefined) return [];
+    if (!Array.isArray(value)) throw new TypeError("evidenceRefs must be an array when provided");
+    const out = [];
+    const seen = new Set();
+    for (let index = 0; index < value.length; index += 1) {
+      const raw = value[index];
+      const text = typeof raw === "string" ? raw.trim() : "";
+      if (!text) throw new TypeError(`evidenceRefs[${index}] must be a non-empty string`);
+      if (seen.has(text)) continue;
+      seen.add(text);
+      out.push(text);
+    }
+    return out;
+  }
+
+  function appendX402GateReversalTimeline({
+    gate,
+    eventType,
+    at,
+    reason = null,
+    providerDecision = null,
+    evidenceRefs = []
+  } = {}) {
+    const previousReversal =
+      gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
+        ? gate.reversal
+        : null;
+    const previousTimeline = Array.isArray(previousReversal?.timeline) ? previousReversal.timeline : [];
+    const normalizedEvidenceRefs = Array.isArray(evidenceRefs) ? evidenceRefs.slice() : [];
+    const event = normalizeForCanonicalJson(
+      {
+        eventType,
+        at,
+        ...(reason ? { reason } : {}),
+        ...(providerDecision ? { providerDecision } : {}),
+        ...(normalizedEvidenceRefs.length ? { evidenceRefs: normalizedEvidenceRefs } : {})
+      },
+      { path: "$" }
+    );
+    const timeline = [...previousTimeline, event];
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402GateReversal.v1",
+        status:
+          typeof previousReversal?.status === "string" && previousReversal.status.trim() !== ""
+            ? previousReversal.status.trim()
+            : "none",
+        requestedAt:
+          typeof previousReversal?.requestedAt === "string" && previousReversal.requestedAt.trim() !== ""
+            ? previousReversal.requestedAt.trim()
+            : null,
+        resolvedAt:
+          typeof previousReversal?.resolvedAt === "string" && previousReversal.resolvedAt.trim() !== ""
+            ? previousReversal.resolvedAt.trim()
+            : null,
+        providerDecision:
+          typeof previousReversal?.providerDecision === "string" && previousReversal.providerDecision.trim() !== ""
+            ? previousReversal.providerDecision.trim()
+            : null,
+        reason:
+          typeof previousReversal?.reason === "string" && previousReversal.reason.trim() !== ""
+            ? previousReversal.reason.trim()
+            : null,
+        evidenceRefs: Array.isArray(previousReversal?.evidenceRefs) ? previousReversal.evidenceRefs.slice() : [],
+        timeline
+      },
+      { path: "$" }
+    );
   }
 
   function normalizeProviderSignatureStatus({
@@ -31523,6 +31621,467 @@ export function createApi({
           }
           await store.commitTx({ at, ops });
           return sendJson(res, 200, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "reversal" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const gateId = typeof body?.gateId === "string" && body.gateId.trim() !== "" ? body.gateId.trim() : null;
+          if (!gateId) return sendError(res, 400, "gateId is required", null, { code: "SCHEMA_INVALID" });
+          let action = null;
+          let providerDecision = null;
+          let reason = null;
+          let reversalEvidenceRefs = [];
+          try {
+            action = normalizeX402ReversalActionInput(body?.action);
+            providerDecision = normalizeX402ReversalDecisionInput(body?.providerDecision ?? null);
+            reason = normalizeX402ReversalReasonInput(body?.reason ?? null);
+            reversalEvidenceRefs = normalizeX402ReversalEvidenceRefsInput(body?.evidenceRefs ?? null);
+          } catch (err) {
+            return sendError(res, 400, "invalid reversal request", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
+          if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
+          const runId = String(gate.runId ?? "");
+          const settlement = typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
+          if (!settlement) return sendError(res, 404, "settlement not found for gate", null, { code: "NOT_FOUND" });
+          const amountCents = Number(settlement.amountCents ?? gate?.terms?.amountCents ?? 0);
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+            return sendError(res, 409, "gate amount invalid", null, { code: "X402_GATE_INVALID" });
+          }
+          const currency =
+            typeof settlement.currency === "string" && settlement.currency.trim() !== ""
+              ? settlement.currency.trim().toUpperCase()
+              : typeof gate?.terms?.currency === "string" && gate.terms.currency.trim() !== ""
+                ? gate.terms.currency.trim().toUpperCase()
+                : "USD";
+          const payerAgentId = typeof gate?.payerAgentId === "string" && gate.payerAgentId.trim() !== "" ? gate.payerAgentId.trim() : null;
+          const payeeAgentId = typeof gate?.payeeAgentId === "string" && gate.payeeAgentId.trim() !== "" ? gate.payeeAgentId.trim() : null;
+          if (!payerAgentId || !payeeAgentId) return sendError(res, 409, "gate actors missing", null, { code: "X402_GATE_INVALID" });
+
+          const nowAt = nowIso();
+          const reversalEventId = createId("x402rev");
+          const existingReversal =
+            gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal) ? gate.reversal : null;
+          const baseBindings =
+            settlement?.decisionTrace?.bindings && typeof settlement.decisionTrace.bindings === "object" && !Array.isArray(settlement.decisionTrace.bindings)
+              ? settlement.decisionTrace.bindings
+              : null;
+          let nextGate = gate;
+          let nextSettlement = settlement;
+          let payerWallet = null;
+          let payeeWallet = null;
+          const ops = [];
+          let responseStatusCode = 200;
+          let kernelRefs = null;
+
+          if (action === "void_authorization") {
+            if (String(settlement.status ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_STATUS.LOCKED) {
+              return sendError(res, 409, "void is only allowed while settlement is locked", null, { code: "X402_REVERSAL_INVALID_STATE" });
+            }
+            const existingAuthorization =
+              gate?.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization) ? gate.authorization : null;
+            if (!existingAuthorization) return sendError(res, 409, "gate authorization missing", null, { code: "X402_GATE_INVALID" });
+
+            const payerWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payerAgentId }) : null;
+            if (!payerWalletExisting) return sendError(res, 409, "payer wallet missing", null, { code: "WALLET_MISSING" });
+            try {
+              payerWallet = refundAgentWalletEscrow({ wallet: payerWalletExisting, amountCents, at: nowAt });
+            } catch (err) {
+              if (err?.code === "INSUFFICIENT_ESCROW_BALANCE") {
+                return sendError(res, 409, "insufficient escrow balance", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+              }
+              throw err;
+            }
+
+            let reserveOutcome = null;
+            const reserveStatus = String(existingAuthorization?.reserve?.status ?? "").toLowerCase();
+            const reserveId = typeof existingAuthorization?.reserve?.reserveId === "string" ? existingAuthorization.reserve.reserveId.trim() : "";
+            if (reserveId && (reserveStatus === "reserved" || reserveStatus === "settled")) {
+              try {
+                reserveOutcome = await circleReserveAdapter.void({
+                  reserveId,
+                  amountCents,
+                  currency,
+                  idempotencyKey: `${gateId}:void_authorization`
+                });
+              } catch (err) {
+                return sendError(
+                  res,
+                  503,
+                  "failed to void external reserve",
+                  { message: err?.message ?? String(err ?? ""), code: err?.code ?? null },
+                  { code: "X402_RESERVE_VOID_FAILED" }
+                );
+              }
+            }
+
+            const reasonCodes = ["X402_AUTHORIZATION_VOIDED"];
+            kernelRefs = buildSettlementKernelRefs({
+              settlement,
+              agreementId: gate?.agreementHash ?? null,
+              decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_RESOLVED,
+              decisionMode: AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+              decisionReason: "x402_authorization_voided",
+              verificationStatus: "red",
+              policyHash: null,
+              verificationMethodHash: null,
+              verificationMethodMode: "manual",
+              verifierId: "settld.x402.reversal",
+              verifierVersion: "v1",
+              verifierHash: null,
+              resolutionEventId: reversalEventId,
+              status: AGENT_RUN_SETTLEMENT_STATUS.REFUNDED,
+              releasedAmountCents: 0,
+              refundedAmountCents: amountCents,
+              releaseRatePct: 0,
+              finalityState: SETTLEMENT_FINALITY_STATE.FINAL,
+              settledAt: nowAt,
+              createdAt: nowAt,
+              bindings: baseBindings
+            });
+            const reversalWithEvent = appendX402GateReversalTimeline({
+              gate,
+              eventType: "authorization_voided",
+              at: nowAt,
+              reason,
+              providerDecision: "accepted",
+              evidenceRefs: reversalEvidenceRefs
+            });
+            const reversal = normalizeForCanonicalJson(
+              {
+                ...reversalWithEvent,
+                status: "voided",
+                requestedAt: existingReversal?.requestedAt ?? nowAt,
+                resolvedAt: nowAt,
+                providerDecision: "accepted",
+                reason: reason ?? existingReversal?.reason ?? null,
+                evidenceRefs: reversalEvidenceRefs.length > 0 ? reversalEvidenceRefs : existingReversal?.evidenceRefs ?? []
+              },
+              { path: "$" }
+            );
+            const decisionTrace = normalizeForCanonicalJson(
+              {
+                schemaVersion: "X402GateDecisionTrace.v1",
+                verificationStatus: "red",
+                runStatus: "cancelled",
+                shouldAutoResolve: true,
+                reasonCodes,
+                policyReleaseRatePct: 0,
+                policyReleasedAmountCents: 0,
+                policyRefundedAmountCents: amountCents,
+                holdbackBps: 0,
+                holdbackAmountCents: 0,
+                holdbackReleaseEligibleAt: null,
+                immediateReleasedAmountCents: 0,
+                immediateRefundedAmountCents: amountCents,
+                releaseRatePct: 0,
+                verificationMethod: { mode: "manual", source: "x402_reversal_v1" },
+                bindings: baseBindings,
+                reversal,
+                decisionRecord: kernelRefs?.decisionRecord ?? null,
+                settlementReceipt: kernelRefs?.settlementReceipt ?? null
+              },
+              { path: "$" }
+            );
+
+            nextSettlement = resolveAgentRunSettlement({
+              settlement,
+              status: AGENT_RUN_SETTLEMENT_STATUS.REFUNDED,
+              runStatus: "cancelled",
+              releasedAmountCents: 0,
+              refundedAmountCents: amountCents,
+              releaseRatePct: 0,
+              decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_RESOLVED,
+              decisionMode: AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+              decisionReason: "x402_authorization_voided",
+              decisionTrace,
+              resolutionEventId: reversalEventId,
+              at: nowAt
+            });
+
+            const updatedAuthorization = normalizeForCanonicalJson(
+              {
+                ...existingAuthorization,
+                status: "voided",
+                walletEscrow:
+                  existingAuthorization.walletEscrow &&
+                  typeof existingAuthorization.walletEscrow === "object" &&
+                  !Array.isArray(existingAuthorization.walletEscrow)
+                    ? {
+                        ...existingAuthorization.walletEscrow,
+                        status: "unlocked",
+                        unlockedAt: nowAt
+                      }
+                    : existingAuthorization.walletEscrow ?? null,
+                reserve:
+                  existingAuthorization.reserve &&
+                  typeof existingAuthorization.reserve === "object" &&
+                  !Array.isArray(existingAuthorization.reserve)
+                    ? {
+                        ...existingAuthorization.reserve,
+                        status: reserveOutcome?.status ?? "voided",
+                        voidedAt: nowAt,
+                        ...(reserveOutcome?.compensationReserveId ? { compensationReserveId: reserveOutcome.compensationReserveId } : {})
+                      }
+                    : existingAuthorization.reserve ?? null,
+                updatedAt: nowAt
+              },
+              { path: "$" }
+            );
+            nextGate = normalizeForCanonicalJson(
+              {
+                ...gate,
+                status: "resolved",
+                resolvedAt: nowAt,
+                authorization: updatedAuthorization,
+                reversal,
+                updatedAt: nowAt
+              },
+              { path: "$" }
+            );
+            ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet });
+            ops.push({ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement: nextSettlement });
+            ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
+          } else if (action === "request_refund") {
+            if (String(settlement.status ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
+              return sendError(res, 409, "refund request is only allowed after settlement release", null, {
+                code: "X402_REVERSAL_INVALID_STATE"
+              });
+            }
+            if (String(existingReversal?.status ?? "").toLowerCase() === "refunded") {
+              return sendError(res, 409, "gate is already refunded", null, { code: "X402_REVERSAL_INVALID_STATE" });
+            }
+            const reversalWithEvent = appendX402GateReversalTimeline({
+              gate,
+              eventType: "refund_requested",
+              at: nowAt,
+              reason,
+              providerDecision: null,
+              evidenceRefs: reversalEvidenceRefs
+            });
+            const reversal = normalizeForCanonicalJson(
+              {
+                ...reversalWithEvent,
+                status: "refund_pending",
+                requestedAt: nowAt,
+                resolvedAt: null,
+                providerDecision: null,
+                reason: reason ?? existingReversal?.reason ?? null,
+                evidenceRefs: reversalEvidenceRefs.length > 0 ? reversalEvidenceRefs : existingReversal?.evidenceRefs ?? []
+              },
+              { path: "$" }
+            );
+            nextGate = normalizeForCanonicalJson(
+              {
+                ...gate,
+                reversal,
+                updatedAt: nowAt
+              },
+              { path: "$" }
+            );
+            responseStatusCode = 202;
+            ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
+          } else if (action === "resolve_refund") {
+            if (String(existingReversal?.status ?? "").toLowerCase() !== "refund_pending") {
+              return sendError(res, 409, "no pending refund request exists for gate", null, { code: "X402_REVERSAL_INVALID_STATE" });
+            }
+            if (!providerDecision) {
+              return sendError(res, 400, "providerDecision is required for resolve_refund", null, { code: "SCHEMA_INVALID" });
+            }
+            if (providerDecision === "denied") {
+              const reversalWithEvent = appendX402GateReversalTimeline({
+                gate,
+                eventType: "refund_resolved",
+                at: nowAt,
+                reason,
+                providerDecision: "denied",
+                evidenceRefs: reversalEvidenceRefs
+              });
+              const reversal = normalizeForCanonicalJson(
+                {
+                  ...reversalWithEvent,
+                  status: "refund_denied",
+                  requestedAt: existingReversal?.requestedAt ?? nowAt,
+                  resolvedAt: nowAt,
+                  providerDecision: "denied",
+                  reason: reason ?? existingReversal?.reason ?? null,
+                  evidenceRefs: reversalEvidenceRefs.length > 0 ? reversalEvidenceRefs : existingReversal?.evidenceRefs ?? []
+                },
+                { path: "$" }
+              );
+              nextGate = normalizeForCanonicalJson(
+                {
+                  ...gate,
+                  reversal,
+                  updatedAt: nowAt
+                },
+                { path: "$" }
+              );
+              ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
+            } else {
+              if (String(settlement.status ?? "").toLowerCase() !== AGENT_RUN_SETTLEMENT_STATUS.RELEASED) {
+                return sendError(res, 409, "refund resolution requires released settlement", null, {
+                  code: "X402_REVERSAL_INVALID_STATE"
+                });
+              }
+              const refundAmountCents = Number(settlement.releasedAmountCents ?? 0);
+              if (!Number.isSafeInteger(refundAmountCents) || refundAmountCents <= 0) {
+                return sendError(res, 409, "no releasable amount remains to refund", null, { code: "X402_REVERSAL_INVALID_STATE" });
+              }
+              const payerWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payerAgentId }) : null;
+              const payeeWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payeeAgentId }) : null;
+              if (!payerWalletExisting || !payeeWalletExisting) return sendError(res, 409, "missing wallets for refund resolution", null, { code: "WALLET_MISSING" });
+              try {
+                const transferred = transferAgentWalletAvailable({
+                  fromWallet: payeeWalletExisting,
+                  toWallet: payerWalletExisting,
+                  amountCents: refundAmountCents,
+                  at: nowAt
+                });
+                payeeWallet = transferred.fromWallet;
+                payerWallet = transferred.toWallet;
+              } catch (err) {
+                if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
+                  return sendError(res, 409, "provider wallet balance insufficient for refund", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+                }
+                throw err;
+              }
+              const reversalWithEvent = appendX402GateReversalTimeline({
+                gate,
+                eventType: "refund_resolved",
+                at: nowAt,
+                reason,
+                providerDecision: "accepted",
+                evidenceRefs: reversalEvidenceRefs
+              });
+              const reversal = normalizeForCanonicalJson(
+                {
+                  ...reversalWithEvent,
+                  status: "refunded",
+                  requestedAt: existingReversal?.requestedAt ?? nowAt,
+                  resolvedAt: nowAt,
+                  providerDecision: "accepted",
+                  reason: reason ?? existingReversal?.reason ?? null,
+                  evidenceRefs: reversalEvidenceRefs.length > 0 ? reversalEvidenceRefs : existingReversal?.evidenceRefs ?? []
+                },
+                { path: "$" }
+              );
+              kernelRefs = buildSettlementKernelRefs({
+                settlement,
+                agreementId: gate?.agreementHash ?? null,
+                decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_RESOLVED,
+                decisionMode: AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+                decisionReason: "x402_refund_accepted",
+                verificationStatus: "amber",
+                policyHash: null,
+                verificationMethodHash: null,
+                verificationMethodMode: "manual",
+                verifierId: "settld.x402.reversal",
+                verifierVersion: "v1",
+                verifierHash: null,
+                resolutionEventId: reversalEventId,
+                status: AGENT_RUN_SETTLEMENT_STATUS.REFUNDED,
+                releasedAmountCents: 0,
+                refundedAmountCents: amountCents,
+                releaseRatePct: 0,
+                finalityState: SETTLEMENT_FINALITY_STATE.FINAL,
+                settledAt: nowAt,
+                createdAt: nowAt,
+                bindings: baseBindings
+              });
+              const decisionTrace = normalizeForCanonicalJson(
+                {
+                  ...(settlement?.decisionTrace && typeof settlement.decisionTrace === "object" && !Array.isArray(settlement.decisionTrace)
+                    ? settlement.decisionTrace
+                    : {}),
+                  schemaVersion: "X402GateDecisionTrace.v1",
+                  reversal,
+                  reasonCodes: Array.from(
+                    new Set([
+                      ...(Array.isArray(settlement?.decisionTrace?.reasonCodes) ? settlement.decisionTrace.reasonCodes : []),
+                      "X402_REFUND_ACCEPTED"
+                    ])
+                  ),
+                  decisionRecord: kernelRefs?.decisionRecord ?? null,
+                  settlementReceipt: kernelRefs?.settlementReceipt ?? null
+                },
+                { path: "$" }
+              );
+              nextSettlement = refundReleasedAgentRunSettlement({
+                settlement,
+                runStatus: "refunded",
+                decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.MANUAL_RESOLVED,
+                decisionMode: AGENT_RUN_SETTLEMENT_DECISION_MODE.MANUAL_REVIEW,
+                decisionReason: "x402_refund_accepted",
+                decisionTrace,
+                resolutionEventId: reversalEventId,
+                at: nowAt
+              });
+              nextGate = normalizeForCanonicalJson(
+                {
+                  ...gate,
+                  reversal,
+                  decision: {
+                    ...(gate?.decision && typeof gate.decision === "object" && !Array.isArray(gate.decision) ? gate.decision : {}),
+                    releaseRatePct: 0,
+                    releasedAmountCents: 0,
+                    refundedAmountCents: amountCents,
+                    reasonCodes: Array.from(
+                      new Set([
+                        ...(Array.isArray(gate?.decision?.reasonCodes) ? gate.decision.reasonCodes : []),
+                        "X402_REFUND_ACCEPTED"
+                      ])
+                    ),
+                    policyDecisionFingerprint:
+                      settlement?.decisionTrace?.bindings?.policyDecisionFingerprint ??
+                      gate?.decision?.policyDecisionFingerprint ??
+                      null
+                  },
+                  updatedAt: nowAt
+                },
+                { path: "$" }
+              );
+              ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet });
+              ops.push({ kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payeeWallet });
+              ops.push({ kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement: nextSettlement });
+              ops.push({ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate });
+            }
+          }
+
+          const responseBody = {
+            ok: true,
+            action,
+            gate: nextGate,
+            settlement: nextSettlement,
+            reversal: nextGate?.reversal ?? null,
+            ...(kernelRefs?.decisionRecord ? { decisionRecord: kernelRefs.decisionRecord } : {}),
+            ...(kernelRefs?.settlementReceipt ? { settlementReceipt: kernelRefs.settlementReceipt } : {})
+          };
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: responseStatusCode, body: responseBody } });
+          }
+          if (ops.length > 0) await store.commitTx({ at: nowAt, ops });
+          return sendJson(res, responseStatusCode, responseBody);
         }
 
 	        if (parts[0] === "x402" && parts[1] === "gate" && parts[2] && parts.length === 3 && req.method === "GET") {

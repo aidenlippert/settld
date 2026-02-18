@@ -1099,6 +1099,10 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
         gate?.providerQuotePayload && typeof gate.providerQuotePayload === "object" && !Array.isArray(gate.providerQuotePayload)
           ? gate.providerQuotePayload
           : null,
+      reversal:
+        gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
+          ? gate.reversal
+          : null,
       decisionRecord:
         decisionTrace?.decisionRecord && typeof decisionTrace.decisionRecord === "object" && !Array.isArray(decisionTrace.decisionRecord)
           ? decisionTrace.decisionRecord
