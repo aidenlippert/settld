@@ -22,16 +22,19 @@
     "bin",
     "conformance",
     "packages/artifact-verify/src",
-    "scripts/closepack",
-    "scripts/init",
-    "scripts/x402",
+    "scripts",
+    "docs",
     "src",
     "services/finance-sink",
     "services/x402-gateway",
     "services/receiver"
   ],
   "bin": {
-    "settld": "bin/settld.js"
+    "settld": "bin/settld.js",
+    "settld-mcp": "bin/settld-mcp"
+  },
+  "exports": {
+    "./mcp": "./scripts/mcp/settld-mcp-server.mjs"
   },
   "scripts": {
     "postinstall": "node scripts/init/postinstall-sanity.mjs",

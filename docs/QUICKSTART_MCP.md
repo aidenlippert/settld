@@ -2,6 +2,8 @@
 
 This quickstart connects an MCP-compatible agent/client to Settld using the Sprint 23 `stdio` MCP spike server.
 
+For host-specific setup (Claude, Cursor, Codex, OpenClaw), see `docs/QUICKSTART_MCP_HOSTS.md`.
+
 ## Prerequisites
 
 - Node.js 20+

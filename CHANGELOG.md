@@ -7,6 +7,16 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 ## [Unreleased]
 
 ### Added
+- Public MCP distribution path:
+  - npm-published MCP runtime assets (`scripts/mcp/*`, `docs/QUICKSTART_MCP*.md`) are now included in package files.
+  - New CLI entrypoint `settld-mcp` (`bin/settld-mcp`) for direct host MCP registration.
+  - ESM subpath export `settld/mcp` for programmatic MCP server consumption.
+- Host onboarding quickstarts for Claude, Cursor, Codex, and OpenClaw:
+  - `docs/QUICKSTART_MCP_HOSTS.md`
+  - `docs/QUICKSTART_MCP.md` linked host setup guidance.
+- OpenClaw launch artifacts:
+  - publishable skill payload at `docs/integrations/openclaw/settld-mcp-skill/`
+  - ClawHub publish/rollback checklist at `docs/integrations/openclaw/CLAWHUB_PUBLISH_CHECKLIST.md`
 - Agreement delegation primitive: `AgreementDelegation.v1` protocol spec + schema + vectors, and core builder/validator to support parent->child agreement linking in multi-hop agent chains.
 - A2A discovery surface: `GET /.well-known/agent.json` publishes a Settld settlement Agent Card for A2A-compatible agent discovery.
 - x402 verify-before-release wedge: `/x402/gate/*` API endpoints plus the in-repo thin proxy service `services/x402-gateway/` for converting upstream `HTTP 402` into `hold -> verify -> release/refund` settlement flows.

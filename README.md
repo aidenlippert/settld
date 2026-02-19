@@ -194,6 +194,8 @@ Ops workspaces (HTML):
 - `docs/QUICKSTART_PRODUCE.md`
 - `docs/QUICKSTART_SDK.md`
 - `docs/QUICKSTART_SDK_PYTHON.md`
+- `docs/QUICKSTART_MCP.md`
+- `docs/QUICKSTART_MCP_HOSTS.md`
 - `docs/ADOPTION_CHECKLIST.md`
 - `docs/SUPPORT.md`
 - `docs/OPERATIONS_SIGNING.md`
