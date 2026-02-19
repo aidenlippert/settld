@@ -91,6 +91,37 @@ jobs:
           DISPUTE_WINDOW_MS=3600000 \
           npm run quickstart:x402
 
+  mcp_paid_call_kernel_suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run paid-call kernel suite (MCP + demo path)
+        run: >
+          node --test
+          test/mcp-stdio-spike.test.js
+          test/mcp-paid-exa-tool.test.js
+          test/mcp-paid-weather-tool.test.js
+          test/demo-mcp-paid-exa.test.js
+
+  flake_budget_guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Enforce flake budget policy
+        run: node scripts/ci/flake-budget-guard.mjs
+
   deploy_safety_smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
