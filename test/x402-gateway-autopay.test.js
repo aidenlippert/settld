@@ -189,6 +189,20 @@ test("x402 gateway: retries with SettldPay token and returns verified response",
   assert.equal(parsedToken.payload.requestBindingMode, "strict");
   assert.equal(parsedToken.payload.requestBindingSha256, expectedRequestBindingSha256);
   assert.ok(typeof parsedToken.payload.quoteId === "string" && parsedToken.payload.quoteId.length > 0);
+
+  const settlementRead = await fetch(`${apiBase}/runs/${encodeURIComponent(`x402_${gateId}`)}/settlement`, {
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "x-proxy-tenant-id": DEFAULT_TENANT_ID
+    }
+  });
+  const settlementText = await settlementRead.text();
+  assert.equal(settlementRead.status, 200, settlementText);
+  const settlementJson = JSON.parse(settlementText);
+  assert.ok(
+    typeof settlementJson?.decisionRecord?.bindings?.spendAuthorization?.delegationRef === "string" &&
+      settlementJson.decisionRecord.bindings.spendAuthorization.delegationRef.length > 0
+  );
 });
 
 test("x402 gateway: enforces signed provider quote when provider key is configured", async (t) => {

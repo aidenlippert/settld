@@ -164,6 +164,10 @@ test("API e2e: x402 authorize-payment is idempotent and token verifies via keyse
     verifyRes.json?.decisionRecord?.bindings?.policyDecisionFingerprint?.evaluationHash,
     verifyRes.json?.settlementReceipt?.bindings?.policyDecisionFingerprint?.evaluationHash
   );
+  assert.ok(
+    typeof verifyRes.json?.decisionRecord?.bindings?.spendAuthorization?.delegationRef === "string" &&
+      verifyRes.json.decisionRecord.bindings.spendAuthorization.delegationRef.length > 0
+  );
 });
 
 test("API e2e: reserve failure during authorize-payment rolls back wallet escrow lock", async () => {
@@ -813,4 +817,82 @@ test("API e2e: x402 authorize-payment enforces daily tenant cap", async () => {
   assert.equal(authB.json?.code, "X402_PILOT_DAILY_LIMIT_EXCEEDED");
   assert.equal(authB.json?.details?.currentExposureCents, 500);
   assert.equal(authB.json?.details?.projectedExposureCents, 900);
+});
+
+test("API e2e: x402 wallet policy enforces max delegation depth fail-closed", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_depth_payer_1" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_depth_payee_1" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_auth_depth_1" });
+
+  const walletPolicy = {
+    schemaVersion: "X402WalletPolicy.v1",
+    sponsorRef: "sponsor_depth_ops_1",
+    sponsorWalletRef: "wallet_depth_ops_1",
+    policyRef: "policy_depth_1",
+    policyVersion: 1,
+    status: "active",
+    maxDelegationDepth: 1,
+    allowedProviderIds: [payeeAgentId],
+    allowedToolIds: ["weather_read"],
+    requireQuote: false,
+    requireStrictRequestBinding: false,
+    requireAgentKeyMatch: false
+  };
+  const createdPolicy = await upsertX402WalletPolicy(api, {
+    policy: walletPolicy,
+    idempotencyKey: "x402_wallet_policy_upsert_depth_1"
+  });
+  assert.equal(createdPolicy.statusCode, 201, createdPolicy.body);
+
+  const gateId = "gate_auth_depth_1";
+  const createGate = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_depth_1" },
+    body: {
+      gateId,
+      payerAgentId,
+      payeeAgentId,
+      toolId: "weather_read",
+      amountCents: 350,
+      currency: "USD",
+      agentPassport: {
+        sponsorRef: walletPolicy.sponsorRef,
+        sponsorWalletRef: walletPolicy.sponsorWalletRef,
+        agentKeyId: "agent_key_depth_1",
+        delegationRef: "delegation_depth_1",
+        delegationDepth: 2,
+        maxDelegationDepth: 3,
+        policyRef: walletPolicy.policyRef,
+        policyVersion: walletPolicy.policyVersion
+      }
+    }
+  });
+  assert.equal(createGate.statusCode, 201, createGate.body);
+
+  const issuerDecision = await issueWalletAuthorizationDecision(api, {
+    sponsorWalletRef: walletPolicy.sponsorWalletRef,
+    gateId,
+    idempotencyKey: "x402_wallet_issuer_depth_1"
+  });
+  assert.equal(issuerDecision.statusCode, 409, issuerDecision.body);
+  assert.equal(issuerDecision.json?.code, "X402_WALLET_POLICY_DELEGATION_DEPTH_EXCEEDED");
+  assert.equal(issuerDecision.json?.details?.details?.delegationDepth, 2);
+  assert.equal(issuerDecision.json?.details?.details?.maxDelegationDepth, 1);
+
+  const gateRead = await request(api, {
+    method: "GET",
+    path: `/x402/gate/${encodeURIComponent(gateId)}`
+  });
+  assert.equal(gateRead.statusCode, 200, gateRead.body);
+  assert.equal(gateRead.json?.gate?.authorization?.status, "pending");
+
+  const settlementRead = await request(api, {
+    method: "GET",
+    path: `/runs/${encodeURIComponent(`x402_${gateId}`)}/settlement`
+  });
+  assert.equal(settlementRead.statusCode, 200, settlementRead.body);
+  assert.equal(settlementRead.json?.settlement?.status, "locked");
 });

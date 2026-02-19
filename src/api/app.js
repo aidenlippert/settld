@@ -6549,6 +6549,21 @@ export function createApi({
     const policyVersion = normalizeOptionalX402PositiveSafeInt(rawValue.policyVersion, `${fieldPath}.policyVersion`, {
       allowNull: true
     });
+    const delegationDepth = normalizeOptionalNonNegativeSafeInt(rawValue.delegationDepth ?? null, {
+      fieldName: `${fieldPath}.delegationDepth`,
+      allowNull: true
+    });
+    const maxDelegationDepthRaw = normalizeOptionalNonNegativeSafeInt(rawValue.maxDelegationDepth ?? null, {
+      fieldName: `${fieldPath}.maxDelegationDepth`,
+      allowNull: true
+    });
+    if (maxDelegationDepthRaw !== null && delegationDepth === null) {
+      throw new TypeError(`${fieldPath}.delegationDepth is required when maxDelegationDepth is provided`);
+    }
+    const maxDelegationDepth = delegationDepth === null ? null : maxDelegationDepthRaw ?? delegationDepth;
+    if (delegationDepth !== null && maxDelegationDepth !== null && delegationDepth > maxDelegationDepth) {
+      throw new TypeError(`${fieldPath}.delegationDepth must be <= ${fieldPath}.maxDelegationDepth`);
+    }
     const expiresAt =
       rawValue.expiresAt === null || rawValue.expiresAt === undefined || String(rawValue.expiresAt).trim() === ""
         ? null
@@ -6565,6 +6580,8 @@ export function createApi({
         ...(delegationRef ? { delegationRef } : {}),
         ...(policyRef ? { policyRef } : {}),
         ...(policyVersion ? { policyVersion } : {}),
+        ...(delegationDepth !== null ? { delegationDepth } : {}),
+        ...(maxDelegationDepth !== null ? { maxDelegationDepth } : {}),
         ...(expiresAt ? { expiresAt } : {})
       },
       { path: "$" }
@@ -6630,11 +6647,37 @@ export function createApi({
           typeof passport.delegationRef === "string" && passport.delegationRef.trim() !== "" ? passport.delegationRef.trim() : null,
         policyRef: typeof passport.policyRef === "string" && passport.policyRef.trim() !== "" ? passport.policyRef.trim() : null,
         policyVersion: Number.isSafeInteger(Number(passport.policyVersion)) ? Number(passport.policyVersion) : null,
+        delegationDepth:
+          Number.isSafeInteger(Number(passport.delegationDepth)) && Number(passport.delegationDepth) >= 0
+            ? Number(passport.delegationDepth)
+            : null,
+        maxDelegationDepth:
+          Number.isSafeInteger(Number(passport.maxDelegationDepth)) && Number(passport.maxDelegationDepth) >= 0
+            ? Number(passport.maxDelegationDepth)
+            : null,
         expiresAt: typeof passport.expiresAt === "string" && passport.expiresAt.trim() !== "" ? passport.expiresAt.trim() : null
       },
       { path: "$" }
     );
     return sha256Hex(canonicalJsonStringify(normalized));
+  }
+
+  function deriveX402AuthorityGrantRef({ gateId, gateAgentPassport = null, gateAuthorization = null, tokenPayload = null } = {}) {
+    const fallback = `authority_${sha256Hex(String(gateId ?? "")).slice(0, 24)}`;
+    const candidates = [
+      tokenPayload?.delegationRef,
+      gateAgentPassport?.delegationRef,
+      gateAuthorization?.authorityGrantRef
+    ];
+    for (const raw of candidates) {
+      if (typeof raw !== "string" || raw.trim() === "") continue;
+      try {
+        return normalizeOptionalX402RefInput(raw.trim(), "authorityGrantRef", { allowNull: false, max: 200 });
+      } catch {
+        // Try next candidate and ultimately fall back to a deterministic derived value.
+      }
+    }
+    return fallback;
   }
 
   function normalizeX402WalletPolicyStatusInput(rawValue, { fieldPath = "status", allowNull = false } = {}) {
@@ -6742,6 +6785,10 @@ export function createApi({
           fieldName: "policy.maxDailyAuthorizationCents",
           allowNull: true
         }),
+        maxDelegationDepth: normalizeOptionalNonNegativeSafeInt(policy.maxDelegationDepth ?? null, {
+          fieldName: "policy.maxDelegationDepth",
+          allowNull: true
+        }),
         allowedProviderIds: normalizeX402WalletPolicyAllowedIdsInput(policy.allowedProviderIds ?? [], "policy.allowedProviderIds"),
         allowedToolIds: normalizeX402WalletPolicyAllowedIdsInput(policy.allowedToolIds ?? [], "policy.allowedToolIds"),
         allowedAgentKeyIds: normalizeX402WalletPolicyAllowedIdsInput(policy.allowedAgentKeyIds ?? [], "policy.allowedAgentKeyIds"),
@@ -6791,6 +6838,10 @@ export function createApi({
       fieldName: `${fieldPath}.maxDailyAuthorizationCents`,
       allowNull: true
     });
+    const maxDelegationDepth = normalizeOptionalNonNegativeSafeInt(rawValue.maxDelegationDepth ?? null, {
+      fieldName: `${fieldPath}.maxDelegationDepth`,
+      allowNull: true
+    });
     const allowedProviderIds = normalizeX402WalletPolicyAllowedIdsInput(
       rawValue.allowedProviderIds ?? [],
       `${fieldPath}.allowedProviderIds`
@@ -6838,6 +6889,7 @@ export function createApi({
         status,
         maxAmountCents,
         maxDailyAuthorizationCents,
+        maxDelegationDepth,
         allowedProviderIds,
         allowedToolIds,
         allowedAgentKeyIds,
@@ -7341,6 +7393,29 @@ export function createApi({
           "X402_WALLET_POLICY_AGENT_KEY_NOT_ALLOWED",
           "x402 wallet policy agent key is not allowed",
           { agentKeyId: gateAgentKeyId, allowedAgentKeyIds: policy.allowedAgentKeyIds }
+        );
+      }
+    }
+
+    const policyMaxDelegationDepth =
+      Number.isSafeInteger(policy.maxDelegationDepth) && policy.maxDelegationDepth >= 0 ? policy.maxDelegationDepth : null;
+    if (policyMaxDelegationDepth !== null) {
+      const gateDelegationDepth =
+        gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport)
+          ? Number(gate.agentPassport.delegationDepth)
+          : Number.NaN;
+      if (!Number.isSafeInteger(gateDelegationDepth) || gateDelegationDepth < 0) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_DELEGATION_DEPTH_REQUIRED",
+          "x402 wallet policy requires delegation depth in agent passport",
+          { maxDelegationDepth: policyMaxDelegationDepth }
+        );
+      }
+      if (gateDelegationDepth > policyMaxDelegationDepth) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_DELEGATION_DEPTH_EXCEEDED",
+          "x402 wallet policy delegation depth exceeded",
+          { delegationDepth: gateDelegationDepth, maxDelegationDepth: policyMaxDelegationDepth }
         );
       }
     }
@@ -33151,6 +33226,11 @@ export function createApi({
           }
 
           const includeSpendAuthorizationClaims = Boolean(effectiveQuoteId || resolvedWalletPolicy || gateAgentPassport);
+          const authorityGrantRef = deriveX402AuthorityGrantRef({
+            gateId,
+            gateAgentPassport,
+            gateAuthorization: existingAuthorization
+          });
           const walletPolicyFingerprint =
             resolvedWalletPolicy &&
             typeof resolvedWalletPolicy.policyFingerprint === "string" &&
@@ -33237,10 +33317,7 @@ export function createApi({
                     (typeof gateAgentPassport?.agentKeyId === "string" && gateAgentPassport.agentKeyId.trim() !== ""
                       ? gateAgentPassport.agentKeyId.trim()
                       : payerAgentId) || null,
-                  delegationRef:
-                    typeof gateAgentPassport?.delegationRef === "string" && gateAgentPassport.delegationRef.trim() !== ""
-                      ? gateAgentPassport.delegationRef.trim()
-                      : null,
+                  delegationRef: authorityGrantRef,
                   policyVersion:
                     Number.isSafeInteger(Number(walletIssuerDecisionPayload?.policyVersion)) && Number(walletIssuerDecisionPayload.policyVersion) > 0
                       ? Number(walletIssuerDecisionPayload.policyVersion)
@@ -33269,6 +33346,7 @@ export function createApi({
                 schemaVersion: "X402GateAuthorization.v1",
                 authorizationRef,
                 status: "reserved",
+                authorityGrantRef,
                 walletEscrow: {
                   status: walletEscrowLocked ? "locked" : "unlocked",
                   amountCents,
@@ -33656,6 +33734,16 @@ export function createApi({
               : typeof gate?.quote?.quoteSha256 === "string" && gate.quote.quoteSha256.trim() !== ""
                 ? gate.quote.quoteSha256.trim().toLowerCase()
                 : null;
+          const authorityGrantRef = deriveX402AuthorityGrantRef({
+            gateId,
+            gateAgentPassport: gate?.agentPassport ?? null,
+            gateAuthorization,
+            tokenPayload: tokenPayloadForBindings
+          });
+          const spendAuthorizationSource =
+            tokenPayloadForBindings && typeof tokenPayloadForBindings === "object" && !Array.isArray(tokenPayloadForBindings)
+              ? tokenPayloadForBindings
+              : {};
           const settlementBindings = {
             authorizationRef:
               typeof gateAuthorization?.authorizationRef === "string" && gateAuthorization.authorizationRef.trim() !== ""
@@ -33703,28 +33791,27 @@ export function createApi({
                   }
                 : null,
             spendAuthorization:
-              tokenPayloadForBindings && typeof tokenPayloadForBindings === "object"
+              (tokenPayloadForBindings && typeof tokenPayloadForBindings === "object") || authorityGrantRef
                 ? {
                     spendAuthorizationVersion:
-                      typeof tokenPayloadForBindings.spendAuthorizationVersion === "string"
-                        ? tokenPayloadForBindings.spendAuthorizationVersion
+                      typeof spendAuthorizationSource.spendAuthorizationVersion === "string"
+                        ? spendAuthorizationSource.spendAuthorizationVersion
                         : null,
                     idempotencyKey:
-                      typeof tokenPayloadForBindings.idempotencyKey === "string" ? tokenPayloadForBindings.idempotencyKey : null,
-                    nonce: typeof tokenPayloadForBindings.nonce === "string" ? tokenPayloadForBindings.nonce : null,
-                    sponsorRef: typeof tokenPayloadForBindings.sponsorRef === "string" ? tokenPayloadForBindings.sponsorRef : null,
+                      typeof spendAuthorizationSource.idempotencyKey === "string" ? spendAuthorizationSource.idempotencyKey : null,
+                    nonce: typeof spendAuthorizationSource.nonce === "string" ? spendAuthorizationSource.nonce : null,
+                    sponsorRef: typeof spendAuthorizationSource.sponsorRef === "string" ? spendAuthorizationSource.sponsorRef : null,
                     sponsorWalletRef:
-                      typeof tokenPayloadForBindings.sponsorWalletRef === "string" ? tokenPayloadForBindings.sponsorWalletRef : null,
-                    agentKeyId: typeof tokenPayloadForBindings.agentKeyId === "string" ? tokenPayloadForBindings.agentKeyId : null,
-                    delegationRef:
-                      typeof tokenPayloadForBindings.delegationRef === "string" ? tokenPayloadForBindings.delegationRef : null,
+                      typeof spendAuthorizationSource.sponsorWalletRef === "string" ? spendAuthorizationSource.sponsorWalletRef : null,
+                    agentKeyId: typeof spendAuthorizationSource.agentKeyId === "string" ? spendAuthorizationSource.agentKeyId : null,
+                    delegationRef: authorityGrantRef,
                     policyVersion:
-                      Number.isSafeInteger(Number(tokenPayloadForBindings.policyVersion)) && Number(tokenPayloadForBindings.policyVersion) > 0
-                        ? Number(tokenPayloadForBindings.policyVersion)
+                      Number.isSafeInteger(Number(spendAuthorizationSource.policyVersion)) && Number(spendAuthorizationSource.policyVersion) > 0
+                        ? Number(spendAuthorizationSource.policyVersion)
                         : null,
                     policyFingerprint:
-                      typeof tokenPayloadForBindings.policyFingerprint === "string"
-                        ? tokenPayloadForBindings.policyFingerprint.toLowerCase()
+                      typeof spendAuthorizationSource.policyFingerprint === "string"
+                        ? spendAuthorizationSource.policyFingerprint.toLowerCase()
                         : null
                   }
                 : null,
