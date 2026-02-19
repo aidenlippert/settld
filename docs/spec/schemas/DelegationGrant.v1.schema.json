@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/DelegationGrant.v1.schema.json",
+  "title": "DelegationGrant.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "grantId",
+    "tenantId",
+    "delegatorAgentId",
+    "delegateeAgentId",
+    "scope",
+    "spendLimit",
+    "chainBinding",
+    "validity",
+    "revocation",
+    "createdAt",
+    "grantHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "DelegationGrant.v1" },
+    "grantId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "delegatorAgentId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "delegateeAgentId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedRiskClasses", "sideEffectingAllowed"],
+      "properties": {
+        "allowedProviderIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "allowedToolIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "allowedRiskClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["read", "compute", "action", "financial"]
+          }
+        },
+        "sideEffectingAllowed": { "type": "boolean" }
+      }
+    },
+    "spendLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "maxPerCallCents", "maxTotalCents"],
+      "properties": {
+        "currency": { "type": "string", "minLength": 3, "maxLength": 8 },
+        "maxPerCallCents": { "type": "integer", "minimum": 0 },
+        "maxTotalCents": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "chainBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootGrantHash", "parentGrantHash", "depth", "maxDelegationDepth"],
+      "properties": {
+        "rootGrantHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "parentGrantHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "depth": { "type": "integer", "minimum": 0 },
+        "maxDelegationDepth": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "validity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuedAt", "notBefore", "expiresAt"],
+      "properties": {
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "notBefore": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revocable", "revokedAt", "revocationReasonCode"],
+      "properties": {
+        "revocable": { "type": "boolean" },
+        "revokedAt": { "type": ["string", "null"], "format": "date-time" },
+        "revocationReasonCode": { "type": ["string", "null"], "maxLength": 120 }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "grantHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

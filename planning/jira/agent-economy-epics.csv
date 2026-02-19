@@ -1,0 +1,7 @@
+"Epic Key","Summary","Description","Owner","Priority","Labels"
+"STLD-AE1","Program A: Identity + Delegation Kernel","Portable principal-backed identity and delegated authority chain for autonomous execution.","Backend + Security","Highest","agent-economy,identity,delegation,protocol"
+"STLD-AE2","Program B: Policy + Risk Compiler/Issuer","Deterministic policy and risk decisioning as the only authority to mint spend authorizations.","Backend + Risk","Highest","agent-economy,policy,risk,issuer"
+"STLD-AE3","Program C: Execution Intent + Contract Plane","Canonical intent and machine contracts for quote/auth/execute/settle/reverse cycles.","Backend","Highest","agent-economy,contracts,execution,settlement"
+"STLD-AE4","Program D: Market Resolver + Negotiation","Autonomous policy-aware tool/provider discovery and deterministic negotiation state machines.","Backend + DevEx","High","agent-economy,market,resolver,negotiation"
+"STLD-AE5","Program E: Trust Capital","Outcome-derived reputation and risk-priced capital primitives (credit/insurance).","Backend + Data/Risk","High","agent-economy,reputation,credit,insurance"
+"STLD-AE6","Program F: Compliance + Legal + Physical Adapters","Jurisdiction-aware policy packs and adapter bridges for real-world rails and attestations.","Backend + DevOps + Security","High","agent-economy,compliance,adapters,oracle"

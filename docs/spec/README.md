@@ -44,6 +44,9 @@ These specs are written so an independent implementer can build a verifier witho
 - `ToolCallAgreement.v1.md` — hash-addressable agreement binding a tool call (`callId` + `inputHash`) to settlement terms.
 - `ToolCallEvidence.v1.md` — hash-addressable evidence binding a tool call output (`outputHash`) to an agreement hash.
 - `AgentIdentity.v1.md` — portable autonomous agent identity contract.
+- `AgentPassport.v1.md` — delegated identity envelope binding principal, keyset anchors, delegation root, and policy envelope.
+- `DelegationGrant.v1.md` — deterministic delegated-authority grant contract (scope + spend + chain + validity).
+- `ExecutionIntent.v1.md` — canonical pre-execution intent contract binding request fingerprint, risk profile, and policy/spend envelope.
 - `AgentWallet.v1.md` — deterministic autonomous wallet snapshot contract.
 - `AgentRun.v1.md` — deterministic agent run snapshot contract.
 - `AgentEvent.v1.md` — append-only event envelope for agent runs.

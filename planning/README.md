@@ -35,3 +35,14 @@ If you're asking **"what's still open?"**, start with `planning/STATUS.md` and t
 
 - `planning/sprints/agent-economy-roadmap.md`
   - Long-horizon "agent economy" vision and sequencing (workstreams), not a live execution tracker.
+
+- `planning/sprints/agent-economy-operating-plan.md`
+  - Deep technical program architecture (Programs A-F), dependency graph, invariants, and acceptance gates.
+  - Sequence-based (no date constraints), intended as execution design input.
+
+- `planning/jira/agent-economy-backlog.json`
+  - Jira-shaped epic/ticket backlog for Programs A-F with dependencies and gate criteria.
+  - Input artifact; live open/closed state still belongs in GitHub Issues.
+
+- `planning/jira/agent-economy-epics.csv` + `planning/jira/agent-economy-tickets.csv`
+  - CSV exports of the same Program A-F backlog for quick Jira import.

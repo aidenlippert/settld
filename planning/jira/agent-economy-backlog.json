@@ -1,0 +1,306 @@
+{
+  "epics": [
+    {
+      "Epic Key": "STLD-AE1",
+      "Summary": "Program A: Identity + Delegation Kernel",
+      "Description": "Portable principal-backed identity and delegated authority chain for autonomous execution.",
+      "Owner": "Backend + Security",
+      "Priority": "Highest",
+      "Labels": "agent-economy,identity,delegation,protocol"
+    },
+    {
+      "Epic Key": "STLD-AE2",
+      "Summary": "Program B: Policy + Risk Compiler/Issuer",
+      "Description": "Deterministic policy and risk decisioning as the only authority to mint spend authorizations.",
+      "Owner": "Backend + Risk",
+      "Priority": "Highest",
+      "Labels": "agent-economy,policy,risk,issuer"
+    },
+    {
+      "Epic Key": "STLD-AE3",
+      "Summary": "Program C: Execution Intent + Contract Plane",
+      "Description": "Canonical intent and machine contracts for quote/auth/execute/settle/reverse cycles.",
+      "Owner": "Backend",
+      "Priority": "Highest",
+      "Labels": "agent-economy,contracts,execution,settlement"
+    },
+    {
+      "Epic Key": "STLD-AE4",
+      "Summary": "Program D: Market Resolver + Negotiation",
+      "Description": "Autonomous policy-aware tool/provider discovery and deterministic negotiation state machines.",
+      "Owner": "Backend + DevEx",
+      "Priority": "High",
+      "Labels": "agent-economy,market,resolver,negotiation"
+    },
+    {
+      "Epic Key": "STLD-AE5",
+      "Summary": "Program E: Trust Capital",
+      "Description": "Outcome-derived reputation and risk-priced capital primitives (credit/insurance).",
+      "Owner": "Backend + Data/Risk",
+      "Priority": "High",
+      "Labels": "agent-economy,reputation,credit,insurance"
+    },
+    {
+      "Epic Key": "STLD-AE6",
+      "Summary": "Program F: Compliance + Legal + Physical Adapters",
+      "Description": "Jurisdiction-aware policy packs and adapter bridges for real-world rails and attestations.",
+      "Owner": "Backend + DevOps + Security",
+      "Priority": "High",
+      "Labels": "agent-economy,compliance,adapters,oracle"
+    }
+  ],
+  "tickets": [
+    {
+      "Ticket Key": "STLD-AE101",
+      "Epic Key": "STLD-AE1",
+      "Summary": "Add AgentPassport.v1 protocol object and schema",
+      "Description": "Formalize principal-backed agent identity envelope with delegation root, key anchors, and policy envelope hints.",
+      "Owner": "Backend",
+      "Estimate": "S",
+      "Priority": "Highest",
+      "Dependencies": "",
+      "Labels": "protocol,identity",
+      "Acceptance Criteria": "Spec + schema merged; examples validate; object hash/signing rules documented with strict null/optional semantics."
+    },
+    {
+      "Ticket Key": "STLD-AE102",
+      "Epic Key": "STLD-AE1",
+      "Summary": "Implement delegation lineage resolver",
+      "Description": "Resolve effective authority from root->leaf grants with depth, expiry, and revocation checks.",
+      "Owner": "Backend",
+      "Estimate": "L",
+      "Priority": "Highest",
+      "Dependencies": "STLD-AE101",
+      "Labels": "delegation,authorization",
+      "Acceptance Criteria": "Deterministic lineage resolution for same snapshot; explicit failure codes for revoked/expired/depth violations."
+    },
+    {
+      "Ticket Key": "STLD-AE103",
+      "Epic Key": "STLD-AE1",
+      "Summary": "Bind delegation refs into decision/receipt artifacts",
+      "Description": "Persist delegation root/effective grant refs so historical accountability survives runtime drift.",
+      "Owner": "Backend",
+      "Estimate": "M",
+      "Priority": "Highest",
+      "Dependencies": "STLD-AE102",
+      "Labels": "receipts,audit",
+      "Acceptance Criteria": "Decision + receipt bindings include stable delegation refs and pass offline verification replay."
+    },
+    {
+      "Ticket Key": "STLD-AE201",
+      "Epic Key": "STLD-AE2",
+      "Summary": "Add ExecutionIntent.v1 protocol object and schema",
+      "Description": "Create canonical pre-execution intent with request fingerprint, risk profile, spend bounds, and policy binding.",
+      "Owner": "Backend",
+      "Estimate": "S",
+      "Priority": "Highest",
+      "Dependencies": "STLD-AE102",
+      "Labels": "protocol,intent,risk",
+      "Acceptance Criteria": "Spec + schema merged; intent hash rules are deterministic and test vectors exist for canonicalization edge cases."
+    },
+    {
+      "Ticket Key": "STLD-AE202",
+      "Epic Key": "STLD-AE2",
+      "Summary": "Implement policy compiler and deterministic decision hash",
+      "Description": "Compile policy packs into executable constraints and emit deterministic decision fingerprints.",
+      "Owner": "Backend",
+      "Estimate": "L",
+      "Priority": "Highest",
+      "Dependencies": "STLD-AE201",
+      "Labels": "policy,determinism",
+      "Acceptance Criteria": "Identical policy+intent input emits byte-equivalent decision records and stable evaluation hashes."
+    },
+    {
+      "Ticket Key": "STLD-AE203",
+      "Epic Key": "STLD-AE2",
+      "Summary": "Gate authorize-payment on issuer decision for all wallet-bound flows",
+      "Description": "Enforce issuer as sole mint authority and reject bypass paths.",
+      "Owner": "Backend",
+      "Estimate": "M",
+      "Priority": "Highest",
+      "Dependencies": "STLD-AE202",
+      "Labels": "security,issuer",
+      "Acceptance Criteria": "All wallet-bound authorize paths fail without valid decision token; replay semantics remain idempotent."
+    },
+    {
+      "Ticket Key": "STLD-AE301",
+      "Epic Key": "STLD-AE3",
+      "Summary": "Define WorkContract.v1 protocol",
+      "Description": "Standardize obligations, milestones, settlement terms, and dispute venue for agent work contracts.",
+      "Owner": "Backend + PM",
+      "Estimate": "M",
+      "Priority": "High",
+      "Dependencies": "STLD-AE203",
+      "Labels": "contracts,protocol",
+      "Acceptance Criteria": "Work contract schema supports milestone payment and dispute linkage without ambiguous state transitions."
+    },
+    {
+      "Ticket Key": "STLD-AE302",
+      "Epic Key": "STLD-AE3",
+      "Summary": "Implement contract milestone state machine",
+      "Description": "Add append-only milestone transitions with deterministic settle/reverse semantics.",
+      "Owner": "Backend",
+      "Estimate": "L",
+      "Priority": "High",
+      "Dependencies": "STLD-AE301",
+      "Labels": "state-machine,settlement",
+      "Acceptance Criteria": "Milestone transitions are replay-safe; duplicate submissions do not double-settle."
+    },
+    {
+      "Ticket Key": "STLD-AE303",
+      "Epic Key": "STLD-AE3",
+      "Summary": "Require strict request binding for side-effect contracts",
+      "Description": "Enforce request fingerprint matching for action/financial class contract calls.",
+      "Owner": "Backend + Provider Kit",
+      "Estimate": "M",
+      "Priority": "High",
+      "Dependencies": "STLD-AE302",
+      "Labels": "security,request-binding",
+      "Acceptance Criteria": "Mutated request replay is rejected with stable code; read/compute backward compatibility remains intact."
+    },
+    {
+      "Ticket Key": "STLD-AE401",
+      "Epic Key": "STLD-AE4",
+      "Summary": "Implement marketplace resolver endpoint",
+      "Description": "Add policy-aware `resolve` API for tool/provider selection by intent, budget, and risk constraints.",
+      "Owner": "Backend",
+      "Estimate": "L",
+      "Priority": "High",
+      "Dependencies": "STLD-AE203",
+      "Labels": "resolver,marketplace",
+      "Acceptance Criteria": "Resolver excludes uncertified/incompatible options by default and returns deterministic ranked results."
+    },
+    {
+      "Ticket Key": "STLD-AE402",
+      "Epic Key": "STLD-AE4",
+      "Summary": "Expose resolver as MCP tool",
+      "Description": "Allow agent runtimes to call Settld resolver directly through MCP surfaces.",
+      "Owner": "DevEx + Backend",
+      "Estimate": "S",
+      "Priority": "High",
+      "Dependencies": "STLD-AE401",
+      "Labels": "mcp,resolver",
+      "Acceptance Criteria": "MCP tool returns machine-usable ranked options with trust bindings and policy compatibility flags."
+    },
+    {
+      "Ticket Key": "STLD-AE403",
+      "Epic Key": "STLD-AE4",
+      "Summary": "Implement negotiation thread protocol and API",
+      "Description": "Add offer/counter/accept/abort deterministic thread state machine.",
+      "Owner": "Backend",
+      "Estimate": "L",
+      "Priority": "Medium",
+      "Dependencies": "STLD-AE401",
+      "Labels": "negotiation,protocol",
+      "Acceptance Criteria": "Thread replay reproduces final state exactly; invalid transitions return stable reject codes."
+    },
+    {
+      "Ticket Key": "STLD-AE501",
+      "Epic Key": "STLD-AE5",
+      "Summary": "Compute reputation deltas from verified outcomes only",
+      "Description": "Build reputation pipeline from receipt/outcome proofs; exclude unverifiable signals.",
+      "Owner": "Backend + Data/Risk",
+      "Estimate": "L",
+      "Priority": "High",
+      "Dependencies": "STLD-AE302",
+      "Labels": "reputation,trust",
+      "Acceptance Criteria": "All reputation events contain source receipt ids; no mutation occurs without verifiable evidence chain."
+    },
+    {
+      "Ticket Key": "STLD-AE502",
+      "Epic Key": "STLD-AE5",
+      "Summary": "Implement credit decision service",
+      "Description": "Issue bounded credit lines based on policy + verified reliability metrics.",
+      "Owner": "Backend + Risk",
+      "Estimate": "XL",
+      "Priority": "Medium",
+      "Dependencies": "STLD-AE501",
+      "Labels": "credit,underwriting",
+      "Acceptance Criteria": "Credit decisions are reproducible and include machine-readable rationale bindings to input evidence snapshots."
+    },
+    {
+      "Ticket Key": "STLD-AE503",
+      "Epic Key": "STLD-AE5",
+      "Summary": "Implement insurance claim evidence workflow",
+      "Description": "Add claim intake/decision path bound to outcome and contract evidence.",
+      "Owner": "Backend",
+      "Estimate": "L",
+      "Priority": "Medium",
+      "Dependencies": "STLD-AE302",
+      "Labels": "insurance,claims",
+      "Acceptance Criteria": "Claim decisions are append-only, explainable, and bound to contract+receipt references."
+    },
+    {
+      "Ticket Key": "STLD-AE601",
+      "Epic Key": "STLD-AE6",
+      "Summary": "Define compliance decision protocol and policy packs",
+      "Description": "Add jurisdiction-aware compliance decision object and policy pack schema.",
+      "Owner": "Backend + Security",
+      "Estimate": "L",
+      "Priority": "High",
+      "Dependencies": "STLD-AE202",
+      "Labels": "compliance,protocol",
+      "Acceptance Criteria": "Compliance decisions are deterministic, exportable, and include rule-level explainability fields."
+    },
+    {
+      "Ticket Key": "STLD-AE602",
+      "Epic Key": "STLD-AE6",
+      "Summary": "Implement oracle attestation adapter quorum",
+      "Description": "Add pluggable oracle adapter with quorum policy for real-world completion signals.",
+      "Owner": "Backend + DevOps",
+      "Estimate": "L",
+      "Priority": "Medium",
+      "Dependencies": "STLD-AE302",
+      "Labels": "oracle,attestation",
+      "Acceptance Criteria": "Oracle disagreement follows deterministic quorum/fail-closed outcomes and is receipt-event traceable."
+    },
+    {
+      "Ticket Key": "STLD-AE603",
+      "Epic Key": "STLD-AE6",
+      "Summary": "Add physical rail adapters as certified tool contracts",
+      "Description": "Model payout/procurement/card flows as certified provider adapters instead of bespoke runtime paths.",
+      "Owner": "Backend + DevEx",
+      "Estimate": "L",
+      "Priority": "Medium",
+      "Dependencies": "STLD-AE401,STLD-AE601",
+      "Labels": "adapters,payout,procurement",
+      "Acceptance Criteria": "Each adapter passes conformance and produces standard receipt/decision/reversal evidence with no privileged bypass channels."
+    }
+  ],
+  "dependencyGraph": [
+    "STLD-AE1 -> STLD-AE2 -> STLD-AE3 -> STLD-AE4 -> STLD-AE5 -> STLD-AE6",
+    "Cross-cutting: observability + conformance expansion across all epics"
+  ],
+  "programAcceptanceGates": {
+    "STLD-AE1": [
+      "delegation chain replay determinism",
+      "revocation effectiveness",
+      "rotation-safe historical verification"
+    ],
+    "STLD-AE2": [
+      "deterministic policy decision hash",
+      "issuer-only wallet-bound authorization",
+      "idempotent decision replay"
+    ],
+    "STLD-AE3": [
+      "exactly-once milestone settlement under retries",
+      "strict side-effect request binding",
+      "offline contract evidence reconstruction"
+    ],
+    "STLD-AE4": [
+      "policy-aware deterministic ranking",
+      "certified-only default discovery",
+      "negotiation state machine replay safety"
+    ],
+    "STLD-AE5": [
+      "reputation sourced only from verified outcomes",
+      "reproducible credit decisions",
+      "claims evidence completeness"
+    ],
+    "STLD-AE6": [
+      "explainable compliance decisions",
+      "oracle quorum determinism",
+      "adapter conformance without bypass"
+    ]
+  }
+}

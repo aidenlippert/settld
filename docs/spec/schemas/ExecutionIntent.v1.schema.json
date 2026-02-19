@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://settld.local/schemas/ExecutionIntent.v1.schema.json",
+  "title": "ExecutionIntent.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "intentId",
+    "tenantId",
+    "agentId",
+    "requestFingerprint",
+    "riskProfile",
+    "spendBounds",
+    "policyBinding",
+    "idempotencyKey",
+    "nonce",
+    "expiresAt",
+    "createdAt",
+    "intentHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ExecutionIntent.v1" },
+    "intentId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "agentId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "runId": { "type": "string", "maxLength": 200 },
+    "agreementHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "quoteId": { "type": "string", "maxLength": 200 },
+    "requestFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalization", "method", "path", "querySha256", "bodySha256", "requestSha256"],
+      "properties": {
+        "canonicalization": { "const": "rfc8785-jcs" },
+        "method": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "querySha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bodySha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "requestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "riskProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskClass", "sideEffecting", "expectedDeterminism", "maxLossCents", "requiresHumanApproval"],
+      "properties": {
+        "riskClass": { "type": "string", "enum": ["read", "compute", "action", "financial"] },
+        "sideEffecting": { "type": "boolean" },
+        "expectedDeterminism": {
+          "type": "string",
+          "enum": ["deterministic", "bounded_nondeterministic", "open_nondeterministic"]
+        },
+        "maxLossCents": { "type": "integer", "minimum": 0 },
+        "requiresHumanApproval": { "type": "boolean" }
+      }
+    },
+    "spendBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "maxAmountCents"],
+      "properties": {
+        "currency": { "type": "string", "minLength": 3, "maxLength": 8 },
+        "maxAmountCents": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "policyBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyId", "policyVersion", "policyHash", "verificationMethodHash"],
+      "properties": {
+        "policyId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "policyVersion": { "type": "integer", "minimum": 1 },
+        "policyHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "verificationMethodHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "nonce": { "type": "string", "minLength": 8, "maxLength": 256 },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "metadata": { "type": "object", "additionalProperties": true },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "intentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
