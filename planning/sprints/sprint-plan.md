@@ -180,25 +180,3 @@ For current status, use `planning/STATUS.md` and the evidence trackers it links.
 1. Run S1 kickoff against the archived export `planning/jira/backlog.2026-02-14.pre-post-hn.json` tickets `STLD-T101` to `STLD-T107` and `STLD-T131` to `STLD-T148`.
 2. Establish weekly operating review: Product, Reliability, Revenue dashboards.
 3. Set release readiness checkpoint at end of S2 and S3 to protect S4 launch confidence.
-
-## Sprint E: Multi-Agent Operating System (1 week)
-
-Window: 2026-02-19 to 2026-02-26
-
-Goals:
-
-1. Stand up the 8-agent operating model with hard path ownership.
-2. Install reusable prompt templates and handoff contracts.
-3. Add planning artifacts that make weekly execution measurable.
-
-Success metrics:
-
-- `weekly_goals_shipped_rate >= 0.8`
-- `critical_path_blockers_open <= 2`
-- `all_agent_handoffs_include_validation = true`
-
-Exit criteria:
-
-- `planning/ownership/agent-roster.md` merged
-- `planning/ownership/prompts/*` merged
-- Jira artifacts include STLD-EE epic and STLD-TE1..TE8 tickets
