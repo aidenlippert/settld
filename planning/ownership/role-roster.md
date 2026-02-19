@@ -67,3 +67,15 @@
 - Policy/delegation control plane: Frontend + Backend.
 - SDK adoption and onboarding: SDK/DevEx + PM.
 - Pilot conversion and monetization: GTM + PM.
+
+## AI agent operating roster (v1)
+
+Primary execution roster is defined in `planning/ownership/agent-roster.md`.
+Prompt templates for each role live under `planning/ownership/prompts/`.
+
+Current execution order:
+
+1. Kernel-Protocol + API-Control (correctness and contracts)
+2. Provider-Ecosystem + MCP-Integration (supply and activation)
+3. Reliability-DevOps + QA-Security (release confidence)
+4. GTM-Docs + CEO-Orchestrator (adoption and weekly prioritization)
