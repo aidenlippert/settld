@@ -31,14 +31,6 @@
       "Owner": "Backend + DevOps",
       "Priority": "High",
       "Labels": "hardening,reliability,operability"
-    },
-    {
-      "Epic Key": "STLD-EE",
-      "Summary": "Sprint E: Multi-Agent Operating System (1 week)",
-      "Description": "2026-02-19 (Thu) to 2026-02-26 (Thu). Operationalize an 8-agent company model with strict ownership, prompt templates, and measurable execution cadence.",
-      "Owner": "CEO-Orchestrator + CTO",
-      "Priority": "High",
-      "Labels": "multi-agent,operating-model,execution"
     }
   ],
   "tickets": [
@@ -249,110 +241,6 @@
       "Dependencies": "",
       "Labels": "keys,security,ops",
       "Acceptance Criteria": "Docs describe key storage for local and hosted deployments; a rotation procedure exists; and rotation has been executed at least once in a test environment with recorded steps."
-    },
-    {
-      "Ticket Key": "STLD-TE1",
-      "Epic Key": "STLD-EE",
-      "Summary": "Publish agent roster with path ownership and KPIs",
-      "Description": "Create a concrete 8-agent company roster with strict repository ownership boundaries, mission, KPIs, and escalation paths.",
-      "Owner": "CEO-Orchestrator",
-      "Estimate": "0.5d",
-      "Priority": "High",
-      "Sprint": "E",
-      "Dependencies": "",
-      "Labels": "planning,ownership,multi-agent",
-      "Acceptance Criteria": "`planning/ownership/agent-roster.md` defines 8 agents, owned paths, KPI per agent, and escalation map."
-    },
-    {
-      "Ticket Key": "STLD-TE2",
-      "Epic Key": "STLD-EE",
-      "Summary": "Ship role prompt templates for all execution agents",
-      "Description": "Add reusable prompt templates with objective, scope boundaries, constraints, validation, and output contract for each role.",
-      "Owner": "CEO-Orchestrator + PM",
-      "Estimate": "1d",
-      "Priority": "High",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE1",
-      "Labels": "planning,prompts,multi-agent",
-      "Acceptance Criteria": "`planning/ownership/prompts/` contains templates for CEO-Orchestrator, Kernel-Protocol, API-Control, Provider-Ecosystem, MCP-Integration, Reliability-DevOps, QA-Security, and GTM-Docs."
-    },
-    {
-      "Ticket Key": "STLD-TE3",
-      "Epic Key": "STLD-EE",
-      "Summary": "Enforce path ownership and handoff packet format",
-      "Description": "Define and enforce non-overlapping write ownership and mandatory handoff packets for cross-agent work.",
-      "Owner": "CTO + QA-Security",
-      "Estimate": "1d",
-      "Priority": "High",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE1",
-      "Labels": "governance,ownership,quality",
-      "Acceptance Criteria": "Rosters and templates explicitly require scope, contract changes, test evidence, rollback, and open risks in every handoff."
-    },
-    {
-      "Ticket Key": "STLD-TE4",
-      "Epic Key": "STLD-EE",
-      "Summary": "Define weekly operating cadence and go/no-go checklist",
-      "Description": "Install weekly planning/execution/review rhythm and explicit release gate checklist for multi-agent execution.",
-      "Owner": "CEO-Orchestrator",
-      "Estimate": "0.5d",
-      "Priority": "Medium",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE1",
-      "Labels": "operations,cadence,release",
-      "Acceptance Criteria": "`planning/sprints/sprint-plan.md` includes Sprint E goals, metrics, and exit criteria for the multi-agent model."
-    },
-    {
-      "Ticket Key": "STLD-TE5",
-      "Epic Key": "STLD-EE",
-      "Summary": "Add scoreboard metrics for agent-company execution",
-      "Description": "Track four company-level metrics to judge whether the agent organization is improving product outcomes.",
-      "Owner": "PM + DevOps",
-      "Estimate": "1d",
-      "Priority": "Medium",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE4",
-      "Labels": "metrics,scoreboard,ops",
-      "Acceptance Criteria": "Scoreboard includes time-to-first-paid-call, certified tools added weekly, reserve fail rate, and settlement success rate."
-    },
-    {
-      "Ticket Key": "STLD-TE6",
-      "Epic Key": "STLD-EE",
-      "Summary": "Run manager-plus-workers parallel execution smoke",
-      "Description": "Execute at least one orchestrated run where manager delegates to two workers in parallel and captures handoffs/results.",
-      "Owner": "CEO-Orchestrator + QA-Security",
-      "Estimate": "0.5d",
-      "Priority": "Medium",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE2",
-      "Labels": "multi-agent,parallel,smoke",
-      "Acceptance Criteria": "One recorded run proves parallel assignment, independent outputs, and successful closure of both worker tasks."
-    },
-    {
-      "Ticket Key": "STLD-TE7",
-      "Epic Key": "STLD-EE",
-      "Summary": "Map existing subagents to new roster",
-      "Description": "Align existing planning subagent definitions with the new 8-agent execution roster and update references.",
-      "Owner": "PM + Tech Lead",
-      "Estimate": "0.5d",
-      "Priority": "Medium",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE1",
-      "Labels": "planning,alignment,subagents",
-      "Acceptance Criteria": "`planning/ownership/role-roster.md` references the new roster and prompt template locations."
-    },
-    {
-      "Ticket Key": "STLD-TE8",
-      "Epic Key": "STLD-EE",
-      "Summary": "Publish contributor guide for agent execution model",
-      "Description": "Document how humans and agents collaborate in this model, including boundaries, handoff format, and acceptance expectations.",
-      "Owner": "GTM-Docs",
-      "Estimate": "1d",
-      "Priority": "Medium",
-      "Sprint": "E",
-      "Dependencies": "STLD-TE2",
-      "Labels": "docs,contributors,operations",
-      "Acceptance Criteria": "Contributor docs describe how to request work from each role and what constitutes a complete handoff."
     }
   ]
 }
