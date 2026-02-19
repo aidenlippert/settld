@@ -39,8 +39,24 @@ function parseArgs(argv) {
   return out;
 }
 
+function assertProbeEnv() {
+  const apiKey = process.env.SETTLD_API_KEY;
+  if (typeof apiKey === "string" && apiKey.trim() !== "") return;
+  throw new Error(
+    [
+      "[mcp:probe] missing required env var: SETTLD_API_KEY",
+      "Set env and retry:",
+      "  export SETTLD_BASE_URL=http://127.0.0.1:3000",
+      "  export SETTLD_TENANT_ID=tenant_default",
+      "  export SETTLD_API_KEY='sk_live_or_sk_test_keyid.secret'",
+      "Docs: docs/QUICKSTART_MCP.md"
+    ].join("\n")
+  );
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  assertProbeEnv();
 
   const child = spawn(process.execPath, ["scripts/mcp/settld-mcp-server.mjs"], {
     cwd: process.cwd(),
@@ -51,6 +67,16 @@ async function main() {
   child.stdout.setEncoding("utf8");
   let buf = "";
   const pending = new Map();
+  let shuttingDown = false;
+
+  child.on("exit", (code, signal) => {
+    if (shuttingDown) return;
+    const reason = `mcp server exited before probe completed (code=${code ?? "null"} signal=${signal ?? ""})`;
+    for (const { reject } of pending.values()) {
+      reject(new Error(reason));
+    }
+    pending.clear();
+  });
 
   function onLine(line) {
     let msg = null;
@@ -91,6 +117,9 @@ async function main() {
   const timeoutMs = Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0 ? Math.floor(timeoutMsRaw) : 30_000;
 
   function rpc(method, params) {
+    if (child.exitCode !== null) {
+      throw new Error(`cannot call ${method}: mcp server already exited (code=${child.exitCode})`);
+    }
     const id = String(Math.random()).slice(2);
     const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     child.stdin.write(payload + "\n");
@@ -131,11 +160,13 @@ async function main() {
     process.stdout.write(JSON.stringify(called, null, 2) + "\n");
   }
 
+  shuttingDown = true;
   child.kill("SIGTERM");
   await Promise.race([sleep(50), new Promise((r) => child.once("exit", r))]);
 }
 
 main().catch((err) => {
-  process.stderr.write(String(err?.stack || err?.message || err) + "\n");
+  const message = typeof err?.message === "string" ? err.message : String(err);
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });
