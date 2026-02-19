@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import net from "node:net";
+import { spawn, spawnSync } from "node:child_process";
 
 import { createEd25519Keypair, keyIdFromPublicKeyPem } from "../../src/core/crypto.js";
 import { createChainedEvent, finalizeChainedEvent } from "../../src/core/event-chain.js";
@@ -60,6 +61,51 @@ async function httpJson({ baseUrl, method, path, headers, body }) {
   const text = await res.text();
   const json = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : null;
   return { status: res.status, json, text, headers: res.headers };
+}
+
+async function pickPort() {
+  return await new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.listen(0, "127.0.0.1", () => {
+      const addr = s.address();
+      if (!addr || typeof addr === "string") {
+        s.close();
+        reject(new Error("unexpected server address"));
+        return;
+      }
+      const port = addr.port;
+      s.close((err) => {
+        if (err) reject(err);
+        else resolve(port);
+      });
+    });
+    s.on("error", reject);
+  });
+}
+
+function spawnNodeProcess(scriptPath, { name, env }) {
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd: process.cwd(),
+    env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let logs = "";
+  const append = (chunk) => {
+    logs += String(chunk ?? "");
+    if (logs.length > 64_000) logs = logs.slice(-64_000);
+  };
+  child.stdout?.on("data", append);
+  child.stderr?.on("data", append);
+  child.on("exit", (code, signal) => {
+    if (code === 0 || signal === "SIGTERM") return;
+    // eslint-disable-next-line no-console
+    console.error(`[acceptance] ${name} exited unexpectedly (code=${code ?? "null"} signal=${signal ?? ""})`);
+  });
+  return {
+    child,
+    name,
+    logs: () => logs
+  };
 }
 
 async function writeArtifactFile(name, contents) {
@@ -249,6 +295,110 @@ async function main() {
     });
     assert.equal(gateGet.status, 200, gateGet.text);
     assert.equal(String(gateGet.json?.gate?.gateId ?? ""), gateId);
+  }
+
+  // Gateway proxy smoke: upstream 402 -> gate create -> paid retry -> verify + settlement headers.
+  {
+    const upstreamPort = await pickPort();
+    const gatewayPort = await pickPort();
+    const apiKeyForGateway = `${createKey.json.keyId}.${createKey.json.secret}`;
+    const upstreamUrl = `http://127.0.0.1:${upstreamPort}/`;
+    const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
+
+    const services = [];
+    try {
+      const upstream = spawnNodeProcess("services/x402-gateway/examples/upstream-mock.js", {
+        name: "upstream-mock",
+        env: {
+          ...process.env,
+          PORT: String(upstreamPort),
+          BIND_HOST: "127.0.0.1",
+          SETTLD_PAY_KEYSET_URL: `${API_BASE_URL}/.well-known/settld-keys.json`
+        }
+      });
+      services.push(upstream);
+      await waitFor(async () => {
+        const r = await httpJson({ baseUrl: `http://127.0.0.1:${upstreamPort}`, method: "GET", path: "/healthz" }).catch(() => null);
+        return r && r.status === 200;
+      });
+
+      const gateway = spawnNodeProcess("services/x402-gateway/src/server.js", {
+        name: "x402-gateway",
+        env: {
+          ...process.env,
+          PORT: String(gatewayPort),
+          BIND_HOST: "127.0.0.1",
+          SETTLD_API_URL: API_BASE_URL,
+          SETTLD_API_KEY: apiKeyForGateway,
+          UPSTREAM_URL: upstreamUrl,
+          X402_AUTOFUND: "1"
+        }
+      });
+      services.push(gateway);
+      await waitFor(async () => {
+        const r = await httpJson({ baseUrl: gatewayUrl, method: "GET", path: "/healthz" }).catch(() => null);
+        return r && r.status === 200;
+      });
+
+      const first = await httpJson({
+        baseUrl: gatewayUrl,
+        method: "GET",
+        path: "/exa/search?q=acceptance+gateway+smoke",
+        headers: { "x-proxy-tenant-id": TENANT_ID }
+      });
+      assert.equal(first.status, 402, first.text);
+      const gateId = String(first.headers.get("x-settld-gate-id") ?? "").trim();
+      assert.ok(gateId, "gateway response missing x-settld-gate-id");
+
+      const paid = await httpJson({
+        baseUrl: gatewayUrl,
+        method: "GET",
+        path: "/exa/search?q=acceptance+gateway+smoke",
+        headers: { "x-proxy-tenant-id": TENANT_ID, "x-settld-gate-id": gateId }
+      });
+      assert.equal(paid.status, 200, paid.text);
+      const settlementStatus = String(paid.headers.get("x-settld-settlement-status") ?? "").toLowerCase();
+      assert.ok(settlementStatus === "released" || settlementStatus === "resolved", `unexpected settlement status: ${settlementStatus}`);
+
+      const gate = await httpJson({
+        baseUrl: API_BASE_URL,
+        method: "GET",
+        path: `/x402/gate/${gateId}`,
+        headers: headersBase
+      });
+      assert.equal(gate.status, 200, gate.text);
+      assert.equal(String(gate.json?.gate?.gateId ?? ""), gateId);
+      assert.equal(String(gate.json?.gate?.status ?? "").toLowerCase(), "resolved");
+
+      await writeArtifactFile(
+        "x402-gateway-smoke.json",
+        JSON.stringify(
+          {
+            ok: true,
+            upstreamPort,
+            gatewayPort,
+            gateId,
+            firstStatus: first.status,
+            paidStatus: paid.status,
+            settlementStatus: paid.headers.get("x-settld-settlement-status") ?? null
+          },
+          null,
+          2
+        )
+      );
+    } finally {
+      for (const svc of services.reverse()) {
+        if (!svc?.child || svc.child.exitCode !== null) continue;
+        svc.child.kill("SIGTERM");
+        await Promise.race([
+          new Promise((resolve) => svc.child.once("exit", resolve)),
+          sleep(750).then(() => {
+            if (svc.child.exitCode === null) svc.child.kill("SIGKILL");
+          })
+        ]);
+        await writeArtifactFile(`x402-gateway-smoke.${svc.name}.log`, svc.logs());
+      }
+    }
   }
 
   // Robot setup

@@ -26,3 +26,4 @@ This folder is the “send to prospects” kit for running a paid pilot:
 - `rfp-clause.md` — draft procurement / RFP language.
 - `roi-calculator-template.csv` — simple template for pilot ROI tracking.
 - `gtm-pilot-playbook.md` — outreach templates, pilot KPI gates, and case-study format.
+- `PILOT_PACKAGE_SCORECARD_X402.md` — default x402 pilot package, baseline/target scorecard, and expansion triggers.

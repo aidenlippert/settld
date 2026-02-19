@@ -2534,6 +2534,40 @@ export function createApi({
           // Ignore: proof triggers are best-effort; proof events are derived and idempotent.
         }
       }
+      if (op.kind === "X402_RECEIPT_PUT") {
+        const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+        const receipt =
+          op.receipt && typeof op.receipt === "object" && !Array.isArray(op.receipt) ? op.receipt : null;
+        const receiptId =
+          typeof op.receiptId === "string" && op.receiptId.trim() !== ""
+            ? op.receiptId.trim()
+            : typeof receipt?.receiptId === "string" && receipt.receiptId.trim() !== ""
+              ? receipt.receiptId.trim()
+              : null;
+        if (!receipt || !receiptId) continue;
+        const financeRow = toX402FinanceReceiptExportRow(receipt);
+        if (!financeRow) continue;
+        derivedOutbox.push({
+          type: "NOTIFY_FINANCE_X402_RECEIPT_RECORDED",
+          tenantId,
+          aggregateType: "x402_receipt",
+          aggregateId: receiptId,
+          at: nowIso(),
+          receiptId,
+          gateId: financeRow.gateId ?? null,
+          runId: financeRow.runId ?? null,
+          payer: financeRow.payer ?? null,
+          payee: financeRow.payee ?? null,
+          amountCents: financeRow.amountCents ?? 0,
+          currency: financeRow.currency ?? "USD",
+          settlementState: financeRow.settlementState ?? null,
+          disputeStatus: financeRow.disputeStatus ?? "none",
+          policyHash: financeRow.policyHash ?? null,
+          decisionHash: financeRow.decisionHash ?? null,
+          policyDecisionHash: financeRow.policyDecisionHash ?? null,
+          settledAt: financeRow.settledAt ?? null
+        });
+      }
     }
 
     function attachRequestId(record) {
@@ -7010,6 +7044,136 @@ export function createApi({
         releasedCents,
         refundedCents,
         netSettledCents: releasedCents - refundedCents
+      },
+      { path: "$" }
+    );
+  }
+
+  function csvEscapeCell(value) {
+    const text = value === null || value === undefined ? "" : String(value);
+    if (text.includes('"') || text.includes(",") || text.includes("\n") || text.includes("\r")) {
+      return `"${text.replaceAll('"', '""')}"`;
+    }
+    return text;
+  }
+
+  function parseX402FinanceExportWindow(url) {
+    const parseBound = (rawValue, fallbackValue, fieldName) => {
+      const selected = rawValue ?? fallbackValue;
+      if (selected === null || selected === undefined || String(selected).trim() === "") {
+        throw new TypeError(`${fieldName} is required`);
+      }
+      const text = String(selected).trim();
+      if (!Number.isFinite(Date.parse(text))) throw new TypeError(`${fieldName} must be an ISO date-time`);
+      return new Date(text).toISOString();
+    };
+    const startAt = parseBound(
+      url.searchParams.get("startAt") ?? url.searchParams.get("start"),
+      url.searchParams.get("from"),
+      "startAt"
+    );
+    const endAt = parseBound(
+      url.searchParams.get("endAt") ?? url.searchParams.get("end"),
+      url.searchParams.get("to"),
+      "endAt"
+    );
+    if (Date.parse(startAt) > Date.parse(endAt)) {
+      throw new TypeError("startAt must be <= endAt");
+    }
+    return { startAt, endAt };
+  }
+
+  function deriveX402FinanceDisputeStatus(receipt) {
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return "none";
+    const reversal =
+      receipt.reversal && typeof receipt.reversal === "object" && !Array.isArray(receipt.reversal) ? receipt.reversal : null;
+    const reversalAction = typeof reversal?.action === "string" ? reversal.action.trim().toLowerCase() : "";
+    const providerDecision = typeof reversal?.providerDecision === "string" ? reversal.providerDecision.trim().toLowerCase() : "";
+    const settlementState = typeof receipt.settlementState === "string" ? receipt.settlementState.trim().toLowerCase() : "";
+    if (reversalAction === "request_refund" && !providerDecision) return "open";
+    if (reversalAction === "resolve_refund" && (providerDecision === "accepted" || providerDecision === "denied")) {
+      return "closed";
+    }
+    if (settlementState === "refunded") return "closed";
+    return "none";
+  }
+
+  function toX402FinanceReceiptExportRow(receipt) {
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return null;
+    const settlementReceipt =
+      receipt.settlementReceipt && typeof receipt.settlementReceipt === "object" && !Array.isArray(receipt.settlementReceipt)
+        ? receipt.settlementReceipt
+        : null;
+    const decisionRecord =
+      receipt.decisionRecord && typeof receipt.decisionRecord === "object" && !Array.isArray(receipt.decisionRecord)
+        ? receipt.decisionRecord
+        : null;
+    const policyDecisionFingerprint =
+      receipt?.bindings?.policyDecisionFingerprint &&
+      typeof receipt.bindings.policyDecisionFingerprint === "object" &&
+      !Array.isArray(receipt.bindings.policyDecisionFingerprint)
+        ? receipt.bindings.policyDecisionFingerprint
+        : null;
+    const amountCents = Number(settlementReceipt?.amountCents ?? 0);
+    const normalizedAmountCents = Number.isSafeInteger(amountCents) ? amountCents : 0;
+    const disputeStatus = deriveX402FinanceDisputeStatus(receipt);
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402FinanceReceiptExportRow.v1",
+        receiptId: receipt.receiptId ?? null,
+        gateId: receipt.gateId ?? null,
+        runId: receipt.runId ?? null,
+        payer: receipt.payerAgentId ?? null,
+        payee: receipt.providerId ?? null,
+        amountCents: normalizedAmountCents,
+        currency:
+          typeof settlementReceipt?.currency === "string" && settlementReceipt.currency.trim() !== ""
+            ? settlementReceipt.currency.trim().toUpperCase()
+            : "USD",
+        settlementState: receipt.settlementState ?? null,
+        disputeStatus,
+        policyHash:
+          typeof policyDecisionFingerprint?.policyHash === "string" && /^[0-9a-f]{64}$/i.test(policyDecisionFingerprint.policyHash)
+            ? policyDecisionFingerprint.policyHash.toLowerCase()
+            : typeof decisionRecord?.policyRef?.policyHash === "string" && /^[0-9a-f]{64}$/i.test(decisionRecord.policyRef.policyHash)
+              ? decisionRecord.policyRef.policyHash.toLowerCase()
+              : null,
+        decisionHash:
+          typeof decisionRecord?.decisionHash === "string" && /^[0-9a-f]{64}$/i.test(decisionRecord.decisionHash)
+            ? decisionRecord.decisionHash.toLowerCase()
+            : typeof settlementReceipt?.decisionRef?.decisionHash === "string" && /^[0-9a-f]{64}$/i.test(settlementReceipt.decisionRef.decisionHash)
+              ? settlementReceipt.decisionRef.decisionHash.toLowerCase()
+              : null,
+        policyDecisionHash:
+          typeof policyDecisionFingerprint?.evaluationHash === "string" && /^[0-9a-f]{64}$/i.test(policyDecisionFingerprint.evaluationHash)
+            ? policyDecisionFingerprint.evaluationHash.toLowerCase()
+            : null,
+        settledAt: receipt.settledAt ?? null
+      },
+      { path: "$" }
+    );
+  }
+
+  function summarizeX402FinanceReceiptRows({ rows = [], periodStart, periodEnd } = {}) {
+    let settlementCount = 0;
+    let disputeCount = 0;
+    let totalAmountCents = 0;
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      settlementCount += 1;
+      const amountCents = Number(row.amountCents ?? 0);
+      if (Number.isSafeInteger(amountCents)) totalAmountCents += amountCents;
+      const disputeStatus = typeof row.disputeStatus === "string" ? row.disputeStatus.trim().toLowerCase() : "";
+      if (disputeStatus && disputeStatus !== "none") disputeCount += 1;
+    }
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402PilotInvoicingSummary.v1",
+        periodStart,
+        periodEnd,
+        settlementCount,
+        disputeCount,
+        totalAmountCents
       },
       { path: "$" }
     );
@@ -24793,6 +24957,224 @@ export function createApi({
             return res.end(csv);
           }
 
+          if (parts[1] === "finance" && parts[2] === "receipts.csv" && parts.length === 3 && req.method === "GET") {
+            if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
+              return sendError(res, 403, "forbidden");
+            }
+            if (typeof store.listX402Receipts !== "function") {
+              return sendError(res, 501, "x402 receipts are not supported for this store");
+            }
+
+            let window;
+            let query;
+            try {
+              window = parseX402FinanceExportWindow(url);
+              query = parseX402ReceiptListQuery(url);
+            } catch (err) {
+              return sendError(res, 400, "invalid finance receipts export query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            const payerFilterRaw = url.searchParams.get("payer") ?? url.searchParams.get("payerAgentId");
+            const payeeFilterRaw = url.searchParams.get("payee") ?? url.searchParams.get("payeeProviderId");
+            const payerFilter =
+              payerFilterRaw === null || payerFilterRaw === undefined || String(payerFilterRaw).trim() === "" ? null : String(payerFilterRaw).trim();
+            const payeeFilter =
+              payeeFilterRaw === null || payeeFilterRaw === undefined || String(payeeFilterRaw).trim() === "" ? null : String(payeeFilterRaw).trim();
+
+            const page =
+              typeof store.listX402ReceiptsPage === "function"
+                ? await store.listX402ReceiptsPage({
+                    tenantId,
+                    agentId: query.agentId,
+                    sponsorId: query.sponsorId,
+                    sponsorWalletRef: query.sponsorWalletRef,
+                    toolId: query.toolId,
+                    state: query.state,
+                    from: window.startAt,
+                    to: window.endAt,
+                    cursor: query.cursor,
+                    limit: Math.min(5000, query.limit),
+                    offset: query.offset
+                  })
+                : {
+                    receipts: await store.listX402Receipts({
+                      tenantId,
+                      agentId: query.agentId,
+                      sponsorId: query.sponsorId,
+                      sponsorWalletRef: query.sponsorWalletRef,
+                      toolId: query.toolId,
+                      state: query.state,
+                      from: window.startAt,
+                      to: window.endAt,
+                      limit: Math.min(5000, query.limit),
+                      offset: query.offset
+                    }),
+                    nextCursor: null
+                  };
+            const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
+            const rows = receipts
+              .map((receipt) => toX402FinanceReceiptExportRow(receipt))
+              .filter((row) => Boolean(row))
+              .filter((row) => {
+                if (payerFilter && String(row.payer ?? "") !== payerFilter) return false;
+                if (payeeFilter && String(row.payee ?? "") !== payeeFilter) return false;
+                return true;
+              });
+            rows.sort((left, right) => {
+              const leftMs = Number.isFinite(Date.parse(String(left?.settledAt ?? ""))) ? Date.parse(String(left.settledAt)) : Number.NaN;
+              const rightMs = Number.isFinite(Date.parse(String(right?.settledAt ?? ""))) ? Date.parse(String(right.settledAt)) : Number.NaN;
+              if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
+              return String(left?.receiptId ?? "").localeCompare(String(right?.receiptId ?? ""));
+            });
+
+            const headers = [
+              "receiptId",
+              "gateId",
+              "runId",
+              "payer",
+              "payee",
+              "amountCents",
+              "currency",
+              "settlementState",
+              "disputeStatus",
+              "policyHash",
+              "decisionHash",
+              "policyDecisionHash",
+              "settledAt"
+            ];
+            const csvRows = [headers.join(",")];
+            for (const row of rows) {
+              csvRows.push(
+                [
+                  row.receiptId,
+                  row.gateId,
+                  row.runId,
+                  row.payer,
+                  row.payee,
+                  row.amountCents,
+                  row.currency,
+                  row.settlementState,
+                  row.disputeStatus,
+                  row.policyHash,
+                  row.decisionHash,
+                  row.policyDecisionHash,
+                  row.settledAt
+                ]
+                  .map((value) => csvEscapeCell(value))
+                  .join(",")
+              );
+            }
+
+            res.statusCode = 200;
+            res.setHeader("content-type", "text/csv; charset=utf-8");
+            res.setHeader("cache-control", "no-store");
+            if (typeof page?.nextCursor === "string" && page.nextCursor.trim() !== "") {
+              res.setHeader("x-next-cursor", page.nextCursor.trim());
+            }
+            return res.end(`${csvRows.join("\n")}\n`);
+          }
+
+          if (parts[1] === "finance" && parts[2] === "pilot-invoicing" && parts.length === 3 && req.method === "GET") {
+            if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
+              return sendError(res, 403, "forbidden");
+            }
+            if (typeof store.listX402Receipts !== "function") {
+              return sendError(res, 501, "x402 receipts are not supported for this store");
+            }
+
+            let window;
+            let query;
+            try {
+              window = parseX402FinanceExportWindow(url);
+              query = parseX402ReceiptListQuery(url);
+            } catch (err) {
+              return sendError(res, 400, "invalid pilot invoicing query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            const payerFilterRaw = url.searchParams.get("payer") ?? url.searchParams.get("payerAgentId");
+            const payeeFilterRaw = url.searchParams.get("payee") ?? url.searchParams.get("payeeProviderId");
+            const payerFilter =
+              payerFilterRaw === null || payerFilterRaw === undefined || String(payerFilterRaw).trim() === "" ? null : String(payerFilterRaw).trim();
+            const payeeFilter =
+              payeeFilterRaw === null || payeeFilterRaw === undefined || String(payeeFilterRaw).trim() === "" ? null : String(payeeFilterRaw).trim();
+
+            const allReceipts = [];
+            const seenCursors = new Set();
+            const pageLimit = Math.min(1000, query.limit > 0 ? query.limit : 1000);
+            let cursor = query.cursor;
+            while (true) {
+              if (cursor && seenCursors.has(cursor)) break;
+              if (cursor) seenCursors.add(cursor);
+              const page =
+                typeof store.listX402ReceiptsPage === "function"
+                  ? await store.listX402ReceiptsPage({
+                      tenantId,
+                      agentId: query.agentId,
+                      sponsorId: query.sponsorId,
+                      sponsorWalletRef: query.sponsorWalletRef,
+                      toolId: query.toolId,
+                      state: query.state,
+                      from: window.startAt,
+                      to: window.endAt,
+                      cursor,
+                      limit: pageLimit,
+                      offset: 0
+                    })
+                  : {
+                      receipts: await store.listX402Receipts({
+                        tenantId,
+                        agentId: query.agentId,
+                        sponsorId: query.sponsorId,
+                        sponsorWalletRef: query.sponsorWalletRef,
+                        toolId: query.toolId,
+                        state: query.state,
+                        from: window.startAt,
+                        to: window.endAt,
+                        limit: 50_000,
+                        offset: 0
+                      }),
+                      nextCursor: null
+                    };
+              const pageRows = Array.isArray(page?.receipts) ? page.receipts : [];
+              allReceipts.push(...pageRows);
+              if (!page?.nextCursor || typeof page.nextCursor !== "string" || page.nextCursor.trim() === "") break;
+              cursor = page.nextCursor.trim();
+              if (allReceipts.length >= 100_000) break;
+            }
+
+            const rows = allReceipts
+              .map((receipt) => toX402FinanceReceiptExportRow(receipt))
+              .filter((row) => Boolean(row))
+              .filter((row) => {
+                if (payerFilter && String(row.payer ?? "") !== payerFilter) return false;
+                if (payeeFilter && String(row.payee ?? "") !== payeeFilter) return false;
+                return true;
+              });
+            rows.sort((left, right) => {
+              const leftMs = Number.isFinite(Date.parse(String(left?.settledAt ?? ""))) ? Date.parse(String(left.settledAt)) : Number.NaN;
+              const rightMs = Number.isFinite(Date.parse(String(right?.settledAt ?? ""))) ? Date.parse(String(right.settledAt)) : Number.NaN;
+              if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
+              return String(left?.receiptId ?? "").localeCompare(String(right?.receiptId ?? ""));
+            });
+            const summary = summarizeX402FinanceReceiptRows({ rows, periodStart: window.startAt, periodEnd: window.endAt });
+
+            const formatRaw = url.searchParams.get("format");
+            const format = formatRaw && String(formatRaw).trim() !== "" ? String(formatRaw).trim().toLowerCase() : "json";
+            if (format === "csv") {
+              const headers = ["periodStart", "periodEnd", "settlementCount", "disputeCount", "totalAmountCents"];
+              const line = [
+                csvEscapeCell(summary.periodStart),
+                csvEscapeCell(summary.periodEnd),
+                csvEscapeCell(summary.settlementCount),
+                csvEscapeCell(summary.disputeCount),
+                csvEscapeCell(summary.totalAmountCents)
+              ].join(",");
+              res.statusCode = 200;
+              res.setHeader("content-type", "text/csv; charset=utf-8");
+              res.setHeader("cache-control", "no-store");
+              return res.end(`${headers.join(",")}\n${line}\n`);
+            }
+            return sendJson(res, 200, { ok: true, ...summary });
+          }
+
           if (parts[1] === "finance" && parts[2] === "reconcile" && parts.length === 3 && req.method === "GET") {
             if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
               return sendError(res, 403, "forbidden");
@@ -33603,7 +33985,7 @@ export function createApi({
           if (idemStoreKey) {
             ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
           }
-          await store.commitTx({ at, ops });
+          await commitTx(ops);
           return sendJson(res, 200, responseBody);
         }
 
@@ -34479,7 +34861,7 @@ export function createApi({
           if (idemStoreKey) {
             ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: responseStatusCode, body: responseBody } });
           }
-          if (ops.length > 0) await store.commitTx({ at: nowAt, ops });
+          if (ops.length > 0) await commitTx(ops);
           return sendJson(res, responseStatusCode, responseBody);
         }
 

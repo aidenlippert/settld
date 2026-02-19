@@ -15,7 +15,7 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const out = { call: null, timeoutMs: null };
+  const out = { call: null, timeoutMs: null, x402Smoke: false, x402SmokeFile: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--call") {
@@ -33,6 +33,14 @@ function parseArgs(argv) {
     if (a === "--timeout-ms") {
       const raw = argv[i + 1];
       out.timeoutMs = raw;
+      i += 1;
+    }
+    if (a === "--x402-smoke") {
+      out.x402Smoke = true;
+    }
+    if (a === "--x402-smoke-file") {
+      out.x402Smoke = true;
+      out.x402SmokeFile = argv[i + 1] || "";
       i += 1;
     }
   }
@@ -143,6 +151,15 @@ async function main() {
   const list = await rpc("tools/list", {});
   process.stdout.write(JSON.stringify(list, null, 2) + "\n");
 
+  function parseToolCallResult(callResponse, fallbackName = "unknown") {
+    const text = callResponse?.result?.content?.[0]?.text ?? "";
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { tool: fallbackName, rawText: text };
+    }
+  }
+
   if (args.call) {
     let callArgs = {};
     try {
@@ -158,6 +175,55 @@ async function main() {
     }
     const called = await rpc("tools/call", { name: args.call.name, arguments: callArgs });
     process.stdout.write(JSON.stringify(called, null, 2) + "\n");
+  }
+
+  if (args.x402Smoke) {
+    let smokeCfg = {};
+    if (args.x402SmokeFile) {
+      try {
+        const raw = fs.readFileSync(String(args.x402SmokeFile), "utf8");
+        smokeCfg = JSON.parse(raw);
+      } catch (err) {
+        throw new Error(`--x402-smoke-file must be valid JSON: ${err?.message ?? err}`);
+      }
+    }
+
+    const seed = String(Date.now());
+    const createArgs = {
+      gateId: `x402gate_probe_${seed}`,
+      payerAgentId: `agt_probe_payer_${seed}`,
+      payeeAgentId: `agt_probe_payee_${seed}`,
+      amountCents: 100,
+      autoFundPayerCents: 1000,
+      idempotencyKey: `mcp_probe_x402_gate_create_${seed}`,
+      ...(smokeCfg?.create && typeof smokeCfg.create === "object" ? smokeCfg.create : {})
+    };
+    const createRes = await rpc("tools/call", { name: "settld.x402_gate_create", arguments: createArgs });
+    process.stdout.write(JSON.stringify(createRes, null, 2) + "\n");
+    const createParsed = parseToolCallResult(createRes, "settld.x402_gate_create");
+    const gateId =
+      createParsed?.result?.gateId ??
+      createParsed?.result?.gate?.gateId ??
+      createParsed?.gateId ??
+      createParsed?.gate?.gateId ??
+      createArgs.gateId;
+
+    const verifyArgs = {
+      gateId,
+      ensureAuthorized: true,
+      authorizeIdempotencyKey: `mcp_probe_x402_gate_authorize_${seed}`,
+      idempotencyKey: `mcp_probe_x402_gate_verify_${seed}`,
+      ...(smokeCfg?.verify && typeof smokeCfg.verify === "object" ? smokeCfg.verify : {})
+    };
+    const verifyRes = await rpc("tools/call", { name: "settld.x402_gate_verify", arguments: verifyArgs });
+    process.stdout.write(JSON.stringify(verifyRes, null, 2) + "\n");
+
+    const getArgs = {
+      gateId,
+      ...(smokeCfg?.get && typeof smokeCfg.get === "object" ? smokeCfg.get : {})
+    };
+    const getRes = await rpc("tools/call", { name: "settld.x402_gate_get", arguments: getArgs });
+    process.stdout.write(JSON.stringify(getRes, null, 2) + "\n");
   }
 
   shuttingDown = true;

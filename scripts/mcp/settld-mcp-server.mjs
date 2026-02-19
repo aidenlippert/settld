@@ -82,6 +82,14 @@ function makeIdempotencyKey(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
+function sha256HexText(value) {
+  return crypto.createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
+}
+
+function isSha256Hex(value) {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value.trim());
+}
+
 function generateEd25519PublicKeyPem() {
   const { publicKey } = crypto.generateKeyPairSync("ed25519");
   return publicKey.export({ format: "pem", type: "spki" });
@@ -548,6 +556,93 @@ function buildTools() {
       }
     },
     {
+      name: "settld.agreement_delegation_create",
+      description: "Create an AgreementDelegation.v1 edge (idempotent via idempotencyKey).",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["parentAgreementHash", "childAgreementHash", "delegatorAgentId", "delegateeAgentId", "budgetCapCents"],
+        properties: {
+          parentAgreementHash: { type: "string" },
+          childAgreementHash: { type: "string" },
+          delegatorAgentId: { type: "string" },
+          delegateeAgentId: { type: "string" },
+          budgetCapCents: { type: "integer", minimum: 1 },
+          currency: { type: "string", default: "USD" },
+          delegationDepth: { type: ["integer", "null"], minimum: 1, default: null },
+          maxDelegationDepth: { type: ["integer", "null"], minimum: 1, default: null },
+          ancestorChain: { type: ["array", "null"], items: { type: "string" }, default: null },
+          delegationId: { type: ["string", "null"], default: null },
+          idempotencyKey: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "settld.agreement_delegation_list",
+      description: "List agreement delegations touching an agreement hash.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["agreementHash"],
+        properties: {
+          agreementHash: { type: "string" },
+          status: { type: ["string", "null"], default: null },
+          limit: { type: ["integer", "null"], minimum: 1, default: null },
+          offset: { type: ["integer", "null"], minimum: 0, default: null }
+        }
+      }
+    },
+    {
+      name: "settld.x402_gate_create",
+      description: "Create an x402 gate (idempotent via idempotencyKey). Generates payer/payee agent ids when omitted.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          gateId: { type: ["string", "null"], default: null },
+          payerAgentId: { type: ["string", "null"], default: null },
+          payeeAgentId: { type: ["string", "null"], default: null },
+          amountCents: { type: "integer", minimum: 1, default: 500 },
+          currency: { type: "string", default: "USD" },
+          autoFundPayerCents: { type: ["integer", "null"], minimum: 0, default: null },
+          toolId: { type: ["string", "null"], default: null },
+          idempotencyKey: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "settld.x402_gate_verify",
+      description:
+        "Verify and resolve an x402 gate. By default it first authorizes payment so MCP probe can run create -> verify -> get.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["gateId"],
+        properties: {
+          gateId: { type: "string" },
+          ensureAuthorized: { type: "boolean", default: true },
+          authorizeIdempotencyKey: { type: ["string", "null"], default: null },
+          idempotencyKey: { type: ["string", "null"], default: null },
+          verificationStatus: { type: "string", enum: ["green", "amber", "red"], default: "green" },
+          runStatus: { type: "string", enum: ["completed", "failed"], default: "completed" },
+          requestSha256: { type: ["string", "null"], default: null },
+          responseSha256: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "settld.x402_gate_get",
+      description: "Fetch the current x402 gate record and linked settlement state.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["gateId"],
+        properties: {
+          gateId: { type: "string" }
+        }
+      }
+    },
+    {
       name: "settld.about",
       description: "Return MCP server configuration (redacted).",
       inputSchema: {
@@ -770,6 +865,202 @@ async function main() {
               agreementId,
               raw: redactSecrets(acceptOut)
             };
+          } else if (name === "settld.x402_gate_create") {
+            const gateId = args?.gateId ? String(args.gateId).trim() : `x402gate_mcp_${crypto.randomUUID()}`;
+            const payerAgentId = args?.payerAgentId ? String(args.payerAgentId).trim() : `agt_x402_payer_${crypto.randomUUID()}`;
+            const payeeAgentId = args?.payeeAgentId ? String(args.payeeAgentId).trim() : `agt_x402_payee_${crypto.randomUUID()}`;
+            assertNonEmptyString(gateId, "gateId");
+            assertNonEmptyString(payerAgentId, "payerAgentId");
+            assertNonEmptyString(payeeAgentId, "payeeAgentId");
+            if (payerAgentId === payeeAgentId) throw new TypeError("payerAgentId and payeeAgentId must differ");
+
+            const amountCents = Number(args?.amountCents ?? 500);
+            if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw new TypeError("amountCents must be a positive safe integer");
+            const currency = args?.currency ? String(args.currency).trim().toUpperCase() : "USD";
+            assertNonEmptyString(currency, "currency");
+
+            const autoFundRaw = args?.autoFundPayerCents ?? amountCents;
+            const autoFundPayerCents = Number(autoFundRaw);
+            if (!Number.isSafeInteger(autoFundPayerCents) || autoFundPayerCents < 0) {
+              throw new TypeError("autoFundPayerCents must be a non-negative safe integer");
+            }
+
+            const idempotencyKey =
+              typeof args?.idempotencyKey === "string" && args.idempotencyKey.trim() !== ""
+                ? args.idempotencyKey.trim()
+                : makeIdempotencyKey("mcp_x402_gate_create");
+
+            const body = {
+              gateId,
+              payerAgentId,
+              payeeAgentId,
+              amountCents,
+              currency,
+              autoFundPayerCents
+            };
+            if (typeof args?.toolId === "string" && args.toolId.trim() !== "") body.toolId = args.toolId.trim();
+            const out = await client.requestJson("/x402/gate/create", {
+              method: "POST",
+              write: true,
+              body,
+              idem: idempotencyKey
+            });
+            result = {
+              ok: true,
+              gateId,
+              payerAgentId,
+              payeeAgentId,
+              idempotencyKey,
+              ...redactSecrets(out)
+            };
+          } else if (name === "settld.agreement_delegation_create") {
+            const parentAgreementHash = String(args?.parentAgreementHash ?? "").trim().toLowerCase();
+            const childAgreementHash = String(args?.childAgreementHash ?? "").trim().toLowerCase();
+            if (!isSha256Hex(parentAgreementHash)) throw new TypeError("parentAgreementHash must be a sha256 hex string");
+            if (!isSha256Hex(childAgreementHash)) throw new TypeError("childAgreementHash must be a sha256 hex string");
+            const delegatorAgentId = String(args?.delegatorAgentId ?? "").trim();
+            const delegateeAgentId = String(args?.delegateeAgentId ?? "").trim();
+            assertNonEmptyString(delegatorAgentId, "delegatorAgentId");
+            assertNonEmptyString(delegateeAgentId, "delegateeAgentId");
+            const budgetCapCents = Number(args?.budgetCapCents);
+            if (!Number.isSafeInteger(budgetCapCents) || budgetCapCents <= 0) {
+              throw new TypeError("budgetCapCents must be a positive safe integer");
+            }
+            const currency = args?.currency ? String(args.currency).trim().toUpperCase() : "USD";
+            assertNonEmptyString(currency, "currency");
+
+            const idempotencyKey =
+              typeof args?.idempotencyKey === "string" && args.idempotencyKey.trim() !== ""
+                ? args.idempotencyKey.trim()
+                : makeIdempotencyKey("mcp_agreement_delegation_create");
+
+            const body = {
+              childAgreementHash,
+              delegatorAgentId,
+              delegateeAgentId,
+              budgetCapCents,
+              currency
+            };
+            if (typeof args?.delegationId === "string" && args.delegationId.trim() !== "") body.delegationId = args.delegationId.trim();
+            if (Number.isSafeInteger(Number(args?.delegationDepth)) && Number(args.delegationDepth) > 0) {
+              body.delegationDepth = Number(args.delegationDepth);
+            }
+            if (Number.isSafeInteger(Number(args?.maxDelegationDepth)) && Number(args.maxDelegationDepth) > 0) {
+              body.maxDelegationDepth = Number(args.maxDelegationDepth);
+            }
+            if (Array.isArray(args?.ancestorChain)) {
+              body.ancestorChain = args.ancestorChain.map((v) => String(v ?? "").trim()).filter(Boolean);
+            }
+
+            const out = await client.requestJson(`/agreements/${encodeURIComponent(parentAgreementHash)}/delegations`, {
+              method: "POST",
+              write: true,
+              body,
+              idem: idempotencyKey
+            });
+            result = {
+              ok: true,
+              parentAgreementHash,
+              idempotencyKey,
+              ...redactSecrets(out)
+            };
+          } else if (name === "settld.agreement_delegation_list") {
+            const agreementHash = String(args?.agreementHash ?? "").trim().toLowerCase();
+            if (!isSha256Hex(agreementHash)) throw new TypeError("agreementHash must be a sha256 hex string");
+            const query = new URLSearchParams();
+            if (typeof args?.status === "string" && args.status.trim() !== "") query.set("status", args.status.trim());
+            if (Number.isSafeInteger(Number(args?.limit)) && Number(args.limit) > 0) query.set("limit", String(Number(args.limit)));
+            if (Number.isSafeInteger(Number(args?.offset)) && Number(args.offset) >= 0) query.set("offset", String(Number(args.offset)));
+            const path = `/agreements/${encodeURIComponent(agreementHash)}/delegations${query.toString() ? `?${query.toString()}` : ""}`;
+            const out = await client.requestJson(path, { method: "GET" });
+            result = { ok: true, agreementHash, ...redactSecrets(out) };
+          } else if (name === "settld.x402_gate_verify") {
+            const gateId = String(args?.gateId ?? "").trim();
+            assertNonEmptyString(gateId, "gateId");
+            const ensureAuthorized = args?.ensureAuthorized !== false;
+
+            const verificationStatusRaw = args?.verificationStatus ? String(args.verificationStatus).trim().toLowerCase() : "green";
+            if (!["green", "amber", "red"].includes(verificationStatusRaw)) {
+              throw new TypeError("verificationStatus must be green|amber|red");
+            }
+            const verificationStatus = verificationStatusRaw;
+
+            const runStatusRaw = args?.runStatus ? String(args.runStatus).trim().toLowerCase() : "completed";
+            if (!["completed", "failed"].includes(runStatusRaw)) {
+              throw new TypeError("runStatus must be completed|failed");
+            }
+            const runStatus = runStatusRaw;
+
+            const requestSha256 = (() => {
+              if (typeof args?.requestSha256 === "string" && args.requestSha256.trim() !== "") return args.requestSha256.trim().toLowerCase();
+              return sha256HexText(`mcp:x402:request:${gateId}`).toLowerCase();
+            })();
+            if (!isSha256Hex(requestSha256)) throw new TypeError("requestSha256 must be a sha256 hex string");
+            const responseSha256 = (() => {
+              if (typeof args?.responseSha256 === "string" && args.responseSha256.trim() !== "") return args.responseSha256.trim().toLowerCase();
+              return sha256HexText(`mcp:x402:response:${gateId}`).toLowerCase();
+            })();
+            if (!isSha256Hex(responseSha256)) throw new TypeError("responseSha256 must be a sha256 hex string");
+
+            const verifyIdempotencyKey =
+              typeof args?.idempotencyKey === "string" && args.idempotencyKey.trim() !== ""
+                ? args.idempotencyKey.trim()
+                : makeIdempotencyKey("mcp_x402_gate_verify");
+            const authorizeIdempotencyKey =
+              typeof args?.authorizeIdempotencyKey === "string" && args.authorizeIdempotencyKey.trim() !== ""
+                ? args.authorizeIdempotencyKey.trim()
+                : makeIdempotencyKey("mcp_x402_gate_authorize");
+
+            let authorizeOut = null;
+            if (ensureAuthorized) {
+              authorizeOut = await client.requestJson("/x402/gate/authorize-payment", {
+                method: "POST",
+                write: true,
+                body: { gateId },
+                idem: authorizeIdempotencyKey
+              });
+            }
+
+            const verifyOut = await client.requestJson("/x402/gate/verify", {
+              method: "POST",
+              write: true,
+              body: {
+                gateId,
+                verificationStatus,
+                runStatus,
+                policy: {
+                  mode: "automatic",
+                  rules: {
+                    autoReleaseOnGreen: true,
+                    greenReleaseRatePct: 100,
+                    autoReleaseOnAmber: false,
+                    amberReleaseRatePct: 0,
+                    autoReleaseOnRed: true,
+                    redReleaseRatePct: 0
+                  }
+                },
+                verificationMethod: { mode: "deterministic", source: "mcp_x402_gate_verify_v1" },
+                evidenceRefs: [`http:request_sha256:${requestSha256}`, `http:response_sha256:${responseSha256}`]
+              },
+              idem: verifyIdempotencyKey
+            });
+
+            result = {
+              ok: true,
+              gateId,
+              ensureAuthorized,
+              authorizeIdempotencyKey: ensureAuthorized ? authorizeIdempotencyKey : null,
+              idempotencyKey: verifyIdempotencyKey,
+              requestSha256,
+              responseSha256,
+              authorize: authorizeOut ? redactSecrets(authorizeOut) : null,
+              verify: redactSecrets(verifyOut)
+            };
+          } else if (name === "settld.x402_gate_get") {
+            const gateId = String(args?.gateId ?? "").trim();
+            assertNonEmptyString(gateId, "gateId");
+            const out = await client.requestJson(`/x402/gate/${encodeURIComponent(gateId)}`, { method: "GET" });
+            result = { ok: true, gateId, ...redactSecrets(out) };
           } else if (name === "settld.submit_evidence") {
             const agentId = String(args?.agentId ?? "").trim();
             const runId = String(args?.runId ?? "").trim();

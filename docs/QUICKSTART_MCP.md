@@ -135,6 +135,61 @@ npm run mcp:probe
 
 This spawns the MCP server, runs `initialize` and `tools/list`, prints the responses, and exits.
 
+## x402 Gate Smoke (create -> verify -> get)
+
+Run an end-to-end x402 gate flow over MCP with explicit idempotency keys:
+
+```bash
+npm run -s mcp:probe -- --x402-smoke
+```
+
+This performs:
+
+1. `settld.x402_gate_create`
+2. `settld.x402_gate_verify` (auto-authorize enabled by default)
+3. `settld.x402_gate_get`
+
+You can override payloads from a JSON file:
+
+```bash
+cat > /tmp/settld-mcp-x402-smoke.json <<'JSON'
+{
+  "create": {
+    "amountCents": 250,
+    "idempotencyKey": "mcp_probe_create_custom_1"
+  },
+  "verify": {
+    "idempotencyKey": "mcp_probe_verify_custom_1",
+    "authorizeIdempotencyKey": "mcp_probe_auth_custom_1"
+  }
+}
+JSON
+
+npm run -s mcp:probe -- --x402-smoke --x402-smoke-file /tmp/settld-mcp-x402-smoke.json
+```
+
+## Agreement Delegation Tools (create/list)
+
+Create a delegation edge and list it via MCP:
+
+```bash
+cat > /tmp/settld-mcp-delegation-create.json <<'JSON'
+{
+  "parentAgreementHash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "childAgreementHash": "2222222222222222222222222222222222222222222222222222222222222222",
+  "delegatorAgentId": "agt_parent",
+  "delegateeAgentId": "agt_child",
+  "budgetCapCents": 500,
+  "idempotencyKey": "mcp_probe_delegation_create_1"
+}
+JSON
+
+npm run -s mcp:probe -- --call-file settld.agreement_delegation_create /tmp/settld-mcp-delegation-create.json
+npm run -s mcp:probe -- --call settld.agreement_delegation_list '{"agreementHash":"1111111111111111111111111111111111111111111111111111111111111111","status":"active","limit":20,"offset":0}'
+```
+
+`settld.agreement_delegation_create` responses include `delegation.delegationHash` for deterministic orchestration and audit bindings.
+
 ## Live Call Without Shell-JSON Footguns
 
 If your terminal copy/paste keeps inserting line breaks, pass tool arguments via a JSON file:
