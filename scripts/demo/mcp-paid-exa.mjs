@@ -490,6 +490,19 @@ async function exportAndVerifyReceiptSample({
 
   const receipts = parseJsonLines(exportBody);
   const sampleReceipt = receipts[0] ?? null;
+  const sampleDecisionId =
+    typeof sampleReceipt?.decisionRecord?.decisionId === "string" && sampleReceipt.decisionRecord.decisionId.trim() !== ""
+      ? sampleReceipt.decisionRecord.decisionId.trim()
+      : typeof sampleReceipt?.settlementReceipt?.decisionRef?.decisionId === "string" &&
+          sampleReceipt.settlementReceipt.decisionRef.decisionId.trim() !== ""
+        ? sampleReceipt.settlementReceipt.decisionRef.decisionId.trim()
+        : null;
+  const sampleSettlementReceiptId =
+    typeof sampleReceipt?.settlementReceipt?.receiptId === "string" && sampleReceipt.settlementReceipt.receiptId.trim() !== ""
+      ? sampleReceipt.settlementReceipt.receiptId.trim()
+      : typeof sampleReceipt?.receiptId === "string" && sampleReceipt.receiptId.trim() !== ""
+        ? sampleReceipt.receiptId.trim()
+        : null;
   const sampleVerification =
     sampleReceipt && typeof sampleReceipt === "object" && !Array.isArray(sampleReceipt)
       ? {
@@ -504,6 +517,8 @@ async function exportAndVerifyReceiptSample({
     exportPath: "x402-receipts.export.jsonl",
     exportedReceiptCount: receipts.length,
     sampleReceiptId: typeof sampleReceipt?.receiptId === "string" ? sampleReceipt.receiptId : null,
+    sampleDecisionId,
+    sampleSettlementReceiptId,
     sampleVerification,
     sampleVerificationCoreOk: receiptVerificationCoreOk(sampleVerification?.nonStrict)
   };
@@ -516,7 +531,9 @@ async function exportAndVerifyReceiptSample({
     nonStrictOk: Boolean(sampleVerification?.nonStrict?.ok),
     strictOk: Boolean(sampleVerification?.strict?.ok),
     exportedReceiptCount: receipts.length,
-    sampleReceiptId: verificationArtifact.sampleReceiptId
+    sampleReceiptId: verificationArtifact.sampleReceiptId,
+    sampleDecisionId,
+    sampleSettlementReceiptId
   };
 }
 
@@ -1052,6 +1069,12 @@ async function main() {
 
     process.stdout.write(`PASS artifactDir=${artifactDir}\n`);
     process.stdout.write(`gateId=${gateId}\n`);
+    if (typeof receiptExport.sampleDecisionId === "string" && receiptExport.sampleDecisionId.trim() !== "") {
+      process.stdout.write(`decisionId=${receiptExport.sampleDecisionId.trim()}\n`);
+    }
+    if (typeof receiptExport.sampleSettlementReceiptId === "string" && receiptExport.sampleSettlementReceiptId.trim() !== "") {
+      process.stdout.write(`settlementReceiptId=${receiptExport.sampleSettlementReceiptId.trim()}\n`);
+    }
 
     if (!keepAlive) {
       stopAll();

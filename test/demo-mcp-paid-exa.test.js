@@ -100,6 +100,8 @@ test("demo:mcp-paid-exa script completes and writes PASS artifact bundle", async
 
   assert.equal(exit.code, 0, `expected demo to pass; stdout=${stdout}\nstderr=${stderr}`);
   assert.match(stdout, /PASS artifactDir=/);
+  assert.match(stdout, /decisionId=/);
+  assert.match(stdout, /settlementReceiptId=/);
 
   const summaryRaw = await readFile(path.join(artifactDir, "summary.json"), "utf8");
   const summary = JSON.parse(summaryRaw);
@@ -107,6 +109,10 @@ test("demo:mcp-paid-exa script completes and writes PASS artifact bundle", async
   assert.equal(summary.passChecks?.providerSignature, true);
   assert.equal(summary.passChecks?.tokenVerified, true);
   assert.equal(summary.passChecks?.reserveTracked, true);
+  assert.equal(typeof summary.receiptExport?.sampleDecisionId, "string");
+  assert.ok(summary.receiptExport.sampleDecisionId.length > 0);
+  assert.equal(typeof summary.receiptExport?.sampleSettlementReceiptId, "string");
+  assert.ok(summary.receiptExport.sampleSettlementReceiptId.length > 0);
   assert.equal(summary.circleMode, "stub");
   assert.equal(typeof summary.circleReserveId, "string");
   assert.ok(summary.circleReserveId.length > 0);
