@@ -40,20 +40,22 @@ async function creditWallet(api, { agentId, amountCents, idempotencyKey }) {
   return response.json.wallet;
 }
 
-test("API e2e: x402 receipt list/get/export returns durable receipt with verification key evidence", async () => {
-  const api = createApi({ opsToken: "tok_ops" });
-
-  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_receipt_payer_1" });
-  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_receipt_payee_1" });
-  await creditWallet(api, { agentId: payerAgentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_receipt_1" });
-
-  const gateId = "gate_receipt_1";
-  const amountCents = 500;
-
+async function createVerifiedReceipt({
+  api,
+  gateId,
+  amountCents,
+  payerAgentId,
+  payeeAgentId,
+  providerSigner,
+  quoteId,
+  requestHashSeed,
+  responseProviderTag,
+  idSuffix
+}) {
   const created = await request(api, {
     method: "POST",
     path: "/x402/gate/create",
-    headers: { "x-idempotency-key": "x402_gate_create_receipt_1" },
+    headers: { "x-idempotency-key": `x402_gate_create_receipt_${idSuffix}` },
     body: {
       gateId,
       payerAgentId,
@@ -68,20 +70,18 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
   const authorized = await request(api, {
     method: "POST",
     path: "/x402/gate/authorize-payment",
-    headers: { "x-idempotency-key": "x402_gate_authz_receipt_1" },
+    headers: { "x-idempotency-key": `x402_gate_authz_receipt_${idSuffix}` },
     body: { gateId }
   });
   assert.equal(authorized.statusCode, 200, authorized.body);
 
-  const providerSigner = createEd25519Keypair();
-  const responseBodyCanonical = canonicalJsonStringify({ ok: true, provider: "mock_receipts" });
+  const responseBodyCanonical = canonicalJsonStringify({ ok: true, provider: responseProviderTag });
   const responseHash = sha256Hex(responseBodyCanonical);
-  const signedAt = "2026-02-18T01:00:00.000Z";
-  const nonce = "abcd1234abcd1234";
+  const responseNonceHex = Number(idSuffix).toString(16).padStart(16, "0");
   const responseSig = signToolProviderSignatureV1({
     responseHash,
-    nonce,
-    signedAt,
+    nonce: responseNonceHex,
+    signedAt: `2026-02-18T01:${String(idSuffix).padStart(2, "0")}:00.000Z`,
     publicKeyPem: providerSigner.publicKeyPem,
     privateKeyPem: providerSigner.privateKeyPem
   });
@@ -94,16 +94,16 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
     address: "mock:payee",
     network: "mocknet",
     requestBindingMode: "strict",
-    requestBindingSha256: "a".repeat(64),
+    requestBindingSha256: requestHashSeed,
     quoteRequired: true,
-    quoteId: "x402quote_receipt_1",
+    quoteId,
     spendAuthorizationMode: "required",
     quotedAt: "2026-02-18T00:59:00.000Z",
     expiresAt: "2026-02-18T01:59:00.000Z"
   });
   const quoteSig = signToolProviderQuoteSignatureV1({
     quote: quotePayload,
-    nonce: "bcd1234abce56789",
+    nonce: Number(idSuffix + 100).toString(16).padStart(16, "0"),
     signedAt: "2026-02-18T00:59:05.000Z",
     publicKeyPem: providerSigner.publicKeyPem,
     privateKeyPem: providerSigner.privateKeyPem
@@ -112,7 +112,7 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
   const verify = await request(api, {
     method: "POST",
     path: "/x402/gate/verify",
-    headers: { "x-idempotency-key": "x402_gate_verify_receipt_1" },
+    headers: { "x-idempotency-key": `x402_gate_verify_receipt_${idSuffix}` },
     body: {
       gateId,
       verificationStatus: "green",
@@ -129,7 +129,7 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
         }
       },
       verificationMethod: { mode: "attested", source: "provider_signature_v1" },
-      evidenceRefs: [`http:request_sha256:${"b".repeat(64)}`, `http:response_sha256:${responseHash}`],
+      evidenceRefs: [`http:request_sha256:${requestHashSeed}`, `http:response_sha256:${responseHash}`],
       providerSignature: {
         ...responseSig,
         publicKeyPem: providerSigner.publicKeyPem
@@ -147,6 +147,43 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
   const receiptId = verify.json?.settlementReceipt?.receiptId;
   assert.equal(typeof receiptId, "string");
   assert.ok(receiptId);
+  return { receiptId, quotePayload };
+}
+
+test("API e2e: x402 receipt list/get/export returns durable receipt with verification key evidence", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_receipt_payer_1" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_receipt_payee_1" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_receipt_1" });
+
+  const providerSigner = createEd25519Keypair();
+  const first = await createVerifiedReceipt({
+    api,
+    gateId: "gate_receipt_1",
+    amountCents: 500,
+    payerAgentId,
+    payeeAgentId,
+    providerSigner,
+    quoteId: "x402quote_receipt_1",
+    requestHashSeed: "b".repeat(64),
+    responseProviderTag: "mock_receipts_1",
+    idSuffix: 1
+  });
+  const second = await createVerifiedReceipt({
+    api,
+    gateId: "gate_receipt_2",
+    amountCents: 700,
+    payerAgentId,
+    payeeAgentId,
+    providerSigner,
+    quoteId: "x402quote_receipt_2",
+    requestHashSeed: "c".repeat(64),
+    responseProviderTag: "mock_receipts_2",
+    idSuffix: 2
+  });
+  const receiptId = first.receiptId;
+  const quotePayload = first.quotePayload;
 
   const listed = await request(api, {
     method: "GET",
@@ -164,6 +201,26 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
   assert.match(String(found?.bindings?.providerQuoteSig?.keyJwkThumbprintSha256 ?? ""), /^[0-9a-f]{64}$/);
   assert.equal(String(found?.providerSignature?.keyId ?? ""), String(found?.bindings?.providerSig?.providerKeyId ?? ""));
   assert.equal(String(found?.providerQuotePayload?.quoteId ?? ""), quotePayload.quoteId);
+
+  const pagedFirst = await request(api, {
+    method: "GET",
+    path: "/x402/receipts?toolId=mock_search&limit=1"
+  });
+  assert.equal(pagedFirst.statusCode, 200, pagedFirst.body);
+  assert.equal(Array.isArray(pagedFirst.json?.receipts), true);
+  assert.equal(pagedFirst.json.receipts.length, 1);
+  const nextCursor = typeof pagedFirst.json?.nextCursor === "string" ? pagedFirst.json.nextCursor : "";
+  assert.ok(nextCursor.length > 0);
+
+  const pagedSecond = await request(api, {
+    method: "GET",
+    path: `/x402/receipts?toolId=mock_search&limit=1&cursor=${encodeURIComponent(nextCursor)}`
+  });
+  assert.equal(pagedSecond.statusCode, 200, pagedSecond.body);
+  assert.equal(Array.isArray(pagedSecond.json?.receipts), true);
+  assert.equal(pagedSecond.json.receipts.length, 1);
+  assert.notEqual(String(pagedFirst.json.receipts[0]?.receiptId ?? ""), String(pagedSecond.json.receipts[0]?.receiptId ?? ""));
+  assert.ok([first.receiptId, second.receiptId].includes(String(pagedSecond.json.receipts[0]?.receiptId ?? "")));
 
   const byId = await request(api, {
     method: "GET",
@@ -185,4 +242,8 @@ test("API e2e: x402 receipt list/get/export returns durable receipt with verific
   assert.ok(exportLines.length >= 1);
   const parsedFirst = JSON.parse(exportLines[0]);
   assert.equal(parsedFirst.schemaVersion, "X402ReceiptRecord.v1");
+  assert.ok(
+    exported.headers &&
+      (typeof exported.headers["x-next-cursor"] === "undefined" || typeof exported.headers["x-next-cursor"] === "string")
+  );
 });

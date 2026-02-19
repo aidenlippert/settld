@@ -311,6 +311,8 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     arbitrationCases: new Map(), // `${tenantId}\n${caseId}` -> ArbitrationCase.v1 snapshot
     agreementDelegations: new Map(), // `${tenantId}\n${delegationId}` -> AgreementDelegation.v1
     x402Gates: new Map(), // `${tenantId}\n${gateId}` -> X402 gate record (internal API surface)
+    x402Receipts: new Map(), // `${tenantId}\n${receiptId}` -> immutable X402ReceiptRecord.v1 base record
+    x402WalletPolicies: new Map(), // `${tenantId}\n${sponsorWalletRef}::${policyRef}::${policyVersion}` -> X402WalletPolicy.v1
     x402ReversalEvents: new Map(), // `${tenantId}\n${eventId}` -> X402GateReversalEvent.v1
     x402ReversalNonceUsage: new Map(), // `${tenantId}\n${sponsorRef}\n${nonce}` -> X402ReversalNonceUsage.v1
     x402ReversalCommandUsage: new Map(), // `${tenantId}\n${commandId}` -> X402ReversalCommandUsage.v1
@@ -1002,6 +1004,110 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.x402Gates.get(key) ?? null;
   };
 
+  function x402WalletPolicyStoreKey({ tenantId, sponsorWalletRef, policyRef, policyVersion }) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedSponsorWalletRef = typeof sponsorWalletRef === "string" ? sponsorWalletRef.trim() : "";
+    const normalizedPolicyRef = typeof policyRef === "string" ? policyRef.trim() : "";
+    const normalizedPolicyVersion = Number(policyVersion);
+    if (!normalizedSponsorWalletRef) throw new TypeError("sponsorWalletRef is required");
+    if (!normalizedPolicyRef) throw new TypeError("policyRef is required");
+    if (!Number.isSafeInteger(normalizedPolicyVersion) || normalizedPolicyVersion <= 0) {
+      throw new TypeError("policyVersion must be a positive safe integer");
+    }
+    return makeScopedKey({
+      tenantId: normalizedTenantId,
+      id: `${normalizedSponsorWalletRef}::${normalizedPolicyRef}::${normalizedPolicyVersion}`
+    });
+  }
+
+  store.putX402WalletPolicy = async function putX402WalletPolicy({ tenantId = DEFAULT_TENANT_ID, policy, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) throw new TypeError("policy is required");
+    const sponsorWalletRef = typeof policy.sponsorWalletRef === "string" ? policy.sponsorWalletRef.trim() : "";
+    const policyRef = typeof policy.policyRef === "string" ? policy.policyRef.trim() : "";
+    const policyVersion = Number(policy.policyVersion);
+    if (!sponsorWalletRef) throw new TypeError("policy.sponsorWalletRef is required");
+    if (!policyRef) throw new TypeError("policy.policyRef is required");
+    if (!Number.isSafeInteger(policyVersion) || policyVersion <= 0) throw new TypeError("policy.policyVersion must be a positive safe integer");
+    const key = x402WalletPolicyStoreKey({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+    const at = policy.updatedAt ?? policy.createdAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [
+        {
+          kind: "X402_WALLET_POLICY_UPSERT",
+          tenantId,
+          policy: { ...policy, tenantId, sponsorWalletRef, policyRef, policyVersion }
+        }
+      ],
+      audit
+    });
+    return store.x402WalletPolicies.get(key) ?? null;
+  };
+
+  store.getX402WalletPolicy = async function getX402WalletPolicy({
+    tenantId = DEFAULT_TENANT_ID,
+    sponsorWalletRef,
+    policyRef,
+    policyVersion
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    const key = x402WalletPolicyStoreKey({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+    return store.x402WalletPolicies.get(key) ?? null;
+  };
+
+  store.listX402WalletPolicies = async function listX402WalletPolicies({
+    tenantId = DEFAULT_TENANT_ID,
+    sponsorWalletRef = null,
+    sponsorRef = null,
+    policyRef = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (sponsorWalletRef !== null && (typeof sponsorWalletRef !== "string" || sponsorWalletRef.trim() === "")) {
+      throw new TypeError("sponsorWalletRef must be null or a non-empty string");
+    }
+    if (sponsorRef !== null && (typeof sponsorRef !== "string" || sponsorRef.trim() === "")) {
+      throw new TypeError("sponsorRef must be null or a non-empty string");
+    }
+    if (policyRef !== null && (typeof policyRef !== "string" || policyRef.trim() === "")) {
+      throw new TypeError("policyRef must be null or a non-empty string");
+    }
+    if (status !== null && (typeof status !== "string" || status.trim() === "")) {
+      throw new TypeError("status must be null or a non-empty string");
+    }
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const sponsorWalletFilter = sponsorWalletRef ? sponsorWalletRef.trim() : null;
+    const sponsorFilter = sponsorRef ? sponsorRef.trim() : null;
+    const policyFilter = policyRef ? policyRef.trim() : null;
+    const statusFilter = status ? status.trim().toLowerCase() : null;
+    const out = [];
+    for (const row of store.x402WalletPolicies.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (sponsorWalletFilter && String(row.sponsorWalletRef ?? "") !== sponsorWalletFilter) continue;
+      if (sponsorFilter && String(row.sponsorRef ?? "") !== sponsorFilter) continue;
+      if (policyFilter && String(row.policyRef ?? "") !== policyFilter) continue;
+      if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => {
+      const leftAt = Number.isFinite(Date.parse(String(left?.updatedAt ?? ""))) ? Date.parse(String(left.updatedAt)) : Number.NaN;
+      const rightAt = Number.isFinite(Date.parse(String(right?.updatedAt ?? ""))) ? Date.parse(String(right.updatedAt)) : Number.NaN;
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+      const sponsorOrder = String(left?.sponsorWalletRef ?? "").localeCompare(String(right?.sponsorWalletRef ?? ""));
+      if (sponsorOrder !== 0) return sponsorOrder;
+      const policyOrder = String(left?.policyRef ?? "").localeCompare(String(right?.policyRef ?? ""));
+      if (policyOrder !== 0) return policyOrder;
+      return Number(right?.policyVersion ?? 0) - Number(left?.policyVersion ?? 0);
+    });
+    return out.slice(offset, offset + Math.min(1000, limit));
+  };
+
   function x402ReversalNonceStoreKey({ tenantId, sponsorRef, nonce }) {
     const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     const normalizedSponsorRef = typeof sponsorRef === "string" ? sponsorRef.trim() : "";
@@ -1009,26 +1115,6 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     if (!normalizedSponsorRef) throw new TypeError("sponsorRef is required");
     if (!normalizedNonce) throw new TypeError("nonce is required");
     return `${normalizedTenantId}\n${normalizedSponsorRef}\n${normalizedNonce}`;
-  }
-
-  function listX402ReversalEventsForGateSync({ tenantId = DEFAULT_TENANT_ID, gateId } = {}) {
-    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    const normalizedGateId = typeof gateId === "string" ? gateId.trim() : "";
-    if (!normalizedGateId) return [];
-    const out = [];
-    for (const row of store.x402ReversalEvents.values()) {
-      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
-      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
-      if (String(row.gateId ?? "") !== normalizedGateId) continue;
-      out.push(row);
-    }
-    out.sort((left, right) => {
-      const leftMs = Number.isFinite(Date.parse(String(left?.occurredAt ?? ""))) ? Date.parse(String(left.occurredAt)) : Number.NaN;
-      const rightMs = Number.isFinite(Date.parse(String(right?.occurredAt ?? ""))) ? Date.parse(String(right.occurredAt)) : Number.NaN;
-      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
-      return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
-    });
-    return out;
   }
 
   store.putX402ReversalEvent = async function putX402ReversalEvent({ tenantId = DEFAULT_TENANT_ID, gateId, event, audit = null } = {}) {
@@ -1139,13 +1225,42 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return store.x402ReversalCommandUsage.get(makeScopedKey({ tenantId, id: commandId.trim() })) ?? null;
   };
 
-  function toX402ReceiptRecord({ tenantId, gate } = {}) {
+  function x402ReceiptStoreKey({ tenantId, receiptId }) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedReceiptId = typeof receiptId === "string" ? receiptId.trim() : "";
+    if (!normalizedReceiptId) throw new TypeError("receiptId is required");
+    return makeScopedKey({ tenantId: normalizedTenantId, id: normalizedReceiptId });
+  }
+
+  function listX402ReversalEventsForReceiptSync({ tenantId = DEFAULT_TENANT_ID, receiptId } = {}) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedReceiptId = typeof receiptId === "string" ? receiptId.trim() : "";
+    if (!normalizedReceiptId) return [];
+    const out = [];
+    for (const row of store.x402ReversalEvents.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+      if (String(row.receiptId ?? "") !== normalizedReceiptId) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => {
+      const leftMs = Number.isFinite(Date.parse(String(left?.occurredAt ?? ""))) ? Date.parse(String(left.occurredAt)) : Number.NaN;
+      const rightMs = Number.isFinite(Date.parse(String(right?.occurredAt ?? ""))) ? Date.parse(String(right.occurredAt)) : Number.NaN;
+      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
+      return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
+    });
+    return out;
+  }
+
+  function toX402ReceiptRecord({ tenantId, gate, settlement: settlementInput = null, includeReversalContext = true } = {}) {
     if (!gate || typeof gate !== "object" || Array.isArray(gate)) return null;
     const runId = typeof gate.runId === "string" && gate.runId.trim() !== "" ? gate.runId.trim() : null;
     const settlement =
-      runId && store.agentRunSettlements instanceof Map
-        ? store.agentRunSettlements.get(makeScopedKey({ tenantId, id: runId })) ?? null
-        : null;
+      settlementInput && typeof settlementInput === "object" && !Array.isArray(settlementInput)
+        ? settlementInput
+        : runId && store.agentRunSettlements instanceof Map
+          ? store.agentRunSettlements.get(makeScopedKey({ tenantId, id: runId })) ?? null
+          : null;
     const decisionTrace =
       settlement?.decisionTrace && typeof settlement.decisionTrace === "object" && !Array.isArray(settlement.decisionTrace)
         ? settlement.decisionTrace
@@ -1159,7 +1274,10 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     if (!settlementReceipt) return null;
     const receiptId = typeof settlementReceipt.receiptId === "string" ? settlementReceipt.receiptId.trim() : "";
     if (!receiptId) return null;
-    const bindings = decisionTrace?.bindings && typeof decisionTrace.bindings === "object" && !Array.isArray(decisionTrace.bindings) ? decisionTrace.bindings : null;
+    const bindings =
+      decisionTrace?.bindings && typeof decisionTrace.bindings === "object" && !Array.isArray(decisionTrace.bindings)
+        ? decisionTrace.bindings
+        : null;
     const verificationContext =
       gate?.verificationContext && typeof gate.verificationContext === "object" && !Array.isArray(gate.verificationContext)
         ? gate.verificationContext
@@ -1186,7 +1304,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
         : typeof gate.resolvedAt === "string" && gate.resolvedAt.trim() !== ""
           ? gate.resolvedAt.trim()
           : null;
-    return {
+    const base = {
       schemaVersion: "X402ReceiptRecord.v1",
       tenantId,
       receiptId,
@@ -1208,7 +1326,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
           ? settlementReceipt.status.trim().toLowerCase()
           : typeof settlement?.status === "string" && settlement.status.trim() !== ""
             ? settlement.status.trim().toLowerCase()
-          : null,
+            : null,
       verificationStatus:
         typeof decisionTrace?.verificationStatus === "string" && decisionTrace.verificationStatus.trim() !== ""
           ? decisionTrace.verificationStatus.trim().toLowerCase()
@@ -1239,47 +1357,206 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
         gate?.providerQuotePayload && typeof gate.providerQuotePayload === "object" && !Array.isArray(gate.providerQuotePayload)
           ? gate.providerQuotePayload
           : null,
-      reversal:
-        gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
-          ? gate.reversal
-          : null,
-      reversalEvents: listX402ReversalEventsForGateSync({ tenantId, gateId: typeof gate.gateId === "string" ? gate.gateId : null }),
       decisionRecord:
         decisionTrace?.decisionRecord && typeof decisionTrace.decisionRecord === "object" && !Array.isArray(decisionTrace.decisionRecord)
           ? decisionTrace.decisionRecord
           : null,
       settlementReceipt
     };
+    if (!includeReversalContext) return base;
+    return {
+      ...base,
+      reversal:
+        gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
+          ? gate.reversal
+          : null,
+      reversalEvents: listX402ReversalEventsForReceiptSync({ tenantId, receiptId })
+    };
   }
+
+  function normalizeX402ReceiptRecordForStorage({ receipt } = {}) {
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return null;
+    const stableUpdatedAt =
+      typeof receipt.createdAt === "string" && receipt.createdAt.trim() !== ""
+        ? receipt.createdAt
+        : typeof receipt.settledAt === "string" && receipt.settledAt.trim() !== ""
+          ? receipt.settledAt
+          : typeof receipt.updatedAt === "string" && receipt.updatedAt.trim() !== ""
+            ? receipt.updatedAt
+            : new Date().toISOString();
+    const normalized = {
+      ...receipt,
+      reversal: null,
+      reversalEvents: [],
+      updatedAt: stableUpdatedAt
+    };
+    return normalized;
+  }
+
+  function projectX402ReceiptRecord({ tenantId, receipt } = {}) {
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return null;
+    const receiptId = typeof receipt.receiptId === "string" ? receipt.receiptId.trim() : "";
+    if (!receiptId) return null;
+    const gateId = typeof receipt.gateId === "string" ? receipt.gateId.trim() : "";
+    const gate =
+      gateId && store.x402Gates instanceof Map
+        ? store.x402Gates.get(makeScopedKey({ tenantId, id: gateId })) ?? null
+        : null;
+    const reversalEvents = listX402ReversalEventsForReceiptSync({ tenantId, receiptId });
+    const latestEvent = reversalEvents.length > 0 ? reversalEvents[reversalEvents.length - 1] : null;
+    const derivedState =
+      typeof latestEvent?.settlementStatusAfter === "string" && latestEvent.settlementStatusAfter.trim() !== ""
+        ? latestEvent.settlementStatusAfter.trim().toLowerCase()
+        : null;
+    const updatedAtCandidates = [receipt.updatedAt, latestEvent?.occurredAt]
+      .map((value) => (typeof value === "string" && value.trim() !== "" && Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : null))
+      .filter(Boolean);
+    const updatedAt = updatedAtCandidates.length > 0 ? updatedAtCandidates.sort((a, b) => Date.parse(a) - Date.parse(b))[updatedAtCandidates.length - 1] : null;
+    return {
+      ...receipt,
+      settlementState: derivedState ?? receipt.settlementState ?? null,
+      updatedAt: updatedAt ?? receipt.updatedAt ?? null,
+      reversal:
+        gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal)
+          ? gate.reversal
+          : receipt?.reversal && typeof receipt.reversal === "object" && !Array.isArray(receipt.reversal)
+            ? receipt.reversal
+            : null,
+      reversalEvents
+    };
+  }
+
+  function compareX402ReceiptRecords(left, right) {
+    const leftMs = Number.isFinite(Date.parse(String(left?.settledAt ?? ""))) ? Date.parse(String(left.settledAt)) : Number.NaN;
+    const rightMs = Number.isFinite(Date.parse(String(right?.settledAt ?? ""))) ? Date.parse(String(right.settledAt)) : Number.NaN;
+    if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return rightMs - leftMs;
+    return String(left?.receiptId ?? "").localeCompare(String(right?.receiptId ?? ""));
+  }
+
+  function encodeX402ReceiptCursor(record) {
+    const settledAt = typeof record?.settledAt === "string" && record.settledAt.trim() !== "" ? new Date(Date.parse(record.settledAt)).toISOString() : null;
+    const receiptId = typeof record?.receiptId === "string" && record.receiptId.trim() !== "" ? record.receiptId.trim() : null;
+    if (!settledAt || !receiptId) return null;
+    return Buffer.from(JSON.stringify({ settledAt, receiptId }), "utf8").toString("base64url");
+  }
+
+  function decodeX402ReceiptCursor(raw) {
+    if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+    let parsed;
+    try {
+      parsed = JSON.parse(Buffer.from(String(raw).trim(), "base64url").toString("utf8"));
+    } catch {
+      throw new TypeError("cursor must be base64url-encoded JSON");
+    }
+    const settledAt = typeof parsed?.settledAt === "string" && Number.isFinite(Date.parse(parsed.settledAt)) ? new Date(Date.parse(parsed.settledAt)).toISOString() : null;
+    const receiptId = typeof parsed?.receiptId === "string" && parsed.receiptId.trim() !== "" ? parsed.receiptId.trim() : null;
+    if (!settledAt || !receiptId) throw new TypeError("cursor is invalid");
+    return { settledAt, receiptId };
+  }
+
+  function isReceiptAfterCursor(record, cursor) {
+    if (!cursor) return true;
+    const recordMs = Number.isFinite(Date.parse(String(record?.settledAt ?? ""))) ? Date.parse(String(record.settledAt)) : Number.NaN;
+    const cursorMs = Date.parse(cursor.settledAt);
+    if (!Number.isFinite(recordMs)) return false;
+    if (recordMs < cursorMs) return true;
+    if (recordMs > cursorMs) return false;
+    return String(record?.receiptId ?? "") > String(cursor.receiptId ?? "");
+  }
+
+  function listX402ReceiptCandidates({ tenantId }) {
+    const byReceiptId = new Map();
+    if (store.x402Receipts instanceof Map) {
+      for (const row of store.x402Receipts.values()) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        const receiptId = typeof row.receiptId === "string" ? row.receiptId.trim() : "";
+        if (!receiptId) continue;
+        byReceiptId.set(receiptId, projectX402ReceiptRecord({ tenantId, receipt: row }));
+      }
+    }
+    if (byReceiptId.size === 0 && store.x402Gates instanceof Map) {
+      for (const gate of store.x402Gates.values()) {
+        if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
+        if (normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        const derived = toX402ReceiptRecord({ tenantId, gate, includeReversalContext: true });
+        if (!derived) continue;
+        const receiptId = typeof derived.receiptId === "string" ? derived.receiptId.trim() : "";
+        if (!receiptId) continue;
+        byReceiptId.set(receiptId, derived);
+      }
+    }
+    return Array.from(byReceiptId.values()).filter(Boolean);
+  }
+
+  store.deriveX402ReceiptRecord = function deriveX402ReceiptRecord({
+    tenantId = DEFAULT_TENANT_ID,
+    gate,
+    settlement = null,
+    includeReversalContext = false
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    const derived = toX402ReceiptRecord({ tenantId, gate, settlement, includeReversalContext });
+    return normalizeX402ReceiptRecordForStorage({ receipt: derived });
+  };
+
+  store.putX402Receipt = async function putX402Receipt({ tenantId = DEFAULT_TENANT_ID, receipt, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    const normalized = normalizeX402ReceiptRecordForStorage({ receipt });
+    if (!normalized) throw new TypeError("receipt is required");
+    const receiptId = typeof normalized.receiptId === "string" ? normalized.receiptId.trim() : "";
+    if (!receiptId) throw new TypeError("receipt.receiptId is required");
+    const key = x402ReceiptStoreKey({ tenantId, receiptId });
+    const at =
+      typeof normalized.updatedAt === "string" && normalized.updatedAt.trim() !== ""
+        ? normalized.updatedAt
+        : typeof normalized.createdAt === "string" && normalized.createdAt.trim() !== ""
+          ? normalized.createdAt
+          : new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [{ kind: "X402_RECEIPT_PUT", tenantId, receiptId, receipt: { ...normalized, tenantId, receiptId } }],
+      audit
+    });
+    return store.x402Receipts.get(key) ?? null;
+  };
 
   store.getX402Receipt = async function getX402Receipt({ tenantId = DEFAULT_TENANT_ID, receiptId } = {}) {
     tenantId = normalizeTenantId(tenantId);
     if (typeof receiptId !== "string" || receiptId.trim() === "") throw new TypeError("receiptId is required");
     const wanted = receiptId.trim();
+    const key = x402ReceiptStoreKey({ tenantId, receiptId: wanted });
+    const stored = store.x402Receipts instanceof Map ? store.x402Receipts.get(key) ?? null : null;
+    if (stored) return projectX402ReceiptRecord({ tenantId, receipt: stored });
     for (const gate of store.x402Gates.values()) {
       if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
       if (normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
-      const receipt = toX402ReceiptRecord({ tenantId, gate });
+      const receipt = toX402ReceiptRecord({ tenantId, gate, includeReversalContext: true });
       if (!receipt) continue;
       if (String(receipt.receiptId ?? "") === wanted) return receipt;
     }
     return null;
   };
 
-  store.listX402Receipts = async function listX402Receipts({
+  store.listX402ReceiptsPage = async function listX402ReceiptsPage({
     tenantId = DEFAULT_TENANT_ID,
     agentId = null,
     sponsorId = null,
+    sponsorWalletRef = null,
     toolId = null,
     state = null,
     from = null,
     to = null,
     limit = 200,
-    offset = 0
+    offset = 0,
+    cursor = null
   } = {}) {
     tenantId = normalizeTenantId(tenantId);
     if (agentId !== null && (typeof agentId !== "string" || agentId.trim() === "")) throw new TypeError("agentId must be null or a non-empty string");
     if (sponsorId !== null && (typeof sponsorId !== "string" || sponsorId.trim() === "")) throw new TypeError("sponsorId must be null or a non-empty string");
+    if (sponsorWalletRef !== null && (typeof sponsorWalletRef !== "string" || sponsorWalletRef.trim() === "")) {
+      throw new TypeError("sponsorWalletRef must be null or a non-empty string");
+    }
     if (toolId !== null && (typeof toolId !== "string" || toolId.trim() === "")) throw new TypeError("toolId must be null or a non-empty string");
     if (state !== null && (typeof state !== "string" || state.trim() === "")) throw new TypeError("state must be null or a non-empty string");
     if (from !== null && !Number.isFinite(Date.parse(String(from)))) throw new TypeError("from must be null or an ISO date-time");
@@ -1289,41 +1566,45 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
 
     const normalizedAgentId = agentId ? agentId.trim() : null;
     const normalizedSponsorId = sponsorId ? sponsorId.trim() : null;
+    const normalizedSponsorWalletRef = sponsorWalletRef ? sponsorWalletRef.trim() : null;
     const normalizedToolId = toolId ? toolId.trim() : null;
     const normalizedState = state ? state.trim().toLowerCase() : null;
     const fromMs = from ? Date.parse(String(from)) : null;
     const toMs = to ? Date.parse(String(to)) : null;
-    const out = [];
+    const decodedCursor = cursor === null ? null : decodeX402ReceiptCursor(cursor);
 
-    for (const gate of store.x402Gates.values()) {
-      if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
-      if (normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
-      const receipt = toX402ReceiptRecord({ tenantId, gate });
-      if (!receipt) continue;
+    const all = listX402ReceiptCandidates({ tenantId });
+    const filtered = all.filter((receipt) => {
+      if (!receipt) return false;
       if (
         normalizedAgentId &&
         String(receipt.payerAgentId ?? "") !== normalizedAgentId &&
         String(receipt.providerId ?? "") !== normalizedAgentId &&
         String(receipt.agentKeyId ?? "") !== normalizedAgentId
       ) {
-        continue;
+        return false;
       }
-      if (normalizedSponsorId && String(receipt.sponsorRef ?? "") !== normalizedSponsorId) continue;
-      if (normalizedToolId && String(receipt.toolId ?? "") !== normalizedToolId) continue;
-      if (normalizedState && String(receipt.settlementState ?? "").toLowerCase() !== normalizedState) continue;
+      if (normalizedSponsorId && String(receipt.sponsorRef ?? "") !== normalizedSponsorId) return false;
+      if (normalizedSponsorWalletRef && String(receipt.sponsorWalletRef ?? "") !== normalizedSponsorWalletRef) return false;
+      if (normalizedToolId && String(receipt.toolId ?? "") !== normalizedToolId) return false;
+      if (normalizedState && String(receipt.settlementState ?? "").toLowerCase() !== normalizedState) return false;
       const settledAtMs = Number.isFinite(Date.parse(String(receipt.settledAt ?? ""))) ? Date.parse(String(receipt.settledAt)) : Number.NaN;
-      if (fromMs !== null && (!Number.isFinite(settledAtMs) || settledAtMs < fromMs)) continue;
-      if (toMs !== null && (!Number.isFinite(settledAtMs) || settledAtMs > toMs)) continue;
-      out.push(receipt);
-    }
-
-    out.sort((left, right) => {
-      const leftMs = Number.isFinite(Date.parse(String(left?.settledAt ?? ""))) ? Date.parse(String(left.settledAt)) : Number.NaN;
-      const rightMs = Number.isFinite(Date.parse(String(right?.settledAt ?? ""))) ? Date.parse(String(right.settledAt)) : Number.NaN;
-      if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return rightMs - leftMs;
-      return String(left?.receiptId ?? "").localeCompare(String(right?.receiptId ?? ""));
+      if (fromMs !== null && (!Number.isFinite(settledAtMs) || settledAtMs < fromMs)) return false;
+      if (toMs !== null && (!Number.isFinite(settledAtMs) || settledAtMs > toMs)) return false;
+      return true;
     });
-    return out.slice(offset, offset + Math.min(1000, limit));
+
+    filtered.sort(compareX402ReceiptRecords);
+    const cursorFiltered = decodedCursor ? filtered.filter((row) => isReceiptAfterCursor(row, decodedCursor)) : filtered;
+    const paged = cursorFiltered.slice(offset, offset + Math.min(1000, limit));
+    const hasMore = cursorFiltered.length > offset + paged.length;
+    const nextCursor = hasMore && paged.length > 0 ? encodeX402ReceiptCursor(paged[paged.length - 1]) : null;
+    return { receipts: paged, nextCursor };
+  };
+
+  store.listX402Receipts = async function listX402Receipts(args = {}) {
+    const page = await store.listX402ReceiptsPage(args);
+    return page.receipts;
   };
 
   store.listArbitrationCases = async function listArbitrationCases({

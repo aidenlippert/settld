@@ -7327,6 +7327,659 @@
           }
         }
       },
+      "ProviderConformanceVerdictV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "requiredChecks",
+          "passedChecks"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "requiredChecks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "passedChecks": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ProviderConformanceSummaryV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "generatedAt",
+          "verdict"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "verdict": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ok",
+              "requiredChecks",
+              "passedChecks"
+            ],
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "requiredChecks": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "passedChecks": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "MarketplaceProviderCertificationBadgeV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "providerId",
+          "publicationId",
+          "status",
+          "certified",
+          "manifestHash",
+          "providerSigningKeyId",
+          "toolCount",
+          "conformance",
+          "badgeHash"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "MarketplaceProviderCertificationBadge.v1"
+            ]
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "publicationId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "conformance_failed",
+              "draft"
+            ]
+          },
+          "certified": {
+            "type": "boolean"
+          },
+          "certifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "manifestHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "providerSigningKeyId": {
+            "type": "string",
+            "nullable": true
+          },
+          "toolCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "conformance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "generatedAt",
+              "verdict"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "string"
+              },
+              "generatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "verdict": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ok",
+                  "requiredChecks",
+                  "passedChecks"
+                ],
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "requiredChecks": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "passedChecks": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "nullable": true
+          },
+          "badgeHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "MarketplaceProviderPublicationSummaryV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "publicationId",
+          "tenantId",
+          "providerId",
+          "status",
+          "certified",
+          "baseUrl",
+          "tags",
+          "toolCount",
+          "manifestSchemaVersion",
+          "manifestHash",
+          "conformance",
+          "certificationBadge",
+          "publishedAt",
+          "certifiedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string"
+          },
+          "publicationId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "conformance_failed",
+              "draft"
+            ]
+          },
+          "certified": {
+            "type": "boolean"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "toolCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "manifestSchemaVersion": {
+            "type": "string"
+          },
+          "manifestHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "conformance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "generatedAt",
+              "verdict"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "string"
+              },
+              "generatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "verdict": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ok",
+                  "requiredChecks",
+                  "passedChecks"
+                ],
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "requiredChecks": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "passedChecks": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "nullable": true
+          },
+          "certificationBadge": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "providerId",
+              "publicationId",
+              "status",
+              "certified",
+              "manifestHash",
+              "providerSigningKeyId",
+              "toolCount",
+              "conformance",
+              "badgeHash"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "string",
+                "enum": [
+                  "MarketplaceProviderCertificationBadge.v1"
+                ]
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "publicationId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "certified",
+                  "conformance_failed",
+                  "draft"
+                ]
+              },
+              "certified": {
+                "type": "boolean"
+              },
+              "certifiedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "manifestHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "providerSigningKeyId": {
+                "type": "string",
+                "nullable": true
+              },
+              "toolCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "conformance": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "generatedAt",
+                  "verdict"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "type": "string"
+                  },
+                  "generatedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "verdict": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "ok",
+                      "requiredChecks",
+                      "passedChecks"
+                    ],
+                    "properties": {
+                      "ok": {
+                        "type": "boolean"
+                      },
+                      "requiredChecks": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "passedChecks": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                },
+                "nullable": true
+              },
+              "badgeHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "nullable": true
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "certifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "MarketplaceToolListingV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "providerId",
+          "publicationId",
+          "certified",
+          "providerStatus",
+          "providerTags",
+          "manifestSchemaVersion",
+          "manifestHash",
+          "toolId",
+          "pricing",
+          "certificationBadge",
+          "publishedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "MarketplaceToolListing.v1"
+            ]
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "publicationId": {
+            "type": "string"
+          },
+          "certified": {
+            "type": "boolean"
+          },
+          "providerStatus": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "conformance_failed",
+              "draft"
+            ]
+          },
+          "providerDescription": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "manifestSchemaVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "manifestHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "nullable": true
+          },
+          "toolId": {
+            "type": "string"
+          },
+          "mcpToolName": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "method": {
+            "type": "string",
+            "nullable": true
+          },
+          "paidPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "upstreamPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pricing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "amountCents",
+              "currency"
+            ],
+            "properties": {
+              "amountCents": {
+                "type": "integer",
+                "minimum": 1,
+                "nullable": true
+              },
+              "currency": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "idempotency": {
+            "type": "string",
+            "nullable": true
+          },
+          "signatureMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "authMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "certificationBadge": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "providerId",
+              "publicationId",
+              "status",
+              "certified",
+              "manifestHash",
+              "providerSigningKeyId",
+              "toolCount",
+              "conformance",
+              "badgeHash"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "string",
+                "enum": [
+                  "MarketplaceProviderCertificationBadge.v1"
+                ]
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "publicationId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "certified",
+                  "conformance_failed",
+                  "draft"
+                ]
+              },
+              "certified": {
+                "type": "boolean"
+              },
+              "certifiedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "manifestHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "providerSigningKeyId": {
+                "type": "string",
+                "nullable": true
+              },
+              "toolCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "conformance": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "generatedAt",
+                  "verdict"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "type": "string"
+                  },
+                  "generatedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "verdict": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "ok",
+                      "requiredChecks",
+                      "passedChecks"
+                    ],
+                    "properties": {
+                      "ok": {
+                        "type": "boolean"
+                      },
+                      "requiredChecks": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "passedChecks": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                },
+                "nullable": true
+              },
+              "badgeHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "nullable": true
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
       "MarketplaceRfqV1": {
         "type": "object",
         "additionalProperties": false,
@@ -16376,6 +17029,1628 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/providers": {
+      "get": {
+        "summary": "List marketplace provider publications",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "certified",
+                "conformance_failed",
+                "draft",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "toolId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "publications",
+                    "total",
+                    "limit",
+                    "offset"
+                  ],
+                  "properties": {
+                    "publications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "publicationId",
+                          "tenantId",
+                          "providerId",
+                          "status",
+                          "certified",
+                          "baseUrl",
+                          "tags",
+                          "toolCount",
+                          "manifestSchemaVersion",
+                          "manifestHash",
+                          "conformance",
+                          "certificationBadge",
+                          "publishedAt",
+                          "certifiedAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "type": "string"
+                          },
+                          "publicationId": {
+                            "type": "string"
+                          },
+                          "tenantId": {
+                            "type": "string"
+                          },
+                          "providerId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "certified",
+                              "conformance_failed",
+                              "draft"
+                            ]
+                          },
+                          "certified": {
+                            "type": "boolean"
+                          },
+                          "baseUrl": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "toolCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "manifestSchemaVersion": {
+                            "type": "string"
+                          },
+                          "manifestHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "conformance": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "schemaVersion",
+                              "generatedAt",
+                              "verdict"
+                            ],
+                            "properties": {
+                              "schemaVersion": {
+                                "type": "string"
+                              },
+                              "generatedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true
+                              },
+                              "verdict": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "ok",
+                                  "requiredChecks",
+                                  "passedChecks"
+                                ],
+                                "properties": {
+                                  "ok": {
+                                    "type": "boolean"
+                                  },
+                                  "requiredChecks": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "passedChecks": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                }
+                              }
+                            },
+                            "nullable": true
+                          },
+                          "certificationBadge": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "schemaVersion",
+                              "providerId",
+                              "publicationId",
+                              "status",
+                              "certified",
+                              "manifestHash",
+                              "providerSigningKeyId",
+                              "toolCount",
+                              "conformance",
+                              "badgeHash"
+                            ],
+                            "properties": {
+                              "schemaVersion": {
+                                "type": "string",
+                                "enum": [
+                                  "MarketplaceProviderCertificationBadge.v1"
+                                ]
+                              },
+                              "providerId": {
+                                "type": "string"
+                              },
+                              "publicationId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "certified",
+                                  "conformance_failed",
+                                  "draft"
+                                ]
+                              },
+                              "certified": {
+                                "type": "boolean"
+                              },
+                              "certifiedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true
+                              },
+                              "manifestHash": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$"
+                              },
+                              "providerSigningKeyId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "toolCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "conformance": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "schemaVersion",
+                                  "generatedAt",
+                                  "verdict"
+                                ],
+                                "properties": {
+                                  "schemaVersion": {
+                                    "type": "string"
+                                  },
+                                  "generatedAt": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "nullable": true
+                                  },
+                                  "verdict": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "ok",
+                                      "requiredChecks",
+                                      "passedChecks"
+                                    ],
+                                    "properties": {
+                                      "ok": {
+                                        "type": "boolean"
+                                      },
+                                      "requiredChecks": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "passedChecks": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    }
+                                  }
+                                },
+                                "nullable": true
+                              },
+                              "badgeHash": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$"
+                              }
+                            },
+                            "nullable": true
+                          },
+                          "publishedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "certifiedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/tools": {
+      "get": {
+        "summary": "List marketplace tool listings aggregated from provider publications",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "certified",
+                "conformance_failed",
+                "draft",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "toolId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated tag filter"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "tools",
+                    "total",
+                    "limit",
+                    "offset"
+                  ],
+                  "properties": {
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "providerId",
+                          "publicationId",
+                          "certified",
+                          "providerStatus",
+                          "providerTags",
+                          "manifestSchemaVersion",
+                          "manifestHash",
+                          "toolId",
+                          "pricing",
+                          "certificationBadge",
+                          "publishedAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "type": "string",
+                            "enum": [
+                              "MarketplaceToolListing.v1"
+                            ]
+                          },
+                          "providerId": {
+                            "type": "string"
+                          },
+                          "publicationId": {
+                            "type": "string"
+                          },
+                          "certified": {
+                            "type": "boolean"
+                          },
+                          "providerStatus": {
+                            "type": "string",
+                            "enum": [
+                              "certified",
+                              "conformance_failed",
+                              "draft"
+                            ]
+                          },
+                          "providerDescription": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "providerTags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "manifestSchemaVersion": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "manifestHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                            "nullable": true
+                          },
+                          "toolId": {
+                            "type": "string"
+                          },
+                          "mcpToolName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "description": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "method": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "paidPath": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "upstreamPath": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "pricing": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "amountCents",
+                              "currency"
+                            ],
+                            "properties": {
+                              "amountCents": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "nullable": true
+                              },
+                              "currency": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          },
+                          "idempotency": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "signatureMode": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "authMode": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "certificationBadge": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "schemaVersion",
+                              "providerId",
+                              "publicationId",
+                              "status",
+                              "certified",
+                              "manifestHash",
+                              "providerSigningKeyId",
+                              "toolCount",
+                              "conformance",
+                              "badgeHash"
+                            ],
+                            "properties": {
+                              "schemaVersion": {
+                                "type": "string",
+                                "enum": [
+                                  "MarketplaceProviderCertificationBadge.v1"
+                                ]
+                              },
+                              "providerId": {
+                                "type": "string"
+                              },
+                              "publicationId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "certified",
+                                  "conformance_failed",
+                                  "draft"
+                                ]
+                              },
+                              "certified": {
+                                "type": "boolean"
+                              },
+                              "certifiedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true
+                              },
+                              "manifestHash": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$"
+                              },
+                              "providerSigningKeyId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "toolCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "conformance": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "schemaVersion",
+                                  "generatedAt",
+                                  "verdict"
+                                ],
+                                "properties": {
+                                  "schemaVersion": {
+                                    "type": "string"
+                                  },
+                                  "generatedAt": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "nullable": true
+                                  },
+                                  "verdict": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "ok",
+                                      "requiredChecks",
+                                      "passedChecks"
+                                    ],
+                                    "properties": {
+                                      "ok": {
+                                        "type": "boolean"
+                                      },
+                                      "requiredChecks": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "passedChecks": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    }
+                                  }
+                                },
+                                "nullable": true
+                              },
+                              "badgeHash": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$"
+                              }
+                            },
+                            "nullable": true
+                          },
+                          "publishedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/providers/publish": {
+      "post": {
+        "summary": "Publish provider manifest and optionally run conformance",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "baseUrl",
+                  "manifest"
+                ],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "baseUrl": {
+                    "type": "string"
+                  },
+                  "toolId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "providerSigningPublicKeyPem": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "runConformance": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "contactUrl": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "termsUrl": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "publication"
+                  ],
+                  "properties": {
+                    "publication": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "publication"
+                  ],
+                  "properties": {
+                    "publication": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/providers/conformance/run": {
+      "post": {
+        "summary": "Run provider conformance checks",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "baseUrl",
+                  "manifest"
+                ],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "baseUrl": {
+                    "type": "string"
+                  },
+                  "toolId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "providerSigningPublicKeyPem": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "report"
+                  ],
+                  "properties": {
+                    "report": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/providers/{providerId}": {
+      "get": {
+        "summary": "Get marketplace provider publication by id",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "publication",
+                    "certificationBadge"
+                  ],
+                  "properties": {
+                    "publication": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "certificationBadge": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "providerId",
+                        "publicationId",
+                        "status",
+                        "certified",
+                        "manifestHash",
+                        "providerSigningKeyId",
+                        "toolCount",
+                        "conformance",
+                        "badgeHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "MarketplaceProviderCertificationBadge.v1"
+                          ]
+                        },
+                        "providerId": {
+                          "type": "string"
+                        },
+                        "publicationId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "certified",
+                            "conformance_failed",
+                            "draft"
+                          ]
+                        },
+                        "certified": {
+                          "type": "boolean"
+                        },
+                        "certifiedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "manifestHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "providerSigningKeyId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "toolCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "conformance": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "generatedAt",
+                            "verdict"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "type": "string"
+                            },
+                            "generatedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "verdict": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "ok",
+                                "requiredChecks",
+                                "passedChecks"
+                              ],
+                              "properties": {
+                                "ok": {
+                                  "type": "boolean"
+                                },
+                                "requiredChecks": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "passedChecks": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "badgeHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/marketplace/providers/{providerId}/badge": {
+      "get": {
+        "summary": "Get provider certification badge payload",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "badge"
+                  ],
+                  "properties": {
+                    "badge": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "providerId",
+                        "publicationId",
+                        "status",
+                        "certified",
+                        "manifestHash",
+                        "providerSigningKeyId",
+                        "toolCount",
+                        "conformance",
+                        "badgeHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "MarketplaceProviderCertificationBadge.v1"
+                          ]
+                        },
+                        "providerId": {
+                          "type": "string"
+                        },
+                        "publicationId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "certified",
+                            "conformance_failed",
+                            "draft"
+                          ]
+                        },
+                        "certified": {
+                          "type": "boolean"
+                        },
+                        "certifiedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "manifestHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "providerSigningKeyId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "toolCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "conformance": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "generatedAt",
+                            "verdict"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "type": "string"
+                            },
+                            "generatedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "verdict": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "ok",
+                                "requiredChecks",
+                                "passedChecks"
+                              ],
+                              "properties": {
+                                "ok": {
+                                  "type": "boolean"
+                                },
+                                "requiredChecks": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "passedChecks": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "badgeHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
                 }
               }
             }

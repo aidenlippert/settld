@@ -34,6 +34,36 @@ async function creditWallet(api, { agentId, amountCents, idempotencyKey }) {
   assert.equal(response.statusCode, 201, response.body);
 }
 
+async function upsertX402WalletPolicy(api, { policy, idempotencyKey }) {
+  const response = await request(api, {
+    method: "POST",
+    path: "/ops/x402/wallet-policies",
+    headers: {
+      "x-idempotency-key": idempotencyKey,
+      "x-settld-protocol": "1.0"
+    },
+    body: { policy }
+  });
+  return response;
+}
+
+async function issueWalletAuthorizationDecision(
+  api,
+  { sponsorWalletRef, gateId, quoteId = null, requestBindingMode = null, requestBindingSha256 = null, idempotencyKey }
+) {
+  return await request(api, {
+    method: "POST",
+    path: `/x402/wallets/${encodeURIComponent(sponsorWalletRef)}/authorize`,
+    headers: { "x-idempotency-key": idempotencyKey },
+    body: {
+      gateId,
+      ...(quoteId ? { quoteId } : {}),
+      ...(requestBindingMode ? { requestBindingMode } : {}),
+      ...(requestBindingSha256 ? { requestBindingSha256 } : {})
+    }
+  });
+}
+
 function autoPolicy100() {
   return {
     mode: "automatic",
@@ -416,4 +446,108 @@ test("API e2e: x402 reversal request_refund + resolve_refund accepted moves fund
   assert.equal(latest.eventType, "refund_resolved");
   assert.equal(prior.eventType, "refund_requested");
   assert.equal(latest.prevEventHash, prior.eventHash);
+});
+
+test("API e2e: x402 reversal enforces wallet policy allowedReversalActions", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+  const payer = await registerAgent(api, { agentId: "agt_x402_reversal_policy_payer_1" });
+  const payee = await registerAgent(api, { agentId: "agt_x402_reversal_policy_payee_1" });
+  await creditWallet(api, { agentId: payer.agentId, amountCents: 5000, idempotencyKey: "wallet_credit_x402_reversal_policy_1" });
+
+  const policy = {
+    schemaVersion: "X402WalletPolicy.v1",
+    sponsorRef: "sponsor_reversal_policy_1",
+    sponsorWalletRef: "wallet_reversal_policy_1",
+    policyRef: "policy_reversal_1",
+    policyVersion: 3,
+    status: "active",
+    allowedReversalActions: ["request_refund"],
+    requireQuote: false,
+    requireStrictRequestBinding: false,
+    requireAgentKeyMatch: false
+  };
+  const upsertedPolicy = await upsertX402WalletPolicy(api, {
+    policy,
+    idempotencyKey: "x402_wallet_policy_reversal_upsert_1"
+  });
+  assert.equal(upsertedPolicy.statusCode, 201, upsertedPolicy.body);
+
+  const gateId = "x402gate_reversal_policy_1";
+  const amountCents = 500;
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_reversal_policy_1" },
+    body: {
+      gateId,
+      payerAgentId: payer.agentId,
+      payeeAgentId: payee.agentId,
+      amountCents,
+      currency: "USD",
+      toolId: "mock_search",
+      agentPassport: {
+        sponsorRef: policy.sponsorRef,
+        sponsorWalletRef: policy.sponsorWalletRef,
+        agentKeyId: payer.agentId,
+        delegationRef: "delegation_reversal_policy_1",
+        policyRef: policy.policyRef,
+        policyVersion: policy.policyVersion
+      }
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+
+  const authorized = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authorize_reversal_policy_1" },
+    body: { gateId }
+  });
+  assert.equal(authorized.statusCode, 409, authorized.body);
+  assert.equal(authorized.json?.code, "X402_WALLET_ISSUER_DECISION_REQUIRED");
+
+  const issuerDecision = await issueWalletAuthorizationDecision(api, {
+    sponsorWalletRef: policy.sponsorWalletRef,
+    gateId,
+    idempotencyKey: "x402_wallet_issuer_reversal_policy_1"
+  });
+  assert.equal(issuerDecision.statusCode, 200, issuerDecision.body);
+
+  const authorizedWithDecision = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authorize_reversal_policy_1_with_decision" },
+    body: {
+      gateId,
+      walletAuthorizationDecisionToken: issuerDecision.json?.walletAuthorizationDecisionToken
+    }
+  });
+  assert.equal(authorizedWithDecision.statusCode, 200, authorizedWithDecision.body);
+
+  const bindings = await loadReversalBindings(api, { gateId, payerAgentId: payer.agentId });
+  const voidCommand = signReversalCommand({
+    payer,
+    gateId,
+    receiptId: bindings.receiptId,
+    quoteId: bindings.quoteId,
+    requestSha256: bindings.requestSha256,
+    sponsorRef: bindings.sponsorRef,
+    action: "void_authorization",
+    commandId: "cmd_reversal_policy_void_1",
+    idempotencyKey: "idem_reversal_policy_void_1",
+    nonce: "nonce_reversal_policy_void_1"
+  });
+  const blocked = await request(api, {
+    method: "POST",
+    path: "/x402/gate/reversal",
+    headers: { "x-idempotency-key": "x402_gate_reversal_policy_void_1" },
+    body: {
+      gateId,
+      action: "void_authorization",
+      reason: "operator_cancelled",
+      command: voidCommand
+    }
+  });
+  assert.equal(blocked.statusCode, 409, blocked.body);
+  assert.equal(blocked.json?.code, "X402_WALLET_POLICY_REVERSAL_ACTION_NOT_ALLOWED");
 });

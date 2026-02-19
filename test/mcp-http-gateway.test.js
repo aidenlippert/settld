@@ -13,21 +13,31 @@ function listen(server) {
   });
 }
 
-function onceLine(stream, { timeoutMs = 5000 } = {}) {
+function waitForLineMatching(stream, pattern, { timeoutMs = 5000 } = {}) {
   return new Promise((resolve, reject) => {
     let buf = "";
+    const recent = [];
     const onData = (chunk) => {
       buf += String(chunk);
-      const idx = buf.indexOf("\n");
-      if (idx === -1) return;
-      const line = buf.slice(0, idx).trim();
-      stream.off("data", onData);
-      resolve(line);
+      while (true) {
+        const idx = buf.indexOf("\n");
+        if (idx === -1) break;
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line) continue;
+        recent.push(line);
+        if (recent.length > 8) recent.shift();
+        if (pattern.test(line)) {
+          stream.off("data", onData);
+          resolve(line);
+          return;
+        }
+      }
     };
     stream.on("data", onData);
     setTimeout(() => {
       stream.off("data", onData);
-      reject(new Error("timeout waiting for line"));
+      reject(new Error(`timeout waiting for line matching ${String(pattern)}; recent=${JSON.stringify(recent)}`));
     }, timeoutMs).unref?.();
   });
 }
@@ -97,7 +107,7 @@ test("mcp http gateway: initialize -> tools/list -> tools/call (submit_evidence)
   });
   gateway.stderr.setEncoding("utf8");
 
-  const line = await onceLine(gateway.stderr, { timeoutMs: 10_000 });
+  const line = await waitForLineMatching(gateway.stderr, /listening on :(\d+)/, { timeoutMs: 10_000 });
   const m = line.match(/listening on :(\d+)/);
   assert.ok(m, `expected listening line, got: ${line}`);
   const port = Number(m[1]);
@@ -147,4 +157,3 @@ test("mcp http gateway: initialize -> tools/list -> tools/call (submit_evidence)
   const urls = requests.map((r) => r.url);
   assert.deepEqual(urls, ["/agents/agt_1/runs/run_1/events", "/agents/agt_1/runs/run_1/events"]);
 });
-

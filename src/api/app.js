@@ -240,6 +240,11 @@ import {
   mintSettldPayTokenV1,
   parseSettldPayTokenV1
 } from "../core/settld-pay-token.js";
+import {
+  buildX402WalletIssuerDecisionPayloadV1,
+  mintX402WalletIssuerDecisionTokenV1,
+  verifyX402WalletIssuerDecisionTokenV1
+} from "../core/x402-wallet-issuer-decision.js";
 import { buildSettldPayKeysetV1 } from "../core/settld-keys.js";
 import {
   buildMarketplaceOffer,
@@ -1180,15 +1185,26 @@ export function createApi({
   })();
   const circleReserveAdapter = x402ReserveAdapter ?? createCircleReserveAdapter({ mode: x402ReserveModeValue, now: nowIso });
 
-  function computeX402DailyAuthorizedExposureCents({ tenantId, dayKey, excludeGateId = null } = {}) {
+  function computeX402DailyAuthorizedExposureCents({ tenantId, dayKey, excludeGateId = null, sponsorWalletRef = null } = {}) {
     if (!dayKey || !(store?.x402Gates instanceof Map)) return 0;
     const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const sponsorWalletFilter =
+      typeof sponsorWalletRef === "string" && sponsorWalletRef.trim() !== "" ? sponsorWalletRef.trim() : null;
     let total = 0;
     for (const row of store.x402Gates.values()) {
       if (!row || typeof row !== "object") continue;
       if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
       const rowGateId = typeof row.gateId === "string" ? row.gateId : "";
       if (excludeGateId && rowGateId === excludeGateId) continue;
+      if (sponsorWalletFilter) {
+        const rowSponsorWalletRef =
+          row?.agentPassport && typeof row.agentPassport === "object" && !Array.isArray(row.agentPassport)
+            ? typeof row.agentPassport.sponsorWalletRef === "string" && row.agentPassport.sponsorWalletRef.trim() !== ""
+              ? row.agentPassport.sponsorWalletRef.trim()
+              : null
+            : null;
+        if (rowSponsorWalletRef !== sponsorWalletFilter) continue;
+      }
 
       const authorization = row.authorization && typeof row.authorization === "object" && !Array.isArray(row.authorization) ? row.authorization : null;
       if (!authorization) continue;
@@ -6381,6 +6397,7 @@ export function createApi({
   const AGENT_ACTING_ON_BEHALF_OF_SCHEMA_VERSION = "AgentActingOnBehalfOf.v1";
   const X402_AGENT_PASSPORT_SCHEMA_VERSION = "AgentPassport.v1";
   const X402_QUOTE_SCHEMA_VERSION = "X402Quote.v1";
+  const X402_WALLET_POLICY_SCHEMA_VERSION = "X402WalletPolicy.v1";
   const MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_ACCEPT = "marketplace.agreement.accept";
   const MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CHANGE_ORDER = "marketplace.agreement.change_order";
   const MARKETPLACE_DELEGATION_SCOPE_AGREEMENT_CANCEL = "marketplace.agreement.cancel";
@@ -6571,6 +6588,668 @@ export function createApi({
       { path: "$" }
     );
     return sha256Hex(canonicalJsonStringify(normalized));
+  }
+
+  function normalizeX402WalletPolicyStatusInput(rawValue, { fieldPath = "status", allowNull = false } = {}) {
+    if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+      if (allowNull) return null;
+      return "active";
+    }
+    const value = String(rawValue).trim().toLowerCase();
+    if (value !== "active" && value !== "disabled") {
+      throw new TypeError(`${fieldPath} must be active|disabled`);
+    }
+    return value;
+  }
+
+  function normalizeX402WalletPolicyAllowedIdsInput(rawValue, fieldPath, { allowNull = true, max = 200 } = {}) {
+    if (rawValue === null || rawValue === undefined || rawValue === "") {
+      if (allowNull) return [];
+      throw new TypeError(`${fieldPath} is required`);
+    }
+    let parsed = rawValue;
+    if (typeof parsed === "string") {
+      const trimmed = parsed.trim();
+      if (!trimmed) return [];
+      parsed = trimmed.split(",").map((entry) => entry.trim());
+    }
+    if (!Array.isArray(parsed)) throw new TypeError(`${fieldPath} must be an array`);
+    const out = [];
+    const seen = new Set();
+    for (const entry of parsed) {
+      const id = normalizeOptionalX402RefInput(entry, fieldPath, { allowNull: true, max });
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }
+
+  function normalizeX402WalletPolicyAllowedCurrenciesInput(rawValue, fieldPath, { allowNull = true } = {}) {
+    if (rawValue === null || rawValue === undefined || rawValue === "") {
+      if (allowNull) return [];
+      throw new TypeError(`${fieldPath} is required`);
+    }
+    let parsed = rawValue;
+    if (typeof parsed === "string") {
+      const trimmed = parsed.trim();
+      if (!trimmed) return [];
+      parsed = trimmed.split(",").map((entry) => entry.trim());
+    }
+    if (!Array.isArray(parsed)) throw new TypeError(`${fieldPath} must be an array`);
+    const out = [];
+    const seen = new Set();
+    for (const entry of parsed) {
+      if (entry === null || entry === undefined || String(entry).trim() === "") continue;
+      const currency = String(entry).trim().toUpperCase();
+      if (!/^[A-Z][A-Z0-9_]{2,11}$/.test(currency)) {
+        throw new TypeError(`${fieldPath} values must match ^[A-Z][A-Z0-9_]{2,11}$`);
+      }
+      if (seen.has(currency)) continue;
+      seen.add(currency);
+      out.push(currency);
+    }
+    return out;
+  }
+
+  function normalizeX402WalletPolicyAllowedReversalActionsInput(rawValue, fieldPath, { allowNull = true } = {}) {
+    if (rawValue === null || rawValue === undefined || rawValue === "") {
+      if (allowNull) return [];
+      throw new TypeError(`${fieldPath} is required`);
+    }
+    if (!Array.isArray(rawValue)) throw new TypeError(`${fieldPath} must be an array`);
+    const out = [];
+    const seen = new Set();
+    for (const entry of rawValue) {
+      if (entry === null || entry === undefined || String(entry).trim() === "") continue;
+      const action = String(entry).trim().toLowerCase();
+      if (action !== "void_authorization" && action !== "request_refund" && action !== "resolve_refund") {
+        throw new TypeError(`${fieldPath} values must be void_authorization|request_refund|resolve_refund`);
+      }
+      if (seen.has(action)) continue;
+      seen.add(action);
+      out.push(action);
+    }
+    return out;
+  }
+
+  function buildX402WalletPolicyFingerprint(policy) {
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) return null;
+    const normalized = normalizeForCanonicalJson(
+      {
+        schemaVersion: X402_WALLET_POLICY_SCHEMA_VERSION,
+        sponsorRef: normalizeOptionalX402RefInput(policy.sponsorRef ?? null, "policy.sponsorRef", { allowNull: true, max: 200 }),
+        sponsorWalletRef: normalizeOptionalX402RefInput(policy.sponsorWalletRef ?? null, "policy.sponsorWalletRef", {
+          allowNull: false,
+          max: 200
+        }),
+        policyRef: normalizeOptionalX402RefInput(policy.policyRef ?? null, "policy.policyRef", { allowNull: false, max: 200 }),
+        policyVersion: normalizeOptionalX402PositiveSafeInt(policy.policyVersion ?? null, "policy.policyVersion", { allowNull: false }),
+        status: normalizeX402WalletPolicyStatusInput(policy.status ?? null, { allowNull: false }),
+        maxAmountCents: normalizeOptionalNonNegativeSafeInt(policy.maxAmountCents ?? null, {
+          fieldName: "policy.maxAmountCents",
+          allowNull: true
+        }),
+        maxDailyAuthorizationCents: normalizeOptionalNonNegativeSafeInt(policy.maxDailyAuthorizationCents ?? null, {
+          fieldName: "policy.maxDailyAuthorizationCents",
+          allowNull: true
+        }),
+        allowedProviderIds: normalizeX402WalletPolicyAllowedIdsInput(policy.allowedProviderIds ?? [], "policy.allowedProviderIds"),
+        allowedToolIds: normalizeX402WalletPolicyAllowedIdsInput(policy.allowedToolIds ?? [], "policy.allowedToolIds"),
+        allowedAgentKeyIds: normalizeX402WalletPolicyAllowedIdsInput(policy.allowedAgentKeyIds ?? [], "policy.allowedAgentKeyIds"),
+        allowedCurrencies: normalizeX402WalletPolicyAllowedCurrenciesInput(policy.allowedCurrencies ?? [], "policy.allowedCurrencies"),
+        allowedReversalActions: normalizeX402WalletPolicyAllowedReversalActionsInput(
+          policy.allowedReversalActions ?? [],
+          "policy.allowedReversalActions"
+        ),
+        requireQuote: policy.requireQuote === true,
+        requireStrictRequestBinding: policy.requireStrictRequestBinding === true,
+        requireAgentKeyMatch: policy.requireAgentKeyMatch === true
+      },
+      { path: "$" }
+    );
+    return sha256Hex(canonicalJsonStringify(normalized));
+  }
+
+  function normalizeX402WalletPolicyInput(rawValue, { fieldPath = "policy", existing = null } = {}) {
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+      throw new TypeError(`${fieldPath} must be an object`);
+    }
+    const schemaVersionRaw =
+      typeof rawValue.schemaVersion === "string" && rawValue.schemaVersion.trim() !== ""
+        ? rawValue.schemaVersion.trim()
+        : X402_WALLET_POLICY_SCHEMA_VERSION;
+    if (schemaVersionRaw !== X402_WALLET_POLICY_SCHEMA_VERSION) {
+      throw new TypeError(`${fieldPath}.schemaVersion must be ${X402_WALLET_POLICY_SCHEMA_VERSION}`);
+    }
+    const sponsorRef = normalizeOptionalX402RefInput(rawValue.sponsorRef ?? null, `${fieldPath}.sponsorRef`, {
+      allowNull: true,
+      max: 200
+    });
+    const sponsorWalletRef = normalizeOptionalX402RefInput(rawValue.sponsorWalletRef, `${fieldPath}.sponsorWalletRef`, {
+      allowNull: false,
+      max: 200
+    });
+    const policyRef = normalizeOptionalX402RefInput(rawValue.policyRef, `${fieldPath}.policyRef`, { allowNull: false, max: 200 });
+    const policyVersion = normalizeOptionalX402PositiveSafeInt(rawValue.policyVersion, `${fieldPath}.policyVersion`, {
+      allowNull: false
+    });
+    const status = normalizeX402WalletPolicyStatusInput(rawValue.status ?? null, { fieldPath: `${fieldPath}.status`, allowNull: false });
+    const maxAmountCents = normalizeOptionalNonNegativeSafeInt(rawValue.maxAmountCents ?? null, {
+      fieldName: `${fieldPath}.maxAmountCents`,
+      allowNull: true
+    });
+    const maxDailyAuthorizationCents = normalizeOptionalNonNegativeSafeInt(rawValue.maxDailyAuthorizationCents ?? null, {
+      fieldName: `${fieldPath}.maxDailyAuthorizationCents`,
+      allowNull: true
+    });
+    const allowedProviderIds = normalizeX402WalletPolicyAllowedIdsInput(
+      rawValue.allowedProviderIds ?? [],
+      `${fieldPath}.allowedProviderIds`
+    );
+    const allowedToolIds = normalizeX402WalletPolicyAllowedIdsInput(rawValue.allowedToolIds ?? [], `${fieldPath}.allowedToolIds`);
+    const allowedAgentKeyIds = normalizeX402WalletPolicyAllowedIdsInput(
+      rawValue.allowedAgentKeyIds ?? [],
+      `${fieldPath}.allowedAgentKeyIds`
+    );
+    const allowedCurrencies = normalizeX402WalletPolicyAllowedCurrenciesInput(
+      rawValue.allowedCurrencies ?? [],
+      `${fieldPath}.allowedCurrencies`
+    );
+    const allowedReversalActions = normalizeX402WalletPolicyAllowedReversalActionsInput(
+      rawValue.allowedReversalActions ?? [],
+      `${fieldPath}.allowedReversalActions`
+    );
+    const requireQuote = rawValue.requireQuote === true;
+    const requireStrictRequestBinding = rawValue.requireStrictRequestBinding === true;
+    const requireAgentKeyMatch = rawValue.requireAgentKeyMatch === true;
+    const description =
+      rawValue.description === null || rawValue.description === undefined || String(rawValue.description).trim() === ""
+        ? null
+        : String(rawValue.description).trim().slice(0, 500);
+    const metadata =
+      rawValue.metadata === null || rawValue.metadata === undefined
+        ? null
+        : typeof rawValue.metadata === "object" && !Array.isArray(rawValue.metadata)
+          ? { ...rawValue.metadata }
+          : (() => {
+              throw new TypeError(`${fieldPath}.metadata must be an object or null`);
+            })();
+    const createdAt =
+      typeof existing?.createdAt === "string" && Number.isFinite(Date.parse(existing.createdAt))
+        ? existing.createdAt
+        : nowIso();
+    const updatedAt = nowIso();
+    const base = normalizeForCanonicalJson(
+      {
+        schemaVersion: X402_WALLET_POLICY_SCHEMA_VERSION,
+        sponsorRef,
+        sponsorWalletRef,
+        policyRef,
+        policyVersion,
+        status,
+        maxAmountCents,
+        maxDailyAuthorizationCents,
+        allowedProviderIds,
+        allowedToolIds,
+        allowedAgentKeyIds,
+        allowedCurrencies,
+        allowedReversalActions,
+        requireQuote,
+        requireStrictRequestBinding,
+        requireAgentKeyMatch,
+        description,
+        metadata,
+        createdAt,
+        updatedAt
+      },
+      { path: "$" }
+    );
+    return normalizeForCanonicalJson(
+      {
+        ...base,
+        policyFingerprint: buildX402WalletPolicyFingerprint(base)
+      },
+      { path: "$" }
+    );
+  }
+
+  function x402WalletPolicyStoreKey({ tenantId, sponsorWalletRef, policyRef, policyVersion }) {
+    return makeScopedKey({
+      tenantId: normalizeTenant(tenantId),
+      id: `${normalizeOptionalX402RefInput(sponsorWalletRef, "sponsorWalletRef", { allowNull: false, max: 200 })}::${normalizeOptionalX402RefInput(
+        policyRef,
+        "policyRef",
+        { allowNull: false, max: 200 }
+      )}::${normalizeOptionalX402PositiveSafeInt(policyVersion, "policyVersion", { allowNull: false })}`
+    });
+  }
+
+  function getX402WalletPolicyRecord({ tenantId, sponsorWalletRef, policyRef, policyVersion }) {
+    if (typeof store.getX402WalletPolicy === "function") {
+      return store.getX402WalletPolicy({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+    }
+    if (!(store.x402WalletPolicies instanceof Map)) return null;
+    return store.x402WalletPolicies.get(
+      x402WalletPolicyStoreKey({ tenantId, sponsorWalletRef, policyRef, policyVersion })
+    ) ?? null;
+  }
+
+  async function listX402WalletPolicyRecords({
+    tenantId,
+    sponsorWalletRef = null,
+    sponsorRef = null,
+    policyRef = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    const t = normalizeTenant(tenantId);
+    const sponsorWalletFilter =
+      sponsorWalletRef === null || sponsorWalletRef === undefined || String(sponsorWalletRef).trim() === ""
+        ? null
+        : normalizeOptionalX402RefInput(sponsorWalletRef, "sponsorWalletRef", { allowNull: false, max: 200 });
+    const sponsorFilter =
+      sponsorRef === null || sponsorRef === undefined || String(sponsorRef).trim() === ""
+        ? null
+        : normalizeOptionalX402RefInput(sponsorRef, "sponsorRef", { allowNull: false, max: 200 });
+    const policyFilter =
+      policyRef === null || policyRef === undefined || String(policyRef).trim() === ""
+        ? null
+        : normalizeOptionalX402RefInput(policyRef, "policyRef", { allowNull: false, max: 200 });
+    const statusFilter =
+      status === null || status === undefined || String(status).trim() === ""
+        ? null
+        : normalizeX402WalletPolicyStatusInput(status, { fieldPath: "status", allowNull: false });
+    const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(1000, Number(limit)) : 200;
+    const safeOffset = Number.isSafeInteger(Number(offset)) && Number(offset) >= 0 ? Number(offset) : 0;
+    if (typeof store.listX402WalletPolicies === "function") {
+      return await store.listX402WalletPolicies({
+        tenantId: t,
+        sponsorWalletRef: sponsorWalletFilter,
+        sponsorRef: sponsorFilter,
+        policyRef: policyFilter,
+        status: statusFilter,
+        limit: safeLimit,
+        offset: safeOffset
+      });
+    }
+    const rows = [];
+    if (!(store.x402WalletPolicies instanceof Map)) return rows;
+    for (const row of store.x402WalletPolicies.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenant(row.tenantId ?? DEFAULT_TENANT_ID) !== t) continue;
+      if (sponsorWalletFilter && String(row.sponsorWalletRef ?? "") !== sponsorWalletFilter) continue;
+      if (sponsorFilter && String(row.sponsorRef ?? "") !== sponsorFilter) continue;
+      if (policyFilter && String(row.policyRef ?? "") !== policyFilter) continue;
+      if (statusFilter && String(row.status ?? "") !== statusFilter) continue;
+      rows.push(row);
+    }
+    rows.sort((left, right) => {
+      const leftAt = Number.isFinite(Date.parse(String(left.updatedAt ?? ""))) ? Date.parse(String(left.updatedAt)) : Number.NaN;
+      const rightAt = Number.isFinite(Date.parse(String(right.updatedAt ?? ""))) ? Date.parse(String(right.updatedAt)) : Number.NaN;
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+      const sponsorOrder = String(left.sponsorWalletRef ?? "").localeCompare(String(right.sponsorWalletRef ?? ""));
+      if (sponsorOrder !== 0) return sponsorOrder;
+      const policyOrder = String(left.policyRef ?? "").localeCompare(String(right.policyRef ?? ""));
+      if (policyOrder !== 0) return policyOrder;
+      return Number(right.policyVersion ?? 0) - Number(left.policyVersion ?? 0);
+    });
+    return rows.slice(safeOffset, safeOffset + safeLimit);
+  }
+
+  async function resolveX402WalletPolicyForIssuerQuery({
+    tenantId,
+    sponsorWalletRef,
+    policyRef = null,
+    policyVersion = null
+  } = {}) {
+    const normalizedTenantId = normalizeTenant(tenantId);
+    const normalizedWalletRef = normalizeOptionalX402RefInput(sponsorWalletRef, "sponsorWalletRef", {
+      allowNull: false,
+      max: 200
+    });
+    const normalizedPolicyRef =
+      policyRef === null || policyRef === undefined || String(policyRef).trim() === ""
+        ? null
+        : normalizeOptionalX402RefInput(policyRef, "policyRef", { allowNull: false, max: 200 });
+    const normalizedPolicyVersion =
+      policyVersion === null || policyVersion === undefined || policyVersion === ""
+        ? null
+        : normalizeOptionalX402PositiveSafeInt(policyVersion, "policyVersion", { allowNull: false });
+
+    if (normalizedPolicyRef && normalizedPolicyVersion) {
+      const policy = await getX402WalletPolicyRecord({
+        tenantId: normalizedTenantId,
+        sponsorWalletRef: normalizedWalletRef,
+        policyRef: normalizedPolicyRef,
+        policyVersion: normalizedPolicyVersion
+      });
+      return policy ?? null;
+    }
+
+    const listed = await listX402WalletPolicyRecords({
+      tenantId: normalizedTenantId,
+      sponsorWalletRef: normalizedWalletRef,
+      status: "active",
+      limit: 1,
+      offset: 0
+    });
+    return Array.isArray(listed) && listed.length > 0 ? listed[0] : null;
+  }
+
+  function toX402WalletLedgerEntry(receipt) {
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return null;
+    const settlementReceipt =
+      receipt.settlementReceipt && typeof receipt.settlementReceipt === "object" && !Array.isArray(receipt.settlementReceipt)
+        ? receipt.settlementReceipt
+        : null;
+    const amountCents = Number(settlementReceipt?.amountCents ?? 0);
+    const releasedAmountCents = Number(settlementReceipt?.releasedAmountCents ?? 0);
+    const refundedAmountCents = Number(settlementReceipt?.refundedAmountCents ?? 0);
+    const safeAmount = Number.isSafeInteger(amountCents) ? amountCents : 0;
+    const safeReleased = Number.isSafeInteger(releasedAmountCents) ? releasedAmountCents : 0;
+    const safeRefunded = Number.isSafeInteger(refundedAmountCents) ? refundedAmountCents : 0;
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402WalletLedgerEntry.v1",
+        receiptId: receipt.receiptId ?? null,
+        gateId: receipt.gateId ?? null,
+        runId: receipt.runId ?? null,
+        sponsorRef: receipt.sponsorRef ?? null,
+        sponsorWalletRef: receipt.sponsorWalletRef ?? null,
+        providerId: receipt.providerId ?? null,
+        toolId: receipt.toolId ?? null,
+        settlementState: receipt.settlementState ?? null,
+        verificationStatus: receipt.verificationStatus ?? null,
+        settledAt: receipt.settledAt ?? null,
+        currency:
+          typeof settlementReceipt?.currency === "string" && settlementReceipt.currency.trim() !== ""
+            ? settlementReceipt.currency.trim().toUpperCase()
+            : "USD",
+        amountCents: safeAmount,
+        releasedAmountCents: safeReleased,
+        refundedAmountCents: safeRefunded,
+        netAmountCents: safeReleased - safeRefunded
+      },
+      { path: "$" }
+    );
+  }
+
+  function summarizeX402WalletLedgerEntries(entries = []) {
+    let grossAuthorizedCents = 0;
+    let releasedCents = 0;
+    let refundedCents = 0;
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const authorized = Number(entry.amountCents ?? 0);
+      const released = Number(entry.releasedAmountCents ?? 0);
+      const refunded = Number(entry.refundedAmountCents ?? 0);
+      if (Number.isSafeInteger(authorized)) grossAuthorizedCents += authorized;
+      if (Number.isSafeInteger(released)) releasedCents += released;
+      if (Number.isSafeInteger(refunded)) refundedCents += refunded;
+    }
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402WalletLedgerSummary.v1",
+        grossAuthorizedCents,
+        releasedCents,
+        refundedCents,
+        netSettledCents: releasedCents - refundedCents
+      },
+      { path: "$" }
+    );
+  }
+
+  function summarizeX402WalletAuthorizationState({
+    tenantId,
+    sponsorWalletRef
+  } = {}) {
+    if (!(store?.x402Gates instanceof Map)) {
+      return {
+        schemaVersion: "X402WalletAuthorizationSummary.v1",
+        reservedCount: 0,
+        reservedAmountCents: 0,
+        settledCount: 0,
+        settledAmountCents: 0
+      };
+    }
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const walletRef = normalizeOptionalX402RefInput(sponsorWalletRef, "sponsorWalletRef", { allowNull: false, max: 200 });
+    let reservedCount = 0;
+    let reservedAmountCents = 0;
+    let settledCount = 0;
+    let settledAmountCents = 0;
+    for (const gate of store.x402Gates.values()) {
+      if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
+      if (normalizeTenantId(gate.tenantId ?? DEFAULT_TENANT_ID) !== normalizedTenantId) continue;
+      const gateWalletRef =
+        gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport)
+          ? typeof gate.agentPassport.sponsorWalletRef === "string" && gate.agentPassport.sponsorWalletRef.trim() !== ""
+            ? gate.agentPassport.sponsorWalletRef.trim()
+            : null
+          : null;
+      if (gateWalletRef !== walletRef) continue;
+      const authorization =
+        gate.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization)
+          ? gate.authorization
+          : null;
+      const status = String(authorization?.status ?? "").toLowerCase();
+      const amountCents = Number(gate?.terms?.amountCents ?? authorization?.walletEscrow?.amountCents ?? 0);
+      if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
+      if (status === "reserved") {
+        reservedCount += 1;
+        reservedAmountCents += amountCents;
+      } else if (status === "settled") {
+        settledCount += 1;
+        settledAmountCents += amountCents;
+      }
+    }
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion: "X402WalletAuthorizationSummary.v1",
+        reservedCount,
+        reservedAmountCents,
+        settledCount,
+        settledAmountCents
+      },
+      { path: "$" }
+    );
+  }
+
+  function buildX402WalletPolicyError(code, message, details = null) {
+    const err = new Error(message);
+    err.code = code;
+    if (details !== null && details !== undefined) err.details = details;
+    return err;
+  }
+
+  async function assertX402WalletPolicyForAuthorization({
+    tenantId,
+    gate,
+    policy,
+    amountCents,
+    currency,
+    payeeProviderId,
+    effectiveQuoteId,
+    effectiveRequestBindingMode,
+    effectiveRequestBindingSha256,
+    nowAt
+  }) {
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) return;
+    const status = String(policy.status ?? "active").toLowerCase();
+    if (status !== "active") {
+      throw buildX402WalletPolicyError("X402_WALLET_POLICY_DISABLED", "x402 wallet policy is disabled");
+    }
+
+    const maxAmountCents = Number.isSafeInteger(policy.maxAmountCents) && policy.maxAmountCents >= 0 ? policy.maxAmountCents : null;
+    if (maxAmountCents !== null && Number(amountCents) > maxAmountCents) {
+      throw buildX402WalletPolicyError(
+        "X402_WALLET_POLICY_AMOUNT_LIMIT_EXCEEDED",
+        "x402 wallet policy maxAmountCents exceeded",
+        { amountCents, maxAmountCents }
+      );
+    }
+
+    const policySponsorWalletRef =
+      typeof policy.sponsorWalletRef === "string" && policy.sponsorWalletRef.trim() !== "" ? policy.sponsorWalletRef.trim() : null;
+    const maxDailyAuthorizationCents =
+      Number.isSafeInteger(policy.maxDailyAuthorizationCents) && policy.maxDailyAuthorizationCents >= 0
+        ? policy.maxDailyAuthorizationCents
+        : null;
+    if (
+      maxDailyAuthorizationCents !== null &&
+      policySponsorWalletRef
+    ) {
+      const dayKey = String(nowAt).slice(0, 10);
+      const currentExposureCents = computeX402DailyAuthorizedExposureCents({
+        tenantId,
+        dayKey,
+        excludeGateId: gate?.gateId ?? null,
+        sponsorWalletRef: policySponsorWalletRef
+      });
+      const projectedExposureCents = currentExposureCents + Number(amountCents);
+      if (projectedExposureCents > maxDailyAuthorizationCents) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_DAILY_LIMIT_EXCEEDED",
+          "x402 wallet policy maxDailyAuthorizationCents exceeded",
+          {
+            sponsorWalletRef: policySponsorWalletRef,
+            dayKey,
+            amountCents,
+            currentExposureCents,
+            projectedExposureCents,
+            maxDailyAuthorizationCents
+          }
+        );
+      }
+    }
+
+    if (Array.isArray(policy.allowedProviderIds) && policy.allowedProviderIds.length > 0) {
+      if (!policy.allowedProviderIds.includes(String(payeeProviderId ?? ""))) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_PROVIDER_NOT_ALLOWED",
+          "x402 wallet policy provider is not allowed",
+          { payeeProviderId: payeeProviderId ?? null, allowedProviderIds: policy.allowedProviderIds }
+        );
+      }
+    }
+
+    const toolId =
+      typeof gate?.toolId === "string" && gate.toolId.trim() !== ""
+        ? gate.toolId.trim()
+        : typeof gate?.terms?.toolId === "string" && gate.terms.toolId.trim() !== ""
+          ? gate.terms.toolId.trim()
+          : null;
+    if (Array.isArray(policy.allowedToolIds) && policy.allowedToolIds.length > 0) {
+      if (!toolId || !policy.allowedToolIds.includes(toolId)) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_TOOL_NOT_ALLOWED",
+          "x402 wallet policy tool is not allowed",
+          { toolId, allowedToolIds: policy.allowedToolIds }
+        );
+      }
+    }
+
+    const gateAgentKeyId =
+      gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport)
+        ? typeof gate.agentPassport.agentKeyId === "string" && gate.agentPassport.agentKeyId.trim() !== ""
+          ? gate.agentPassport.agentKeyId.trim()
+          : null
+        : null;
+    if (Array.isArray(policy.allowedAgentKeyIds) && policy.allowedAgentKeyIds.length > 0) {
+      if (!gateAgentKeyId || !policy.allowedAgentKeyIds.includes(gateAgentKeyId)) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_AGENT_KEY_NOT_ALLOWED",
+          "x402 wallet policy agent key is not allowed",
+          { agentKeyId: gateAgentKeyId, allowedAgentKeyIds: policy.allowedAgentKeyIds }
+        );
+      }
+    }
+
+    if (Array.isArray(policy.allowedCurrencies) && policy.allowedCurrencies.length > 0) {
+      const normalizedCurrency = String(currency ?? "").toUpperCase();
+      if (!policy.allowedCurrencies.includes(normalizedCurrency)) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_CURRENCY_NOT_ALLOWED",
+          "x402 wallet policy currency is not allowed",
+          { currency: normalizedCurrency, allowedCurrencies: policy.allowedCurrencies }
+        );
+      }
+    }
+
+    if (policy.requireQuote === true && !effectiveQuoteId) {
+      throw buildX402WalletPolicyError(
+        "X402_WALLET_POLICY_QUOTE_REQUIRED",
+        "x402 wallet policy requires quote-bound authorization"
+      );
+    }
+    if (
+      policy.requireStrictRequestBinding === true &&
+      (effectiveRequestBindingMode !== "strict" || !effectiveRequestBindingSha256)
+    ) {
+      throw buildX402WalletPolicyError(
+        "X402_WALLET_POLICY_REQUEST_BINDING_REQUIRED",
+        "x402 wallet policy requires strict request binding"
+      );
+    }
+    if (policy.requireAgentKeyMatch === true) {
+      const payerAgentId = typeof gate?.payerAgentId === "string" && gate.payerAgentId.trim() !== "" ? gate.payerAgentId.trim() : null;
+      if (!payerAgentId) {
+        throw buildX402WalletPolicyError("X402_WALLET_POLICY_AGENT_KEY_MISMATCH", "x402 wallet policy agent key does not match payer key");
+      }
+      const payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: payerAgentId });
+      const payerKeyId =
+        payerIdentity?.keys && typeof payerIdentity.keys === "object" && !Array.isArray(payerIdentity.keys)
+          ? String(payerIdentity.keys.keyId ?? "").trim()
+          : "";
+      if (!gateAgentKeyId || !payerKeyId || gateAgentKeyId !== payerKeyId) {
+        throw buildX402WalletPolicyError(
+          "X402_WALLET_POLICY_AGENT_KEY_MISMATCH",
+          "x402 wallet policy agent key does not match payer key",
+          { agentKeyId: gateAgentKeyId, payerKeyId: payerKeyId || null }
+        );
+      }
+    }
+  }
+
+  async function resolveX402WalletPolicyForPassport({ tenantId, gateAgentPassport }) {
+    const sponsorWalletRef =
+      typeof gateAgentPassport?.sponsorWalletRef === "string" && gateAgentPassport.sponsorWalletRef.trim() !== ""
+        ? gateAgentPassport.sponsorWalletRef.trim()
+        : null;
+    const policyRef =
+      typeof gateAgentPassport?.policyRef === "string" && gateAgentPassport.policyRef.trim() !== ""
+        ? gateAgentPassport.policyRef.trim()
+        : null;
+    const policyVersion =
+      Number.isSafeInteger(Number(gateAgentPassport?.policyVersion)) && Number(gateAgentPassport.policyVersion) > 0
+        ? Number(gateAgentPassport.policyVersion)
+        : null;
+    if (!sponsorWalletRef && !policyRef && !policyVersion) return { policy: null, sponsorWalletRef: null };
+    if (!sponsorWalletRef || !policyRef || !policyVersion) {
+      return {
+        policy: null,
+        sponsorWalletRef,
+        error: {
+          code: "X402_WALLET_POLICY_REFERENCE_INVALID",
+          message: "agentPassport must include sponsorWalletRef + policyRef + policyVersion"
+        }
+      };
+    }
+    const policy = await getX402WalletPolicyRecord({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+    if (!policy) {
+      return {
+        policy: null,
+        sponsorWalletRef,
+        error: {
+          code: "X402_WALLET_POLICY_NOT_FOUND",
+          message: "x402 wallet policy not found for agent passport"
+        }
+      };
+    }
+    return { policy, sponsorWalletRef };
   }
 
   function tenantSettlementPolicyStoreKey({ tenantId, policyId, policyVersion }) {
@@ -8530,13 +9209,26 @@ export function createApi({
     return {
       agentId: parseNullableTrimmed(url.searchParams.get("agent_id") ?? url.searchParams.get("agentId")),
       sponsorId: parseNullableTrimmed(url.searchParams.get("sponsor_id") ?? url.searchParams.get("sponsorId")),
+      sponsorWalletRef: parseNullableTrimmed(url.searchParams.get("sponsor_wallet_ref") ?? url.searchParams.get("sponsorWalletRef")),
       toolId: parseNullableTrimmed(url.searchParams.get("tool_id") ?? url.searchParams.get("toolId")),
       state: parseNullableTrimmed(url.searchParams.get("state")),
       from: parseBound(url.searchParams.get("from"), "from"),
       to: parseBound(url.searchParams.get("to"), "to"),
+      cursor: parseNullableTrimmed(url.searchParams.get("cursor")),
       limit: parsePositiveInt(url.searchParams.get("limit"), 200, { name: "limit" }),
       offset: parseNonNegativeInt(url.searchParams.get("offset"), 0, { name: "offset" })
     };
+  }
+
+  function normalizeX402WalletIssuerDecisionTokenInput(value, fieldPath = "walletAuthorizationDecisionToken", { allowNull = true } = {}) {
+    if (value === null || value === undefined || String(value).trim() === "") {
+      if (allowNull) return null;
+      throw new TypeError(`${fieldPath} is required`);
+    }
+    const out = String(value).trim();
+    if (out.length > 16_384) throw new TypeError(`${fieldPath} must be <= 16384 chars`);
+    if (!/^[A-Za-z0-9_-]+$/.test(out)) throw new TypeError(`${fieldPath} must be base64url token text`);
+    return out;
   }
 
   function normalizePolicyDecisionId(value) {
@@ -18389,6 +19081,136 @@ export function createApi({
         if (parts.length === 1 && req.method === "GET") {
           if (!requireScope(auth.scopes, OPS_SCOPES.OPS_READ)) return sendError(res, 403, "forbidden");
           return sendJson(res, 200, { ok: true });
+        }
+
+        if (parts[1] === "x402" && parts[2] === "wallet-policies" && parts.length === 3 && req.method === "POST") {
+          if (!requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE)) return sendError(res, 403, "forbidden");
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = (await readJsonBody(req)) ?? {};
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const rawPolicy =
+            body?.policy && typeof body.policy === "object" && !Array.isArray(body.policy) ? body.policy : body;
+          let existingPolicy = null;
+          try {
+            const sponsorWalletRef = normalizeOptionalX402RefInput(rawPolicy?.sponsorWalletRef, "policy.sponsorWalletRef", {
+              allowNull: false,
+              max: 200
+            });
+            const policyRef = normalizeOptionalX402RefInput(rawPolicy?.policyRef, "policy.policyRef", { allowNull: false, max: 200 });
+            const policyVersion = normalizeOptionalX402PositiveSafeInt(rawPolicy?.policyVersion, "policy.policyVersion", { allowNull: false });
+            existingPolicy = await getX402WalletPolicyRecord({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy key fields", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          let policy = null;
+          try {
+            policy = normalizeX402WalletPolicyInput(rawPolicy, { fieldPath: "policy", existing: existingPolicy });
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const targetId = `${policy.sponsorWalletRef}::${policy.policyRef}::${policy.policyVersion}`;
+          const responseBody = {
+            ok: true,
+            policy,
+            created: existingPolicy ? false : true
+          };
+          const statusCode = existingPolicy ? 200 : 201;
+          const ops = [{ kind: "X402_WALLET_POLICY_UPSERT", tenantId, policy }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode, body: responseBody } });
+          }
+          await commitTx(ops, {
+            audit: makeOpsAudit({
+              action: "X402_WALLET_POLICY_UPSERT",
+              targetType: "x402_wallet_policy",
+              targetId,
+              details: {
+                sponsorRef: policy.sponsorRef ?? null,
+                sponsorWalletRef: policy.sponsorWalletRef,
+                policyRef: policy.policyRef,
+                policyVersion: policy.policyVersion,
+                status: policy.status
+              }
+            })
+          });
+          return sendJson(res, statusCode, responseBody);
+        }
+
+        if (parts[1] === "x402" && parts[2] === "wallet-policies" && parts.length === 3 && req.method === "GET") {
+          const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
+          if (!hasScope) return sendError(res, 403, "forbidden");
+          const sponsorWalletRefRaw = url.searchParams.get("sponsorWalletRef");
+          const sponsorRefRaw = url.searchParams.get("sponsorRef");
+          const policyRefRaw = url.searchParams.get("policyRef");
+          const statusRaw = url.searchParams.get("status");
+          const limitRaw = url.searchParams.get("limit");
+          const offsetRaw = url.searchParams.get("offset");
+          const limit = limitRaw === null || limitRaw === "" ? 200 : Number(limitRaw);
+          const offset = offsetRaw === null || offsetRaw === "" ? 0 : Number(offsetRaw);
+          if (!Number.isSafeInteger(limit) || limit < 1 || limit > 2000) {
+            return sendError(res, 400, "invalid list query", { message: "limit must be an integer in range 1..2000" }, { code: "SCHEMA_INVALID" });
+          }
+          if (!Number.isSafeInteger(offset) || offset < 0) {
+            return sendError(res, 400, "invalid list query", { message: "offset must be a non-negative integer" }, { code: "SCHEMA_INVALID" });
+          }
+          let policies = [];
+          try {
+            policies = await listX402WalletPolicyRecords({
+              tenantId,
+              sponsorWalletRef: sponsorWalletRefRaw,
+              sponsorRef: sponsorRefRaw,
+              policyRef: policyRefRaw,
+              status: statusRaw,
+              limit,
+              offset
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          return sendJson(res, 200, {
+            ok: true,
+            tenantId,
+            limit,
+            offset,
+            policies
+          });
+        }
+
+        if (parts[1] === "x402" && parts[2] === "wallet-policies" && parts.length === 6 && req.method === "GET") {
+          const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
+          if (!hasScope) return sendError(res, 403, "forbidden");
+          let sponsorWalletRef = null;
+          let policyRef = null;
+          let policyVersion = null;
+          try {
+            sponsorWalletRef = normalizeOptionalX402RefInput(decodePathPart(parts[3]), "sponsorWalletRef", { allowNull: false, max: 200 });
+            policyRef = normalizeOptionalX402RefInput(decodePathPart(parts[4]), "policyRef", { allowNull: false, max: 200 });
+            policyVersion = normalizeOptionalX402PositiveSafeInt(decodePathPart(parts[5]), "policyVersion", { allowNull: false });
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy key", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const policy = await getX402WalletPolicyRecord({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+          if (!policy) return sendError(res, 404, "x402 wallet policy not found", null, { code: "NOT_FOUND" });
+          return sendJson(res, 200, { ok: true, policy });
         }
 
         if (parts[1] === "tool-calls" && parts[2] === "holds" && parts[3] === "lock" && parts.length === 4 && req.method === "POST") {
@@ -30191,21 +31013,44 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid receipt export query", { message: err?.message }, { code: "SCHEMA_INVALID" });
           }
-          const rows = await store.listX402Receipts({
-            tenantId,
-            agentId: query.agentId,
-            sponsorId: query.sponsorId,
-            toolId: query.toolId,
-            state: query.state,
-            from: query.from,
-            to: query.to,
-            limit: Math.min(5000, query.limit),
-            offset: query.offset
-          });
+          const exportPage =
+            typeof store.listX402ReceiptsPage === "function"
+              ? await store.listX402ReceiptsPage({
+                  tenantId,
+                  agentId: query.agentId,
+                  sponsorId: query.sponsorId,
+                  sponsorWalletRef: query.sponsorWalletRef,
+                  toolId: query.toolId,
+                  state: query.state,
+                  from: query.from,
+                  to: query.to,
+                  cursor: query.cursor,
+                  limit: Math.min(5000, query.limit),
+                  offset: query.offset
+                })
+              : {
+                  receipts: await store.listX402Receipts({
+                    tenantId,
+                    agentId: query.agentId,
+                    sponsorId: query.sponsorId,
+                    sponsorWalletRef: query.sponsorWalletRef,
+                    toolId: query.toolId,
+                    state: query.state,
+                    from: query.from,
+                    to: query.to,
+                    limit: Math.min(5000, query.limit),
+                    offset: query.offset
+                  }),
+                  nextCursor: null
+                };
+          const rows = Array.isArray(exportPage?.receipts) ? exportPage.receipts : [];
           const ndjson = rows.map((row) => JSON.stringify(row)).join("\n");
           res.statusCode = 200;
           res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
           res.setHeader("cache-control", "no-store");
+          if (typeof exportPage?.nextCursor === "string" && exportPage.nextCursor.trim() !== "") {
+            res.setHeader("x-next-cursor", exportPage.nextCursor.trim());
+          }
           res.end(ndjson ? `${ndjson}\n` : "");
           return;
         }
@@ -30226,18 +31071,710 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid receipt query", { message: err?.message }, { code: "SCHEMA_INVALID" });
           }
-          const receipts = await store.listX402Receipts({
+          const page =
+            typeof store.listX402ReceiptsPage === "function"
+              ? await store.listX402ReceiptsPage({
+                  tenantId,
+                  agentId: query.agentId,
+                  sponsorId: query.sponsorId,
+                  sponsorWalletRef: query.sponsorWalletRef,
+                  toolId: query.toolId,
+                  state: query.state,
+                  from: query.from,
+                  to: query.to,
+                  cursor: query.cursor,
+                  limit: query.limit,
+                  offset: query.offset
+                })
+              : {
+                  receipts: await store.listX402Receipts({
+                    tenantId,
+                    agentId: query.agentId,
+                    sponsorId: query.sponsorId,
+                    sponsorWalletRef: query.sponsorWalletRef,
+                    toolId: query.toolId,
+                    state: query.state,
+                    from: query.from,
+                    to: query.to,
+                    limit: query.limit,
+                    offset: query.offset
+                  }),
+                  nextCursor: null
+                };
+          const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
+          return sendJson(res, 200, { receipts, limit: query.limit, offset: query.offset, nextCursor: page?.nextCursor ?? null });
+        }
+
+        if (parts[0] === "x402" && parts[1] === "wallets" && parts.length === 2 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          let sponsorRef = null;
+          let sponsorWalletRef = null;
+          let policyRefInput = null;
+          let policyVersionInput = null;
+          let existingPolicy = null;
+          try {
+            sponsorRef = normalizeOptionalX402RefInput(body?.sponsorRef, "sponsorRef", { allowNull: false, max: 200 });
+            sponsorWalletRef = normalizeOptionalX402RefInput(body?.sponsorWalletRef ?? createId("x402wallet"), "sponsorWalletRef", {
+              allowNull: false,
+              max: 200
+            });
+            const rawPolicy =
+              body?.policy && typeof body.policy === "object" && !Array.isArray(body.policy) ? body.policy : body ?? {};
+            policyRefInput = rawPolicy.policyRef ?? body?.policyRef ?? "default";
+            policyVersionInput = rawPolicy.policyVersion ?? body?.policyVersion ?? 1;
+            const normalizedPolicyRef = normalizeOptionalX402RefInput(policyRefInput, "policyRef", { allowNull: false, max: 200 });
+            const normalizedPolicyVersion = normalizeOptionalX402PositiveSafeInt(policyVersionInput, "policyVersion", { allowNull: false });
+            existingPolicy = await getX402WalletPolicyRecord({
+              tenantId,
+              sponsorWalletRef,
+              policyRef: normalizedPolicyRef,
+              policyVersion: normalizedPolicyVersion
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet create request", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const policyInput =
+            body?.policy && typeof body.policy === "object" && !Array.isArray(body.policy) ? body.policy : body ?? {};
+          let policy = null;
+          try {
+            policy = normalizeX402WalletPolicyInput(
+              {
+                ...policyInput,
+                sponsorRef,
+                sponsorWalletRef,
+                policyRef: policyRefInput,
+                policyVersion: policyVersionInput
+              },
+              { fieldPath: "policy", existing: existingPolicy }
+            );
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const existingWalletPolicies = await listX402WalletPolicyRecords({
             tenantId,
-            agentId: query.agentId,
-            sponsorId: query.sponsorId,
-            toolId: query.toolId,
-            state: query.state,
-            from: query.from,
-            to: query.to,
-            limit: query.limit,
-            offset: query.offset
+            sponsorWalletRef,
+            limit: 1,
+            offset: 0
           });
-          return sendJson(res, 200, { receipts, limit: query.limit, offset: query.offset });
+          const walletCreated = !Array.isArray(existingWalletPolicies) || existingWalletPolicies.length === 0;
+          const responseBody = {
+            ok: true,
+            created: walletCreated,
+            wallet: normalizeForCanonicalJson(
+              {
+                schemaVersion: "X402SponsorWallet.v1",
+                sponsorRef: policy.sponsorRef ?? sponsorRef,
+                sponsorWalletRef: policy.sponsorWalletRef,
+                activePolicyRef: policy.policyRef,
+                activePolicyVersion: policy.policyVersion,
+                policyFingerprint: policy.policyFingerprint,
+                createdAt: policy.createdAt,
+                updatedAt: policy.updatedAt
+              },
+              { path: "$" }
+            ),
+            policy
+          };
+          const statusCode = walletCreated ? 201 : 200;
+          const ops = [{ kind: "X402_WALLET_POLICY_UPSERT", tenantId, policy }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode, body: responseBody } });
+          }
+          await commitTx(ops, {
+            audit: makeOpsAudit({
+              action: "X402_WALLET_ISSUER_CREATE",
+              targetType: "x402_wallet",
+              targetId: policy.sponsorWalletRef,
+              details: {
+                sponsorRef: policy.sponsorRef ?? null,
+                policyRef: policy.policyRef,
+                policyVersion: policy.policyVersion
+              }
+            })
+          });
+          return sendJson(res, statusCode, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "wallets" && parts[2] && parts[3] === "policy" && parts.length === 4 && req.method === "PUT") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+          let sponsorWalletRef = null;
+          try {
+            sponsorWalletRef = normalizeOptionalX402RefInput(decodePathPart(parts[2]), "sponsorWalletRef", { allowNull: false, max: 200 });
+          } catch (err) {
+            return sendError(res, 400, "invalid sponsorWalletRef", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "PUT", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const policyInput =
+            body?.policy && typeof body.policy === "object" && !Array.isArray(body.policy) ? body.policy : body ?? {};
+          const policyRefInput = policyInput.policyRef ?? body?.policyRef ?? "default";
+          const policyVersionInput = policyInput.policyVersion ?? body?.policyVersion ?? 1;
+          let normalizedPolicyRef = null;
+          let normalizedPolicyVersion = null;
+          try {
+            normalizedPolicyRef = normalizeOptionalX402RefInput(policyRefInput, "policyRef", { allowNull: false, max: 200 });
+            normalizedPolicyVersion = normalizeOptionalX402PositiveSafeInt(policyVersionInput, "policyVersion", { allowNull: false });
+          } catch (err) {
+            return sendError(res, 400, "invalid wallet policy key", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const existingPolicy = await getX402WalletPolicyRecord({
+            tenantId,
+            sponsorWalletRef,
+            policyRef: normalizedPolicyRef,
+            policyVersion: normalizedPolicyVersion
+          });
+          const sponsorRef =
+            normalizeOptionalX402RefInput(
+              policyInput.sponsorRef ?? body?.sponsorRef ?? existingPolicy?.sponsorRef ?? null,
+              "sponsorRef",
+              { allowNull: false, max: 200 }
+            );
+
+          let policy = null;
+          try {
+            policy = normalizeX402WalletPolicyInput(
+              {
+                ...policyInput,
+                sponsorRef,
+                sponsorWalletRef,
+                policyRef: normalizedPolicyRef,
+                policyVersion: normalizedPolicyVersion
+              },
+              { fieldPath: "policy", existing: existingPolicy }
+            );
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const responseBody = {
+            ok: true,
+            created: existingPolicy ? false : true,
+            wallet: normalizeForCanonicalJson(
+              {
+                schemaVersion: "X402SponsorWallet.v1",
+                sponsorRef: policy.sponsorRef ?? sponsorRef,
+                sponsorWalletRef: policy.sponsorWalletRef,
+                activePolicyRef: policy.policyRef,
+                activePolicyVersion: policy.policyVersion,
+                policyFingerprint: policy.policyFingerprint,
+                createdAt: policy.createdAt,
+                updatedAt: policy.updatedAt
+              },
+              { path: "$" }
+            ),
+            policy
+          };
+          const statusCode = existingPolicy ? 200 : 201;
+          const ops = [{ kind: "X402_WALLET_POLICY_UPSERT", tenantId, policy }];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode, body: responseBody } });
+          }
+          await commitTx(ops, {
+            audit: makeOpsAudit({
+              action: "X402_WALLET_ISSUER_POLICY_UPSERT",
+              targetType: "x402_wallet_policy",
+              targetId: `${policy.sponsorWalletRef}::${policy.policyRef}::${policy.policyVersion}`,
+              details: {
+                sponsorRef: policy.sponsorRef ?? null,
+                status: policy.status
+              }
+            })
+          });
+          return sendJson(res, statusCode, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "wallets" && parts[2] && parts[3] === "policy" && parts.length === 4 && req.method === "GET") {
+          let sponsorWalletRef = null;
+          try {
+            sponsorWalletRef = normalizeOptionalX402RefInput(decodePathPart(parts[2]), "sponsorWalletRef", { allowNull: false, max: 200 });
+          } catch (err) {
+            return sendError(res, 400, "invalid sponsorWalletRef", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const policyRefRaw = url.searchParams.get("policyRef");
+          const policyVersionRaw = url.searchParams.get("policyVersion");
+          const statusRaw = url.searchParams.get("status");
+          const limitRaw = url.searchParams.get("limit");
+          const offsetRaw = url.searchParams.get("offset");
+          if ((policyRefRaw && !policyVersionRaw) || (!policyRefRaw && policyVersionRaw)) {
+            return sendError(res, 400, "policyRef and policyVersion must be provided together", null, { code: "SCHEMA_INVALID" });
+          }
+          if (policyRefRaw && policyVersionRaw) {
+            let policyRef = null;
+            let policyVersion = null;
+            try {
+              policyRef = normalizeOptionalX402RefInput(policyRefRaw, "policyRef", { allowNull: false, max: 200 });
+              policyVersion = normalizeOptionalX402PositiveSafeInt(policyVersionRaw, "policyVersion", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid x402 wallet policy key", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            const policy = await getX402WalletPolicyRecord({ tenantId, sponsorWalletRef, policyRef, policyVersion });
+            if (!policy) return sendError(res, 404, "x402 wallet policy not found", null, { code: "NOT_FOUND" });
+            return sendJson(res, 200, { ok: true, policy });
+          }
+          const limit = limitRaw === null || limitRaw === "" ? 200 : Number(limitRaw);
+          const offset = offsetRaw === null || offsetRaw === "" ? 0 : Number(offsetRaw);
+          if (!Number.isSafeInteger(limit) || limit < 1 || limit > 2000) {
+            return sendError(res, 400, "invalid list query", { message: "limit must be an integer in range 1..2000" }, { code: "SCHEMA_INVALID" });
+          }
+          if (!Number.isSafeInteger(offset) || offset < 0) {
+            return sendError(res, 400, "invalid list query", { message: "offset must be a non-negative integer" }, { code: "SCHEMA_INVALID" });
+          }
+          let policies = [];
+          try {
+            policies = await listX402WalletPolicyRecords({
+              tenantId,
+              sponsorWalletRef,
+              status: statusRaw,
+              limit,
+              offset
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid x402 wallet policy query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          return sendJson(res, 200, { ok: true, sponsorWalletRef, limit, offset, policies });
+        }
+
+        if (parts[0] === "x402" && parts[1] === "wallets" && parts[2] && parts[3] === "authorize" && parts.length === 4 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+          let sponsorWalletRef = null;
+          try {
+            sponsorWalletRef = normalizeOptionalX402RefInput(decodePathPart(parts[2]), "sponsorWalletRef", { allowNull: false, max: 200 });
+          } catch (err) {
+            return sendError(res, 400, "invalid sponsorWalletRef", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          const gateId = typeof body?.gateId === "string" && body.gateId.trim() !== "" ? body.gateId.trim() : null;
+          if (!gateId) return sendError(res, 400, "gateId is required", null, { code: "SCHEMA_INVALID" });
+          const requestBindingModeRaw =
+            typeof body?.requestBindingMode === "string" && body.requestBindingMode.trim() !== ""
+              ? body.requestBindingMode.trim().toLowerCase()
+              : null;
+          if (requestBindingModeRaw !== null && requestBindingModeRaw !== "strict") {
+            return sendError(res, 400, "requestBindingMode must be strict when provided", null, { code: "SCHEMA_INVALID" });
+          }
+          let requestBindingSha256 = null;
+          try {
+            requestBindingSha256 = normalizeSha256HashInput(body?.requestBindingSha256 ?? null, "requestBindingSha256", { allowNull: true });
+          } catch (err) {
+            return sendError(res, 400, "invalid requestBindingSha256", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const requestBindingMode = requestBindingModeRaw ?? (requestBindingSha256 ? "strict" : null);
+          if (requestBindingMode === "strict" && !requestBindingSha256) {
+            return sendError(res, 400, "requestBindingSha256 is required when requestBindingMode=strict", null, {
+              code: "SCHEMA_INVALID"
+            });
+          }
+          let requestedQuoteId = null;
+          try {
+            requestedQuoteId = normalizeOptionalX402RefInput(body?.quoteId ?? null, "quoteId", { allowNull: true, max: 200 });
+          } catch (err) {
+            return sendError(res, 400, "invalid quoteId", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          let walletAuthorizationDecisionToken = null;
+          try {
+            walletAuthorizationDecisionToken = normalizeX402WalletIssuerDecisionTokenInput(
+              body?.walletAuthorizationDecisionToken ?? body?.walletAuthorizationDecision ?? null,
+              "walletAuthorizationDecisionToken",
+              { allowNull: true }
+            );
+          } catch (err) {
+            return sendError(res, 400, "invalid walletAuthorizationDecisionToken", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
+          if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
+          if (String(gate.status ?? "").toLowerCase() === "resolved") {
+            return sendError(res, 409, "gate is already resolved", null, { code: "X402_GATE_TERMINAL" });
+          }
+          const runId = String(gate.runId ?? "");
+          const settlement = typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId }) : null;
+          if (!settlement) return sendError(res, 404, "settlement not found for gate", null, { code: "NOT_FOUND" });
+          if (String(settlement.status ?? "").toLowerCase() !== "locked") {
+            return sendError(res, 409, "settlement already resolved", null, { code: "X402_GATE_TERMINAL" });
+          }
+          const payerAgentId = typeof gate?.payerAgentId === "string" && gate.payerAgentId.trim() !== "" ? gate.payerAgentId.trim() : null;
+          if (!payerAgentId) return sendError(res, 409, "gate payer missing", null, { code: "X402_GATE_INVALID" });
+          const amountCents = Number(gate?.terms?.amountCents ?? settlement?.amountCents ?? 0);
+          if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return sendError(res, 409, "gate amount invalid", null, { code: "X402_GATE_INVALID" });
+          const currency =
+            typeof gate?.terms?.currency === "string" && gate.terms.currency.trim() !== ""
+              ? gate.terms.currency.trim().toUpperCase()
+              : settlement?.currency ?? "USD";
+          const gateAgentPassport =
+            gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport) ? gate.agentPassport : null;
+          if (!gateAgentPassport) {
+            return sendError(res, 409, "gate does not use wallet-policy issuer", null, { code: "X402_WALLET_ISSUER_NOT_APPLICABLE" });
+          }
+          const gateWalletRef =
+            typeof gateAgentPassport.sponsorWalletRef === "string" && gateAgentPassport.sponsorWalletRef.trim() !== ""
+              ? gateAgentPassport.sponsorWalletRef.trim()
+              : null;
+          if (!gateWalletRef || gateWalletRef !== sponsorWalletRef) {
+            return sendError(res, 409, "sponsor wallet does not match gate passport", null, { code: "X402_WALLET_ISSUER_WALLET_MISMATCH" });
+          }
+          const walletPolicyResolution = await resolveX402WalletPolicyForPassport({
+            tenantId,
+            gateAgentPassport
+          });
+          if (walletPolicyResolution?.error) {
+            return sendError(
+              res,
+              409,
+              "x402 wallet policy reference is invalid",
+              {
+                message: walletPolicyResolution.error.message ?? null,
+                sponsorWalletRef: walletPolicyResolution.sponsorWalletRef ?? null
+              },
+              { code: walletPolicyResolution.error.code ?? "X402_WALLET_POLICY_REFERENCE_INVALID" }
+            );
+          }
+          const resolvedWalletPolicy = walletPolicyResolution?.policy ?? null;
+          if (!resolvedWalletPolicy) {
+            return sendError(res, 404, "x402 wallet policy not found", null, { code: "X402_WALLET_POLICY_NOT_FOUND" });
+          }
+          const payeeProviderId =
+            typeof gate?.payeeAgentId === "string" && gate.payeeAgentId.trim() !== ""
+              ? gate.payeeAgentId.trim()
+              : typeof gate?.terms?.providerId === "string" && gate.terms.providerId.trim() !== ""
+                ? gate.terms.providerId.trim()
+                : null;
+          const nowAt = nowIso();
+          const nowMs = Date.parse(nowAt);
+          const nowUnix = Math.floor(nowMs / 1000);
+          const existingQuote =
+            gate?.quote && typeof gate.quote === "object" && !Array.isArray(gate.quote) ? gate.quote : null;
+          const existingQuoteExpiresAtMs = Number.isFinite(Date.parse(String(existingQuote?.expiresAt ?? "")))
+            ? Date.parse(String(existingQuote.expiresAt))
+            : Number.NaN;
+          if (requestedQuoteId && !existingQuote) {
+            return sendError(res, 409, "requested quoteId was not found on gate", null, { code: "X402_QUOTE_NOT_FOUND" });
+          }
+          if (requestedQuoteId && existingQuote && String(existingQuote.quoteId ?? "") !== String(requestedQuoteId)) {
+            return sendError(res, 409, "requested quoteId does not match gate quote", null, { code: "X402_QUOTE_MISMATCH" });
+          }
+          const selectedQuote =
+            existingQuote &&
+            (!requestedQuoteId || String(existingQuote.quoteId ?? "") === String(requestedQuoteId)) &&
+            Number.isFinite(existingQuoteExpiresAtMs) &&
+            existingQuoteExpiresAtMs > nowMs
+              ? existingQuote
+              : null;
+          if (requestedQuoteId && !selectedQuote) {
+            return sendError(res, 409, "requested quote has expired", null, { code: "X402_QUOTE_EXPIRED" });
+          }
+          const quoteRequestBindingMode =
+            selectedQuote && typeof selectedQuote.requestBindingMode === "string" && selectedQuote.requestBindingMode.trim() !== ""
+              ? selectedQuote.requestBindingMode.trim().toLowerCase()
+              : null;
+          const quoteRequestBindingSha256 =
+            selectedQuote && typeof selectedQuote.requestBindingSha256 === "string" && selectedQuote.requestBindingSha256.trim() !== ""
+              ? selectedQuote.requestBindingSha256.trim().toLowerCase()
+              : null;
+          const effectiveRequestBindingMode = requestBindingMode ?? quoteRequestBindingMode ?? null;
+          const effectiveRequestBindingSha256 = requestBindingSha256 ?? quoteRequestBindingSha256 ?? null;
+          if (effectiveRequestBindingMode === "strict" && !effectiveRequestBindingSha256) {
+            return sendError(res, 409, "strict request binding requires sha256 hash", null, { code: "X402_REQUEST_BINDING_REQUIRED" });
+          }
+          if (requestBindingMode === "strict" && quoteRequestBindingMode === "strict" && quoteRequestBindingSha256) {
+            if (String(requestBindingSha256 ?? "") !== String(quoteRequestBindingSha256)) {
+              return sendError(res, 409, "request binding does not match quote binding", null, { code: "X402_QUOTE_REQUEST_BINDING_MISMATCH" });
+            }
+          }
+          const effectiveQuoteId =
+            typeof selectedQuote?.quoteId === "string" && selectedQuote.quoteId.trim() !== "" ? selectedQuote.quoteId.trim() : null;
+          const effectiveQuoteSha256 =
+            typeof selectedQuote?.quoteSha256 === "string" && selectedQuote.quoteSha256.trim() !== ""
+              ? selectedQuote.quoteSha256.trim().toLowerCase()
+              : null;
+
+          try {
+            await assertX402WalletPolicyForAuthorization({
+              tenantId,
+              gate,
+              policy: resolvedWalletPolicy,
+              amountCents,
+              currency,
+              payeeProviderId,
+              effectiveQuoteId,
+              effectiveRequestBindingMode,
+              effectiveRequestBindingSha256,
+              nowAt
+            });
+          } catch (err) {
+            return sendError(
+              res,
+              409,
+              "x402 wallet policy blocked authorization",
+              { message: err?.message ?? null, code: err?.code ?? null, details: err?.details ?? null },
+              { code: err?.code ?? "X402_WALLET_POLICY_BLOCKED" }
+            );
+          }
+
+          const sponsorRef =
+            typeof resolvedWalletPolicy?.sponsorRef === "string" && resolvedWalletPolicy.sponsorRef.trim() !== ""
+              ? resolvedWalletPolicy.sponsorRef.trim()
+              : typeof gateAgentPassport?.sponsorRef === "string" && gateAgentPassport.sponsorRef.trim() !== ""
+                ? gateAgentPassport.sponsorRef.trim()
+                : payerAgentId;
+          const policyRef = String(resolvedWalletPolicy.policyRef ?? "");
+          const policyVersion = Number(resolvedWalletPolicy.policyVersion ?? 0);
+          const policyFingerprint =
+            typeof resolvedWalletPolicy.policyFingerprint === "string" && resolvedWalletPolicy.policyFingerprint.trim() !== ""
+              ? resolvedWalletPolicy.policyFingerprint.trim().toLowerCase()
+              : null;
+          if (!policyFingerprint) {
+            return sendError(res, 409, "x402 wallet policy fingerprint missing", null, { code: "X402_WALLET_POLICY_FINGERPRINT_MISSING" });
+          }
+
+          let idemHeaderValue = null;
+          try {
+            idemHeaderValue = extractIdempotencyKey(req.headers["x-idempotency-key"] ?? null);
+          } catch {}
+          const decisionPayload = buildX402WalletIssuerDecisionPayloadV1({
+            decisionId: createId("x402dec"),
+            gateId,
+            sponsorRef,
+            sponsorWalletRef,
+            policyRef,
+            policyVersion,
+            policyFingerprint,
+            amountCents,
+            currency,
+            payeeProviderId: String(payeeProviderId ?? ""),
+            ...(effectiveQuoteId ? { quoteId: effectiveQuoteId } : {}),
+            ...(effectiveQuoteSha256 ? { quoteSha256: effectiveQuoteSha256 } : {}),
+            ...(effectiveRequestBindingMode ? { requestBindingMode: effectiveRequestBindingMode } : {}),
+            ...(effectiveRequestBindingSha256 ? { requestBindingSha256: effectiveRequestBindingSha256 } : {}),
+            idempotencyKey: idemHeaderValue ?? `x402wallet:${gateId}:${effectiveQuoteId ?? "noquote"}`,
+            nonce: createId("x402nonce"),
+            iat: nowUnix,
+            exp: nowUnix + settldPayTokenTtlSecondsValue
+          });
+          const mintedDecision = mintX402WalletIssuerDecisionTokenV1({
+            payload: decisionPayload,
+            publicKeyPem: store.serverSigner.publicKeyPem,
+            privateKeyPem: store.serverSigner.privateKeyPem
+          });
+          const responseBody = {
+            ok: true,
+            gateId,
+            sponsorWalletRef,
+            policyRef,
+            policyVersion,
+            walletAuthorizationDecisionToken: mintedDecision.token,
+            tokenKid: mintedDecision.kid,
+            tokenSha256: mintedDecision.tokenSha256,
+            expiresAt: new Date(decisionPayload.exp * 1000).toISOString(),
+            quoteId: effectiveQuoteId,
+            quoteSha256: effectiveQuoteSha256,
+            requestBindingMode: effectiveRequestBindingMode,
+            requestBindingSha256: effectiveRequestBindingSha256
+          };
+          if (idemStoreKey) {
+            await store.commitTx({
+              at: nowAt,
+              ops: [{ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }]
+            });
+          }
+          return sendJson(res, 200, responseBody);
+        }
+
+        if (parts[0] === "x402" && parts[1] === "wallets" && parts[2] && parts[3] === "ledger" && parts.length === 4 && req.method === "GET") {
+          if (typeof store.listX402Receipts !== "function") return sendError(res, 501, "x402 receipts are not supported for this store");
+          let sponsorWalletRef = null;
+          try {
+            sponsorWalletRef = normalizeOptionalX402RefInput(decodePathPart(parts[2]), "sponsorWalletRef", { allowNull: false, max: 200 });
+          } catch (err) {
+            return sendError(res, 400, "invalid sponsorWalletRef", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          let query;
+          try {
+            query = parseX402ReceiptListQuery(url);
+          } catch (err) {
+            return sendError(res, 400, "invalid wallet ledger query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const resolvedWalletPolicy = await resolveX402WalletPolicyForIssuerQuery({ tenantId, sponsorWalletRef });
+          const effectiveSponsorId = query.sponsorId ?? resolvedWalletPolicy?.sponsorRef ?? null;
+          const fetchReceiptPage = async ({ sponsorId, sponsorWalletRefFilter }) => {
+            if (typeof store.listX402ReceiptsPage === "function") {
+              return await store.listX402ReceiptsPage({
+                tenantId,
+                agentId: query.agentId,
+                sponsorId,
+                sponsorWalletRef: sponsorWalletRefFilter,
+                toolId: query.toolId,
+                state: query.state,
+                from: query.from,
+                to: query.to,
+                cursor: query.cursor,
+                limit: query.limit,
+                offset: query.offset
+              });
+            }
+            return {
+              receipts: await store.listX402Receipts({
+                tenantId,
+                agentId: query.agentId,
+                sponsorId,
+                sponsorWalletRef: sponsorWalletRefFilter,
+                toolId: query.toolId,
+                state: query.state,
+                from: query.from,
+                to: query.to,
+                limit: query.limit,
+                offset: query.offset
+              }),
+              nextCursor: null
+            };
+          };
+
+          let page = await fetchReceiptPage({ sponsorId: effectiveSponsorId, sponsorWalletRefFilter: sponsorWalletRef });
+          let receipts = Array.isArray(page?.receipts) ? page.receipts : [];
+          if (receipts.length === 0 && effectiveSponsorId && !query.sponsorWalletRef) {
+            const fallbackPage = await fetchReceiptPage({ sponsorId: effectiveSponsorId, sponsorWalletRefFilter: null });
+            const fallbackRows = Array.isArray(fallbackPage?.receipts) ? fallbackPage.receipts : [];
+            const narrowed = fallbackRows.filter((row) => {
+              if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+              const rowWalletRef =
+                typeof row.sponsorWalletRef === "string" && row.sponsorWalletRef.trim() !== "" ? row.sponsorWalletRef.trim() : null;
+              if (rowWalletRef) return rowWalletRef === sponsorWalletRef;
+              return String(row.sponsorRef ?? "") === String(effectiveSponsorId);
+            });
+            page = { ...fallbackPage, receipts: narrowed };
+            receipts = narrowed;
+          }
+          const entries = receipts.map((receipt) => toX402WalletLedgerEntry(receipt)).filter((entry) => Boolean(entry));
+          const summary = summarizeX402WalletLedgerEntries(entries);
+          return sendJson(res, 200, {
+            ok: true,
+            sponsorWalletRef,
+            entries,
+            summary,
+            limit: query.limit,
+            offset: query.offset,
+            nextCursor: page?.nextCursor ?? null
+          });
+        }
+
+        if (parts[0] === "x402" && parts[1] === "wallets" && parts[2] && parts[3] === "budgets" && parts.length === 4 && req.method === "GET") {
+          let sponsorWalletRef = null;
+          try {
+            sponsorWalletRef = normalizeOptionalX402RefInput(decodePathPart(parts[2]), "sponsorWalletRef", { allowNull: false, max: 200 });
+          } catch (err) {
+            return sendError(res, 400, "invalid sponsorWalletRef", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          const atRaw = url.searchParams.get("at");
+          const atIso =
+            atRaw === null || atRaw === undefined || String(atRaw).trim() === ""
+              ? nowIso()
+              : Number.isFinite(Date.parse(String(atRaw).trim()))
+                ? new Date(String(atRaw).trim()).toISOString()
+                : null;
+          if (!atIso) {
+            return sendError(res, 400, "invalid budgets query", { message: "at must be an ISO date-time when provided" }, { code: "SCHEMA_INVALID" });
+          }
+          let policy = null;
+          try {
+            policy = await resolveX402WalletPolicyForIssuerQuery({
+              tenantId,
+              sponsorWalletRef,
+              policyRef: url.searchParams.get("policyRef"),
+              policyVersion: url.searchParams.get("policyVersion")
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid budgets policy selector", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          if (!policy) return sendError(res, 404, "x402 wallet policy not found", null, { code: "NOT_FOUND" });
+
+          const dayKey = atIso.slice(0, 10);
+          const dailyAuthorizedExposureCents = computeX402DailyAuthorizedExposureCents({
+            tenantId,
+            dayKey,
+            sponsorWalletRef
+          });
+          const maxAmountCents = Number.isSafeInteger(policy.maxAmountCents) ? policy.maxAmountCents : null;
+          const maxDailyAuthorizationCents = Number.isSafeInteger(policy.maxDailyAuthorizationCents)
+            ? policy.maxDailyAuthorizationCents
+            : null;
+          const remainingDailyAuthorizationCents =
+            maxDailyAuthorizationCents === null ? null : Math.max(0, maxDailyAuthorizationCents - dailyAuthorizedExposureCents);
+          const authorizationSummary = summarizeX402WalletAuthorizationState({ tenantId, sponsorWalletRef });
+          return sendJson(res, 200, {
+            ok: true,
+            sponsorWalletRef,
+            at: atIso,
+            policy,
+            budgets: normalizeForCanonicalJson(
+              {
+                schemaVersion: "X402WalletBudgetSnapshot.v1",
+                dayKey,
+                maxAmountCents,
+                maxDailyAuthorizationCents,
+                dailyAuthorizedExposureCents,
+                remainingDailyAuthorizationCents,
+                authorizationSummary
+              },
+              { path: "$" }
+            )
+          });
         }
 
         if (parts[0] === "x402" && parts[1] === "gate" && parts[2] === "create" && parts.length === 3 && req.method === "POST") {
@@ -30634,6 +32171,16 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid quoteId", { message: err?.message }, { code: "SCHEMA_INVALID" });
           }
+          let walletAuthorizationDecisionToken = null;
+          try {
+            walletAuthorizationDecisionToken = normalizeX402WalletIssuerDecisionTokenInput(
+              body?.walletAuthorizationDecisionToken ?? body?.walletAuthorizationDecision ?? null,
+              "walletAuthorizationDecisionToken",
+              { allowNull: true }
+            );
+          } catch (err) {
+            return sendError(res, 400, "invalid walletAuthorizationDecisionToken", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
 
           const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
           if (!gate) return sendError(res, 404, "gate not found", null, { code: "NOT_FOUND" });
@@ -30657,6 +32204,14 @@ export function createApi({
             typeof gate?.terms?.currency === "string" && gate.terms.currency.trim() !== ""
               ? gate.terms.currency.trim().toUpperCase()
               : settlement?.currency ?? "USD";
+          const gateAgentPassport =
+            gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport) ? gate.agentPassport : null;
+          const payeeProviderId =
+            typeof gate?.payeeAgentId === "string" && gate.payeeAgentId.trim() !== ""
+              ? gate.payeeAgentId.trim()
+              : typeof gate?.terms?.providerId === "string" && gate.terms.providerId.trim() !== ""
+                ? gate.terms.providerId.trim()
+                : null;
 
           const nowAt = nowIso();
           const nowMs = Date.parse(nowAt);
@@ -30772,16 +32327,128 @@ export function createApi({
             !effectiveQuoteId
               ? !existingTokenQuoteId && !existingTokenQuoteSha256
               : existingTokenQuoteId === effectiveQuoteId && (!effectiveQuoteSha256 || existingTokenQuoteSha256 === effectiveQuoteSha256);
+          let resolvedWalletPolicy = null;
+          if (gateAgentPassport) {
+            const walletPolicyResolution = await resolveX402WalletPolicyForPassport({
+              tenantId,
+              gateAgentPassport
+            });
+            if (walletPolicyResolution?.error && !hasReservedAuthorization) {
+              return sendError(
+                res,
+                409,
+                "x402 wallet policy reference is invalid",
+                {
+                  message: walletPolicyResolution.error.message ?? null,
+                  sponsorWalletRef: walletPolicyResolution.sponsorWalletRef ?? null
+                },
+                { code: walletPolicyResolution.error.code ?? "X402_WALLET_POLICY_REFERENCE_INVALID" }
+              );
+            }
+            resolvedWalletPolicy = walletPolicyResolution?.policy ?? null;
+          }
+          let walletIssuerDecisionPayload = null;
+          if (!hasReservedAuthorization && resolvedWalletPolicy) {
+            if (!walletAuthorizationDecisionToken) {
+              return sendError(
+                res,
+                409,
+                "wallet issuer decision is required for wallet-bound authorization",
+                {
+                  gateId,
+                  sponsorWalletRef:
+                    typeof resolvedWalletPolicy?.sponsorWalletRef === "string" && resolvedWalletPolicy.sponsorWalletRef.trim() !== ""
+                      ? resolvedWalletPolicy.sponsorWalletRef.trim()
+                      : null
+                },
+                { code: "X402_WALLET_ISSUER_DECISION_REQUIRED" }
+              );
+            }
+            const expectedSponsorRef =
+              typeof resolvedWalletPolicy?.sponsorRef === "string" && resolvedWalletPolicy.sponsorRef.trim() !== ""
+                ? resolvedWalletPolicy.sponsorRef.trim()
+                : typeof gateAgentPassport?.sponsorRef === "string" && gateAgentPassport.sponsorRef.trim() !== ""
+                  ? gateAgentPassport.sponsorRef.trim()
+                  : payerAgentId;
+            const expectedSponsorWalletRef =
+              typeof resolvedWalletPolicy?.sponsorWalletRef === "string" && resolvedWalletPolicy.sponsorWalletRef.trim() !== ""
+                ? resolvedWalletPolicy.sponsorWalletRef.trim()
+                : null;
+            const expectedPolicyRef =
+              typeof resolvedWalletPolicy?.policyRef === "string" && resolvedWalletPolicy.policyRef.trim() !== ""
+                ? resolvedWalletPolicy.policyRef.trim()
+                : null;
+            const expectedPolicyVersion =
+              Number.isSafeInteger(Number(resolvedWalletPolicy?.policyVersion)) && Number(resolvedWalletPolicy.policyVersion) > 0
+                ? Number(resolvedWalletPolicy.policyVersion)
+                : null;
+            const expectedPolicyFingerprint =
+              typeof resolvedWalletPolicy?.policyFingerprint === "string" && resolvedWalletPolicy.policyFingerprint.trim() !== ""
+                ? resolvedWalletPolicy.policyFingerprint.trim().toLowerCase()
+                : null;
+            const issuerDecisionVerify = verifyX402WalletIssuerDecisionTokenV1({
+              token: walletAuthorizationDecisionToken,
+              publicKeyPem: store.serverSigner.publicKeyPem,
+              nowUnixSeconds: nowUnix,
+              expected: {
+                gateId,
+                sponsorRef: expectedSponsorRef,
+                sponsorWalletRef: expectedSponsorWalletRef,
+                policyRef: expectedPolicyRef,
+                policyVersion: expectedPolicyVersion,
+                policyFingerprint: expectedPolicyFingerprint,
+                amountCents,
+                currency,
+                payeeProviderId: String(payeeProviderId ?? ""),
+                quoteId: effectiveQuoteId,
+                quoteSha256: effectiveQuoteSha256,
+                requestBindingMode: effectiveRequestBindingMode,
+                requestBindingSha256: effectiveRequestBindingSha256
+              }
+            });
+            if (!issuerDecisionVerify?.ok) {
+              return sendError(
+                res,
+                409,
+                "wallet issuer decision is invalid",
+                {
+                  message: issuerDecisionVerify?.error ?? null,
+                  field: issuerDecisionVerify?.field ?? null,
+                  verifyCode: issuerDecisionVerify?.code ?? null
+                },
+                { code: issuerDecisionVerify?.code ?? "X402_WALLET_ISSUER_DECISION_INVALID" }
+              );
+            }
+            walletIssuerDecisionPayload = issuerDecisionVerify.payload ?? null;
+          }
           if (x402PilotKillSwitchValue === true) {
             return sendError(res, 409, "x402 pilot kill switch is active", null, { code: "X402_PILOT_KILL_SWITCH_ACTIVE" });
           }
           if (!hasReservedAuthorization) {
-            const payeeProviderId =
-              typeof gate?.payeeAgentId === "string" && gate.payeeAgentId.trim() !== ""
-                ? gate.payeeAgentId.trim()
-                : typeof gate?.terms?.providerId === "string" && gate.terms.providerId.trim() !== ""
-                  ? gate.terms.providerId.trim()
-                  : null;
+            if (resolvedWalletPolicy) {
+              try {
+                await assertX402WalletPolicyForAuthorization({
+                  tenantId,
+                  gate,
+                  policy: resolvedWalletPolicy,
+                  amountCents,
+                  currency,
+                  payeeProviderId,
+                  effectiveQuoteId,
+                  effectiveRequestBindingMode,
+                  effectiveRequestBindingSha256,
+                  nowAt
+                });
+              } catch (err) {
+                return sendError(
+                  res,
+                  409,
+                  "x402 wallet policy blocked authorization",
+                  { message: err?.message ?? null, code: err?.code ?? null, details: err?.details ?? null },
+                  { code: err?.code ?? "X402_WALLET_POLICY_BLOCKED" }
+                );
+              }
+            }
             if (
               Array.isArray(x402PilotAllowedProviderIdsValue) &&
               x402PilotAllowedProviderIdsValue.length > 0 &&
@@ -30963,9 +32630,19 @@ export function createApi({
             }
           }
 
-          const gateAgentPassport =
-            gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport) ? gate.agentPassport : null;
-          const includeSpendAuthorizationClaims = Boolean(effectiveQuoteId);
+          const includeSpendAuthorizationClaims = Boolean(effectiveQuoteId || resolvedWalletPolicy || gateAgentPassport);
+          const walletPolicyFingerprint =
+            resolvedWalletPolicy &&
+            typeof resolvedWalletPolicy.policyFingerprint === "string" &&
+            resolvedWalletPolicy.policyFingerprint.trim() !== ""
+              ? resolvedWalletPolicy.policyFingerprint.trim().toLowerCase()
+              : null;
+          const walletPolicyVersion =
+            resolvedWalletPolicy && Number.isSafeInteger(Number(resolvedWalletPolicy.policyVersion)) && Number(resolvedWalletPolicy.policyVersion) > 0
+              ? Number(resolvedWalletPolicy.policyVersion)
+              : Number.isSafeInteger(Number(gateAgentPassport?.policyVersion)) && Number(gateAgentPassport.policyVersion) > 0
+                ? Number(gateAgentPassport.policyVersion)
+                : 1;
           const agentPassportPolicyFingerprint = buildX402AgentPassportPolicyFingerprint(gateAgentPassport);
           const fallbackPolicyFingerprint = includeSpendAuthorizationClaims
             ? sha256Hex(
@@ -30976,8 +32653,20 @@ export function createApi({
                       gateId,
                       authorizationRef,
                       payerAgentId,
-                      payeeProviderId: String(gate?.payeeAgentId ?? ""),
-                      quoteId: effectiveQuoteId ?? null
+                      payeeProviderId: String(payeeProviderId ?? ""),
+                      quoteId: effectiveQuoteId ?? null,
+                      sponsorRef:
+                        (typeof resolvedWalletPolicy?.sponsorRef === "string" && resolvedWalletPolicy.sponsorRef.trim() !== ""
+                          ? resolvedWalletPolicy.sponsorRef.trim()
+                          : typeof gateAgentPassport?.sponsorRef === "string" && gateAgentPassport.sponsorRef.trim() !== ""
+                            ? gateAgentPassport.sponsorRef.trim()
+                            : payerAgentId) || null,
+                      sponsorWalletRef:
+                        typeof resolvedWalletPolicy?.sponsorWalletRef === "string" && resolvedWalletPolicy.sponsorWalletRef.trim() !== ""
+                          ? resolvedWalletPolicy.sponsorWalletRef.trim()
+                          : typeof gateAgentPassport?.sponsorWalletRef === "string" && gateAgentPassport.sponsorWalletRef.trim() !== ""
+                            ? gateAgentPassport.sponsorWalletRef.trim()
+                            : null
                     },
                     { path: "$" }
                   )
@@ -30991,23 +32680,38 @@ export function createApi({
             authorizationRef,
             amountCents,
             currency,
-            payeeProviderId: String(gate?.payeeAgentId ?? ""),
+            payeeProviderId: String(payeeProviderId ?? ""),
             ...(effectiveRequestBindingMode
               ? { requestBindingMode: effectiveRequestBindingMode, requestBindingSha256: effectiveRequestBindingSha256 }
               : {}),
             ...(includeSpendAuthorizationClaims
               ? {
-                  quoteId: effectiveQuoteId,
-                  quoteSha256: effectiveQuoteSha256,
-                  idempotencyKey: `x402:${gateId}:${effectiveQuoteId}`,
-                  nonce: createId("x402nonce"),
+                  ...(effectiveQuoteId ? { quoteId: effectiveQuoteId, quoteSha256: effectiveQuoteSha256 } : {}),
+                  idempotencyKey:
+                    typeof walletIssuerDecisionPayload?.idempotencyKey === "string" && walletIssuerDecisionPayload.idempotencyKey.trim() !== ""
+                      ? walletIssuerDecisionPayload.idempotencyKey.trim()
+                      : effectiveQuoteId
+                        ? `x402:${gateId}:${effectiveQuoteId}`
+                        : `x402:${gateId}:${authorizationRef}`,
+                  nonce:
+                    typeof walletIssuerDecisionPayload?.nonce === "string" && walletIssuerDecisionPayload.nonce.trim() !== ""
+                      ? walletIssuerDecisionPayload.nonce.trim()
+                      : createId("x402nonce"),
                   sponsorRef:
-                    (typeof gateAgentPassport?.sponsorRef === "string" && gateAgentPassport.sponsorRef.trim() !== ""
-                      ? gateAgentPassport.sponsorRef.trim()
+                    (typeof walletIssuerDecisionPayload?.sponsorRef === "string" && walletIssuerDecisionPayload.sponsorRef.trim() !== ""
+                      ? walletIssuerDecisionPayload.sponsorRef.trim()
+                      : typeof resolvedWalletPolicy?.sponsorRef === "string" && resolvedWalletPolicy.sponsorRef.trim() !== ""
+                      ? resolvedWalletPolicy.sponsorRef.trim()
+                      : typeof gateAgentPassport?.sponsorRef === "string" && gateAgentPassport.sponsorRef.trim() !== ""
+                        ? gateAgentPassport.sponsorRef.trim()
                       : payerAgentId) || null,
                   sponsorWalletRef:
-                    typeof gateAgentPassport?.sponsorWalletRef === "string" && gateAgentPassport.sponsorWalletRef.trim() !== ""
-                      ? gateAgentPassport.sponsorWalletRef.trim()
+                    typeof walletIssuerDecisionPayload?.sponsorWalletRef === "string" && walletIssuerDecisionPayload.sponsorWalletRef.trim() !== ""
+                      ? walletIssuerDecisionPayload.sponsorWalletRef.trim()
+                      : typeof resolvedWalletPolicy?.sponsorWalletRef === "string" && resolvedWalletPolicy.sponsorWalletRef.trim() !== ""
+                      ? resolvedWalletPolicy.sponsorWalletRef.trim()
+                      : typeof gateAgentPassport?.sponsorWalletRef === "string" && gateAgentPassport.sponsorWalletRef.trim() !== ""
+                        ? gateAgentPassport.sponsorWalletRef.trim()
                       : null,
                   agentKeyId:
                     (typeof gateAgentPassport?.agentKeyId === "string" && gateAgentPassport.agentKeyId.trim() !== ""
@@ -31018,10 +32722,13 @@ export function createApi({
                       ? gateAgentPassport.delegationRef.trim()
                       : null,
                   policyVersion:
-                    Number.isSafeInteger(Number(gateAgentPassport?.policyVersion)) && Number(gateAgentPassport.policyVersion) > 0
-                      ? Number(gateAgentPassport.policyVersion)
-                      : 1,
-                  policyFingerprint: agentPassportPolicyFingerprint ?? fallbackPolicyFingerprint
+                    Number.isSafeInteger(Number(walletIssuerDecisionPayload?.policyVersion)) && Number(walletIssuerDecisionPayload.policyVersion) > 0
+                      ? Number(walletIssuerDecisionPayload.policyVersion)
+                      : walletPolicyVersion,
+                  policyFingerprint:
+                    typeof walletIssuerDecisionPayload?.policyFingerprint === "string" && walletIssuerDecisionPayload.policyFingerprint.trim() !== ""
+                      ? walletIssuerDecisionPayload.policyFingerprint.trim().toLowerCase()
+                      : walletPolicyFingerprint ?? agentPassportPolicyFingerprint ?? fallbackPolicyFingerprint
                 }
               : {}),
             iat: nowUnix,
@@ -31734,6 +33441,18 @@ export function createApi({
 	              : []),
 	            { kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate }
 	          ];
+          const derivedReceiptRecord =
+            typeof store.deriveX402ReceiptRecord === "function"
+              ? store.deriveX402ReceiptRecord({ tenantId, gate: nextGate, settlement: resolvedSettlement, includeReversalContext: false })
+              : null;
+          if (derivedReceiptRecord && typeof derivedReceiptRecord.receiptId === "string" && derivedReceiptRecord.receiptId.trim() !== "") {
+            ops.push({
+              kind: "X402_RECEIPT_PUT",
+              tenantId,
+              receiptId: derivedReceiptRecord.receiptId,
+              receipt: derivedReceiptRecord
+            });
+          }
 	          const responseBody = {
 	            ok: true,
 	            gate: nextGate,
@@ -31854,6 +33573,56 @@ export function createApi({
           }
 
           const quoteBinding = resolveX402GateQuoteBinding({ gate, settlement });
+          const gateAgentPassport =
+            gate?.agentPassport && typeof gate.agentPassport === "object" && !Array.isArray(gate.agentPassport) ? gate.agentPassport : null;
+          let resolvedWalletPolicy = null;
+          if (gateAgentPassport) {
+            const walletPolicyResolution = await resolveX402WalletPolicyForPassport({
+              tenantId,
+              gateAgentPassport
+            });
+            if (walletPolicyResolution?.error) {
+              return sendError(
+                res,
+                409,
+                "x402 wallet policy reference is invalid",
+                {
+                  message: walletPolicyResolution.error.message ?? null,
+                  sponsorWalletRef: walletPolicyResolution.sponsorWalletRef ?? null
+                },
+                { code: walletPolicyResolution.error.code ?? "X402_WALLET_POLICY_REFERENCE_INVALID" }
+              );
+            }
+            resolvedWalletPolicy = walletPolicyResolution?.policy ?? null;
+          }
+          if (resolvedWalletPolicy) {
+            const policyStatus = String(resolvedWalletPolicy.status ?? "active").toLowerCase();
+            if (policyStatus !== "active") {
+              return sendError(
+                res,
+                409,
+                "x402 wallet policy blocked reversal",
+                { code: "X402_WALLET_POLICY_DISABLED" },
+                { code: "X402_WALLET_POLICY_DISABLED" }
+              );
+            }
+            if (
+              Array.isArray(resolvedWalletPolicy.allowedReversalActions) &&
+              resolvedWalletPolicy.allowedReversalActions.length > 0 &&
+              !resolvedWalletPolicy.allowedReversalActions.includes(action)
+            ) {
+              return sendError(
+                res,
+                409,
+                "x402 wallet policy blocked reversal action",
+                {
+                  action,
+                  allowedReversalActions: resolvedWalletPolicy.allowedReversalActions
+                },
+                { code: "X402_WALLET_POLICY_REVERSAL_ACTION_NOT_ALLOWED" }
+              );
+            }
+          }
           const expectedSponsorRef = quoteBinding.sponsorRef ?? payerAgentId;
           const commandSignatureKeyId =
             commandEnvelope?.signature && typeof commandEnvelope.signature === "object" && !Array.isArray(commandEnvelope.signature)
@@ -32542,6 +34311,22 @@ export function createApi({
             nonce: nonceUsageRecord.nonce,
             usage: nonceUsageRecord
           });
+          const reversalDerivedReceiptRecord =
+            typeof store.deriveX402ReceiptRecord === "function"
+              ? store.deriveX402ReceiptRecord({ tenantId, gate: nextGate, settlement: nextSettlement, includeReversalContext: false })
+              : null;
+          if (
+            reversalDerivedReceiptRecord &&
+            typeof reversalDerivedReceiptRecord.receiptId === "string" &&
+            reversalDerivedReceiptRecord.receiptId.trim() !== ""
+          ) {
+            ops.push({
+              kind: "X402_RECEIPT_PUT",
+              tenantId,
+              receiptId: reversalDerivedReceiptRecord.receiptId,
+              receipt: reversalDerivedReceiptRecord
+            });
+          }
 
           const responseBody = {
             ok: true,

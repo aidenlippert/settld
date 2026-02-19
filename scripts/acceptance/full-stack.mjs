@@ -221,6 +221,15 @@ async function main() {
     const gateId = String(gateCreate.json?.gate?.gateId ?? "");
     assert.ok(gateId, "gateId missing from x402 create response");
 
+    const gateAuthorize = await httpJson({
+      baseUrl: API_BASE_URL,
+      method: "POST",
+      path: "/x402/gate/authorize-payment",
+      headers: { ...headersBase, "x-idempotency-key": `x402_authorize_${Date.now()}` },
+      body: { gateId }
+    });
+    assert.equal(gateAuthorize.status, 200, gateAuthorize.text);
+
     const gateVerify = await httpJson({
       baseUrl: API_BASE_URL,
       method: "POST",

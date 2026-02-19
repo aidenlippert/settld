@@ -17,21 +17,33 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function isNonWritableFsError(err) {
+  const code = String(err?.code ?? "");
+  return code === "EACCES" || code === "EPERM" || code === "EROFS";
+}
+
 export class DedupeStore {
   constructor({ filePath }) {
     assertNonEmptyString(filePath, "filePath");
     this.filePath = filePath;
     this.records = new Map(); // dedupeKey -> record
     this._appendQueue = Promise.resolve();
+    this.persistenceDisabled = false;
   }
 
   async init() {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     let raw = "";
     try {
-      raw = await fs.readFile(this.filePath, "utf8");
+      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+      try {
+        raw = await fs.readFile(this.filePath, "utf8");
+      } catch (err) {
+        if (err?.code !== "ENOENT") throw err;
+        raw = "";
+      }
     } catch (err) {
-      if (err?.code !== "ENOENT") throw err;
+      if (!isNonWritableFsError(err)) throw err;
+      this.persistenceDisabled = true;
       raw = "";
     }
 
@@ -104,9 +116,21 @@ export class DedupeStore {
 
   async appendEvent(evt) {
     if (!evt || typeof evt !== "object") throw new TypeError("evt must be an object");
+    if (this.persistenceDisabled) return false;
     const line = `${JSON.stringify(evt)}\n`;
-    this._appendQueue = this._appendQueue.then(() => fs.appendFile(this.filePath, line, "utf8"));
-    return await this._appendQueue;
+    const append = async () => {
+      await fs.appendFile(this.filePath, line, "utf8");
+    };
+    const op = this._appendQueue.then(append, append);
+    this._appendQueue = op.catch(() => {});
+    try {
+      await op;
+      return true;
+    } catch (err) {
+      if (!isNonWritableFsError(err)) throw err;
+      this.persistenceDisabled = true;
+      return false;
+    }
   }
 
   async ensureReceived({ dedupeKey, artifactHash }) {

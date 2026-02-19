@@ -528,14 +528,15 @@ async function handleProxy(req, res) {
           }
         : null;
       let quoted = null;
-      const shouldFetchQuote = quoteRequired || requestBindingMode === "strict" || Boolean(offerQuoteId);
+      const challengeQuoteId = verifiedQuote?.quoteId ? String(verifiedQuote.quoteId) : offerQuoteId ?? null;
+      const shouldFetchQuote = quoteRequired || requestBindingMode === "strict" || Boolean(challengeQuoteId);
       if (shouldFetchQuote) {
         quoted = await settldJson("/x402/gate/quote", {
           tenantId,
           method: "POST",
           idempotencyKey: stableIdemKey(
             "x402_quote",
-            `${gateId}\n${requestBindingMode ?? "none"}\n${requestBindingSha256 ?? ""}\n${offerQuoteId ?? ""}`
+            `${gateId}\n${requestBindingMode ?? "none"}\n${requestBindingSha256 ?? ""}\n${challengeQuoteId ?? ""}`
           ),
           body: {
             gateId,
@@ -547,7 +548,7 @@ async function handleProxy(req, res) {
               : {}),
             ...(offerProviderId ? { providerId: offerProviderId } : {}),
             ...(offerToolId ? { toolId: offerToolId } : {}),
-            ...(verifiedQuote?.quoteId ? { quoteId: String(verifiedQuote.quoteId) } : offerQuoteId ? { quoteId: offerQuoteId } : {})
+            ...(challengeQuoteId ? { quoteId: challengeQuoteId } : {})
           }
         });
       }
@@ -570,10 +571,8 @@ async function handleProxy(req, res) {
           : {}),
           ...(quoted?.quote?.quoteId
             ? { quoteId: String(quoted.quote.quoteId) }
-            : verifiedQuote?.quoteId
-              ? { quoteId: String(verifiedQuote.quoteId) }
-              : offerQuoteId
-                ? { quoteId: offerQuoteId }
+            : challengeQuoteId
+              ? { quoteId: challengeQuoteId }
                 : {})
         }
       });
