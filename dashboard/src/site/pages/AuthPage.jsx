@@ -247,7 +247,7 @@ export default function AuthPage({ mode = "login" }) {
                   {loading ? "Sending code..." : "Send verification code"}
                 </Button>
               ) : (
-                <div className="rounded-xl border border-[#d8d0c1] bg-[rgba(255,253,248,0.85)] p-4">
+                <div className="rounded-xl border border-[#d8d0c1] bg-[rgba(255,253,248,0.85)] p-5 sm:p-6">
                   <label className="grid gap-2">
                     <Label>Verification code</Label>
                     <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" required />

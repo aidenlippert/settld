@@ -506,14 +506,15 @@ body {
 }
 
 .tight-list {
-  margin: 0.6rem 0 0;
-  padding-left: 1.15rem;
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
   display: grid;
-  gap: 0.38rem;
+  gap: 0.62rem;
 }
 
 .tight-list li {
   color: var(--ink-700);
+  line-height: 1.58;
 }
 
 .quickstart-grid {
@@ -869,7 +870,7 @@ body {
 
 .docs-section-card {
   border-radius: var(--radius-card);
-  padding: 1rem;
+  padding: 1.2rem;
 }
 
 .docs-section-card h2 {
@@ -899,7 +900,7 @@ body {
 .docs-card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.66rem;
+  gap: 0.9rem;
 }
 
 .docs-ref-grid {
@@ -910,12 +911,12 @@ body {
 
 .docs-ref-card {
   border-radius: var(--radius-control);
-  padding: 0.8rem;
+  padding: 1.06rem;
   color: var(--ink-900);
   text-decoration: none;
   font-weight: 700;
   display: grid;
-  gap: 0.32rem;
+  gap: 0.52rem;
 }
 
 .docs-ref-card strong {
@@ -935,14 +936,14 @@ body {
 
 .docs-endpoint-grid {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.62rem;
 }
 
 .docs-endpoint-row {
   border-radius: var(--radius-control);
-  padding: 0.55rem 0.62rem;
+  padding: 0.82rem 0.86rem;
   display: grid;
-  gap: 0.3rem;
+  gap: 0.45rem;
 }
 
 .compact-pill,
@@ -981,6 +982,7 @@ body {
 .docs-endpoint-row span {
   color: var(--ink-700);
   font-size: 0.88rem;
+  line-height: 1.55;
 }
 
 .operator-root,

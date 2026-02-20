@@ -119,7 +119,7 @@ export default function ProductPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {launchLanes.map((lane) => (
                 <Card key={lane} className="border-[#e1d8c8] bg-[rgba(255,255,255,0.64)] shadow-none">
-                  <CardContent className="p-4">
+                  <CardContent className="p-5 sm:p-6">
                     <p className="text-sm font-semibold text-[#1f1f1f]">{lane}</p>
                   </CardContent>
                 </Card>
