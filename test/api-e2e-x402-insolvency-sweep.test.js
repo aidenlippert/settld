@@ -389,6 +389,15 @@ test("API e2e: freeze unwind auto-denies pending escalation and cancels active q
   assert.equal(windDown.json?.unwind?.escalationsDenied, 1);
   assert.equal(windDown.json?.unwind?.quotesCanceled, 1);
   assert.ok(Number(windDown.json?.unwind?.reversalDispatchQueued ?? 0) >= 1);
+  const queuedDispatch = api.store.outbox.find(
+    (message) =>
+      message &&
+      typeof message === "object" &&
+      String(message.type ?? "") === "X402_AGENT_WINDDOWN_REVERSAL_REQUESTED" &&
+      String(message.gateId ?? "") === "x402_gate_unwind_1b"
+  );
+  assert.ok(queuedDispatch && typeof queuedDispatch === "object");
+  assert.ok(typeof queuedDispatch.dispatchId === "string" && queuedDispatch.dispatchId.length === 64);
 
   const deniedEscalation = await request(api, {
     method: "GET",
@@ -416,7 +425,36 @@ test("API e2e: freeze unwind auto-denies pending escalation and cancels active q
   assert.ok(gateB && typeof gateB === "object");
   assert.equal(gateB.authorization?.status, "voided");
   assert.equal(gateB.reversal?.status, "voided");
+  assert.equal(gateB.reversalDispatch?.status, "completed");
+  assert.equal(String(gateB.reversalDispatch?.dispatchId ?? ""), String(queuedDispatch?.dispatchId ?? ""));
   const settlementB = await api.store.getAgentRunSettlement({ tenantId: "tenant_default", runId: gateB.runId });
   assert.ok(settlementB && typeof settlementB === "object");
   assert.equal(String(settlementB.status ?? "").toLowerCase(), "refunded");
+
+  const reversalEventsBefore = await api.store.listX402ReversalEvents({
+    tenantId: "tenant_default",
+    gateId: "x402_gate_unwind_1b",
+    limit: 1000,
+    offset: 0
+  });
+  assert.ok(Array.isArray(reversalEventsBefore));
+
+  api.store.outbox.push({
+    ...queuedDispatch,
+    at: new Date(Date.parse(String(queuedDispatch?.at ?? windDown.json?.lifecycle?.updatedAt ?? new Date().toISOString())) + 1).toISOString()
+  });
+  const replayTick = await api.tickX402WinddownReversals({ maxMessages: 10 });
+  assert.ok(Array.isArray(replayTick?.processed));
+  const replayRow = replayTick.processed.find((row) => row?.gateId === "x402_gate_unwind_1b");
+  assert.equal(replayRow?.status, "skipped");
+  assert.equal(replayRow?.reason, "dispatch_already_completed");
+
+  const reversalEventsAfter = await api.store.listX402ReversalEvents({
+    tenantId: "tenant_default",
+    gateId: "x402_gate_unwind_1b",
+    limit: 1000,
+    offset: 0
+  });
+  assert.ok(Array.isArray(reversalEventsAfter));
+  assert.equal(reversalEventsAfter.length, reversalEventsBefore.length);
 });

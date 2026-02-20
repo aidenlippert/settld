@@ -89,6 +89,47 @@ test("Settlement kernel builds bound decision + receipt artifacts", () => {
   assert.deepEqual(verification.errors, []);
 });
 
+test("Settlement kernel v2 normalizes optional profileHashUsed deterministically", () => {
+  const base = {
+    decisionId: "dec_run_profile_hash_1",
+    tenantId: "tenant_default",
+    runId: "run_profile_hash_1",
+    settlementId: "setl_run_profile_hash_1",
+    agreementId: "agr_profile_hash_1",
+    decisionStatus: "auto_resolved",
+    decisionMode: "automatic",
+    verificationStatus: "green",
+    policyHashUsed: "3".repeat(64),
+    verificationMethodHashUsed: "4".repeat(64),
+    policyRef: {
+      policyHash: "3".repeat(64),
+      verificationMethodHash: "4".repeat(64)
+    },
+    verifierRef: {
+      verifierId: "settld.policy-engine",
+      verifierVersion: "v1",
+      verifierHash: "5".repeat(64),
+      modality: "deterministic"
+    },
+    runStatus: "completed",
+    runLastEventId: "ev_profile_hash_1",
+    runLastChainHash: "ch_profile_hash_1",
+    resolutionEventId: "ev_profile_hash_1",
+    decidedAt: "2026-02-08T00:00:00.000Z"
+  };
+  const withUpper = buildSettlementDecisionRecord({
+    ...base,
+    profileHashUsed: "A".repeat(64)
+  });
+  const withLower = buildSettlementDecisionRecord({
+    ...base,
+    profileHashUsed: "a".repeat(64)
+  });
+
+  assert.equal(withUpper.profileHashUsed, "a".repeat(64));
+  assert.equal(withUpper.decisionHash, withLower.decisionHash);
+});
+
 test("Settlement kernel verification reports decision/receipt binding mismatches", () => {
   const decision = buildSettlementDecisionRecord({
     decisionId: "dec_run_2_auto",
@@ -156,6 +197,71 @@ test("Settlement kernel verification reports decision/receipt binding mismatches
   assert.equal(verification.valid, false);
   assert.ok(verification.errors.includes(SETTLEMENT_KERNEL_VERIFICATION_CODE.SETTLEMENT_RECEIPT_HASH_MISMATCH));
   assert.ok(verification.errors.includes(SETTLEMENT_KERNEL_VERIFICATION_CODE.SETTLEMENT_RECEIPT_DECISION_HASH_MISMATCH));
+});
+
+test("Settlement kernel verification reports invalid optional profileHashUsed", () => {
+  const decision = buildSettlementDecisionRecord({
+    decisionId: "dec_run_profile_hash_2",
+    tenantId: "tenant_default",
+    runId: "run_profile_hash_2",
+    settlementId: "setl_run_profile_hash_2",
+    agreementId: "agr_profile_hash_2",
+    decisionStatus: "auto_resolved",
+    decisionMode: "automatic",
+    verificationStatus: "green",
+    policyHashUsed: "3".repeat(64),
+    verificationMethodHashUsed: "4".repeat(64),
+    policyRef: {
+      policyHash: "3".repeat(64),
+      verificationMethodHash: "4".repeat(64)
+    },
+    verifierRef: {
+      verifierId: "settld.policy-engine",
+      verifierVersion: "v1",
+      verifierHash: "5".repeat(64),
+      modality: "deterministic"
+    },
+    runStatus: "completed",
+    runLastEventId: "ev_profile_hash_2",
+    runLastChainHash: "ch_profile_hash_2",
+    resolutionEventId: "ev_profile_hash_2",
+    decidedAt: "2026-02-08T00:00:00.000Z"
+  });
+  const decisionWithInvalidProfile = {
+    ...decision,
+    profileHashUsed: "not-a-hash"
+  };
+  const receipt = buildSettlementReceipt({
+    receiptId: "rcpt_run_profile_hash_2",
+    tenantId: "tenant_default",
+    runId: "run_profile_hash_2",
+    settlementId: "setl_run_profile_hash_2",
+    decisionRecord: decisionWithInvalidProfile,
+    status: "released",
+    amountCents: 2400,
+    releasedAmountCents: 2400,
+    refundedAmountCents: 0,
+    releaseRatePct: 100,
+    currency: "USD",
+    runStatus: "completed",
+    resolutionEventId: "ev_profile_hash_2",
+    settledAt: "2026-02-08T00:00:01.000Z",
+    createdAt: "2026-02-08T00:00:01.000Z"
+  });
+
+  const verification = verifySettlementKernelArtifacts({
+    settlement: {
+      runId: "run_profile_hash_2",
+      settlementId: "setl_run_profile_hash_2",
+      decisionTrace: {
+        decisionRecord: decisionWithInvalidProfile,
+        settlementReceipt: receipt
+      }
+    },
+    runId: "run_profile_hash_2"
+  });
+  assert.equal(verification.valid, false);
+  assert.ok(verification.errors.includes(SETTLEMENT_KERNEL_VERIFICATION_CODE.DECISION_RECORD_PROFILE_HASH_USED_INVALID));
 });
 
 test("Settlement kernel verification reports temporal ordering violations", () => {

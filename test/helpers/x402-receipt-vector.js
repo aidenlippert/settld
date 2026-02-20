@@ -154,6 +154,7 @@ export function buildX402ReceiptVerifierVector() {
     decisionReason: "x402_provider_signature_green",
     verificationStatus: "green",
     policyHashUsed: "d".repeat(64),
+    profileHashUsed: bindings.spendAuthorization.policyFingerprint,
     verificationMethodHashUsed: "e".repeat(64),
     policyRef: {
       policyHash: "d".repeat(64),

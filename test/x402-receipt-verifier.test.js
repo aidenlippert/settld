@@ -95,6 +95,7 @@ function buildSignedCommandArtifact({ keypair, gateId, receiptId, quoteId, reque
 
 test("x402 receipt verifier: valid vector passes with zero errors", () => {
   const receipt = buildX402ReceiptVerifierVector();
+  assert.equal(receipt.decisionRecord?.profileHashUsed, receipt.bindings?.spendAuthorization?.policyFingerprint);
   const report = verifyX402ReceiptRecord({ receipt, strict: false });
   assert.equal(report.ok, true);
   assert.equal(report.errors.length, 0);

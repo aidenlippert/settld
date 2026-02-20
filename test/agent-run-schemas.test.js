@@ -151,9 +151,15 @@ test("Agent run + wallet schemas validate canonical examples", async () => {
     ...settlementDecisionRecord,
     schemaVersion: "SettlementDecisionRecord.v2",
     policyHashUsed: settlementDecisionRecord.policyRef.policyHash,
+    profileHashUsed: "a".repeat(64),
     verificationMethodHashUsed: settlementDecisionRecord.policyRef.verificationMethodHash
   };
   assert.equal(validateSettlementDecisionRecordV2(settlementDecisionRecordV2), true);
+  const settlementDecisionRecordV2InvalidProfileHash = {
+    ...settlementDecisionRecordV2,
+    profileHashUsed: "ZZZZ"
+  };
+  assert.equal(validateSettlementDecisionRecordV2(settlementDecisionRecordV2InvalidProfileHash), false);
 
   const settlementReceipt = {
     schemaVersion: "SettlementReceipt.v1",

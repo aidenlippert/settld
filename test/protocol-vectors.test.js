@@ -491,6 +491,7 @@ async function buildVectorsV1() {
     decisionReason: null,
     verificationStatus: "green",
     policyHashUsed: "3".repeat(64),
+    profileHashUsed: "a".repeat(64),
     verificationMethodHashUsed: "4".repeat(64),
     policyRef: {
       policyHash: "3".repeat(64),
