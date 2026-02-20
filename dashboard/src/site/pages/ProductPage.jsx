@@ -7,14 +7,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.
 
 const launchLanes = [
   "API tools and paid data providers",
-  "MCP tools and capability wrappers",
-  "Policy-bounded SaaS actions",
-  "Escalation and operator approvals"
+  "MCP tools in coding agents",
+  "SaaS actions with policy checks",
+  "Operator approvals for exceptions"
 ];
 
 const primitiveByLayer = {
   identity: {
-    title: "Identity + Authority",
+    title: "Identity",
     points: [
       "Delegated sponsor, agent, and operator identity boundaries.",
       "Policy scopes and capability allowlists enforced at authorization time.",
@@ -22,7 +22,7 @@ const primitiveByLayer = {
     ]
   },
   execution: {
-    title: "Execution + Coordination",
+    title: "Execution",
     points: [
       "Deterministic quote -> authorize -> execute -> verify transitions.",
       "Escalation suspend/resume state machine with signed one-time overrides.",
@@ -30,7 +30,7 @@ const primitiveByLayer = {
     ]
   },
   economics: {
-    title: "Economics + Lifecycle",
+    title: "Settlement",
     points: [
       "Bounded spend authorizations with reversal and unwind semantics.",
       "Insolvency sweep and saga-based compensating actions.",
@@ -38,7 +38,7 @@ const primitiveByLayer = {
     ]
   },
   evidence: {
-    title: "Evidence + Verification",
+    title: "Evidence",
     points: [
       "Immutable receipts and append-only event lineage.",
       "Offline closepack export and deterministic replay verification.",
@@ -55,11 +55,10 @@ export default function ProductPage() {
           <CardHeader>
             <Badge variant="accent" className="w-fit">Product</Badge>
             <CardTitle className="text-[clamp(2.1rem,5.5vw,3.9rem)] leading-[1] tracking-[-0.02em]">
-              Primitive infrastructure for autonomous systems.
+              Everything agents need to run safely.
             </CardTitle>
             <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
-              Settld is not a single payment feature. It is a deterministic primitive stack across identity, policy,
-              execution, economics, and verification for real agent operations.
+              One open-source control plane for identity, policy, execution, and verification.
             </p>
           </CardHeader>
           <CardContent>
@@ -76,7 +75,7 @@ export default function ProductPage() {
           <CardHeader>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7f2f1f]">Primitive Stack</p>
             <CardTitle className="text-[clamp(1.7rem,4vw,2.7rem)] leading-tight tracking-[-0.02em]">
-              Every layer required to run agents in production.
+              Four layers, one simple model.
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -113,7 +112,7 @@ export default function ProductPage() {
           <CardHeader>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7f2f1f]">Launch Pattern</p>
             <CardTitle className="text-[clamp(1.8rem,4.2vw,3rem)] leading-tight tracking-[-0.02em]">
-              Start narrow. Prove control. Then expand coverage.
+              Start narrow. Prove safety. Scale from there.
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -132,4 +131,3 @@ export default function ProductPage() {
     </PageFrame>
   );
 }
-

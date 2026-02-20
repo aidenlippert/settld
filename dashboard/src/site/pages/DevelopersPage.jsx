@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.
 const integrationTracks = {
   mcp: {
     title: "MCP",
-    copy: "Connect Settld as a tool substrate for Codex, Claude, Cursor, and other MCP-native hosts.",
+    copy: "Connect Settld tools to Codex, Claude, Cursor, and other MCP hosts.",
     commands: [
       "npx settld init capability my-capability",
       "npx settld mcp probe",
@@ -17,7 +17,7 @@ const integrationTracks = {
   },
   sdk: {
     title: "SDK",
-    copy: "Use tenant-scoped SDK keys and deterministic first-run scripts for backend integrations.",
+    copy: "Use SDK keys and first-run scripts for backend integrations.",
     commands: [
       "npm run dev:api",
       "npx settld dev:sdk:key --print-only",
@@ -26,7 +26,7 @@ const integrationTracks = {
   },
   api: {
     title: "API",
-    copy: "Drive quote, authorization, verification, and receipts directly with deterministic contracts.",
+    copy: "Call quote, authorize, verify, and receipt endpoints directly.",
     commands: [
       "POST /x402/gate/authorize-payment",
       "POST /x402/gate/verify",
@@ -35,7 +35,7 @@ const integrationTracks = {
   },
   operator: {
     title: "Operator",
-    copy: "Route blocked transactions into signed human escalation with webhook + inbox support.",
+    copy: "Send blocked transactions to human approval with webhooks and inbox support.",
     commands: [
       "GET /x402/gate/escalations",
       "POST /x402/gate/escalations/:id/resolve",
@@ -46,15 +46,15 @@ const integrationTracks = {
 
 const rolloutPhases = [
   {
-    title: "Phase 1: First verified primitive chain",
+    title: "Phase 1: First run",
     copy: "Run local stack, issue authority, execute bounded action, and verify artifacts offline."
   },
   {
-    title: "Phase 2: Production guardrails",
+    title: "Phase 2: Add guardrails",
     copy: "Define policy classes, allowlists, authority scopes, and escalation paths."
   },
   {
-    title: "Phase 3: Ecosystem scale",
+    title: "Phase 3: Scale",
     copy: "Onboard tools and wrappers, enforce conformance, then increase volume safely."
   }
 ];
@@ -67,10 +67,10 @@ export default function DevelopersPage() {
           <CardHeader>
             <Badge variant="accent" className="w-fit">Developers</Badge>
             <CardTitle className="text-[clamp(2.1rem,5.2vw,3.6rem)] leading-[1] tracking-[-0.02em]">
-              From first integration to production-grade autonomous systems.
+              Go from clone to verified run in minutes.
             </CardTitle>
             <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
-              Choose your integration surface, run a verified flow, and harden with deterministic controls before you scale.
+              Pick a surface, run the first flow, then add controls as you scale.
             </p>
           </CardHeader>
           <CardContent>
@@ -87,7 +87,7 @@ export default function DevelopersPage() {
           <CardHeader>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7f2f1f]">Integration Surfaces</p>
             <CardTitle className="text-[clamp(1.7rem,3.8vw,2.6rem)] leading-tight tracking-[-0.02em]">
-              One control plane, multiple operator and developer entry points.
+              Choose how you want to integrate.
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -137,4 +137,3 @@ export default function DevelopersPage() {
     </PageFrame>
   );
 }
-

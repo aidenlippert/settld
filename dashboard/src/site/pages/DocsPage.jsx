@@ -8,37 +8,37 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.
 const docsPaths = [
   {
     title: "Quickstart",
-    summary: "Run first verified flow from authority to offline verification.",
+    summary: "Run your first end-to-end flow in a local environment.",
     href: docsLinks.quickstart,
     badge: "Getting Started"
   },
   {
     title: "Integrations",
-    summary: "MCP host patterns for Codex, Claude, Cursor, and OpenClaw.",
+    summary: "Connect Settld to Codex, Claude, Cursor, and other MCP hosts.",
     href: docsLinks.integrations,
     badge: "Reference"
   },
   {
     title: "API Surface",
-    summary: "Authorization, verification, receipts, reversal, and lifecycle endpoints.",
+    summary: "Core endpoints for authorize, verify, receipts, and lifecycle handling.",
     href: docsLinks.api,
     badge: "Reference"
   },
   {
     title: "Security Model",
-    summary: "Cryptographic guarantees, replay defense, and trust boundaries.",
+    summary: "Clear trust boundaries, replay defense, and verification rules.",
     href: docsLinks.security,
     badge: "Reference"
   },
   {
     title: "Operations",
-    summary: "Production runbooks, key management, and incident procedures.",
+    summary: "Runbooks for deploys, key rotation, and incident response.",
     href: docsLinks.ops,
     badge: "Runbook"
   },
   {
     title: "Control Plane Architecture",
-    summary: "Primitive layers and deterministic state-machine model.",
+    summary: "How identity, policy, execution, and evidence fit together.",
     href: docsLinks.architecture,
     badge: "Architecture"
   }
@@ -46,18 +46,18 @@ const docsPaths = [
 
 const roleTracks = {
   founder: {
-    title: "Founder / Product Lead",
-    copy: "Understand what ships now, what’s next, and how to scope an open-source rollout.",
+    title: "Product Lead",
+    copy: "Start with quickstart and roadmap to understand what is stable today.",
     links: [docsLinks.quickstart, docsLinks.roadmap, docsLinks.faq]
   },
   engineer: {
     title: "Engineer",
-    copy: "Integrate quickly, then harden with deterministic verification and control loops.",
+    copy: "Integrate fast, then harden with explicit controls.",
     links: [docsLinks.integrations, docsLinks.api, docsLinks.architecture]
   },
   security: {
     title: "Security / Compliance",
-    copy: "Review trust boundaries, controls, and incident runbooks before cutover.",
+    copy: "Review controls and incident runbooks before production rollout.",
     links: [docsLinks.security, docsLinks.ops, docsLinks.incidents]
   }
 };
@@ -83,10 +83,10 @@ export default function DocsPage() {
           <CardHeader>
             <Badge variant="accent" className="w-fit">Docs</Badge>
             <CardTitle className="text-[clamp(2.1rem,5.2vw,3.7rem)] leading-[1] tracking-[-0.02em]">
-              Production docs for autonomous systems teams.
+              Docs you can actually use.
             </CardTitle>
             <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
-              Settld docs are hosted on MkDocs. Use this page as your routing layer by role, then jump directly into the right section.
+              Settld docs are hosted in MkDocs. Use this page to jump straight to what you need.
             </p>
           </CardHeader>
           <CardContent>
@@ -103,7 +103,7 @@ export default function DocsPage() {
           <CardHeader>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7f2f1f]">Start by Role</p>
             <CardTitle className="text-[clamp(1.7rem,3.8vw,2.6rem)] leading-tight tracking-[-0.02em]">
-              Find your path in one click.
+              Pick your path.
             </CardTitle>
           </CardHeader>
           <CardContent>

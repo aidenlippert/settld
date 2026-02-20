@@ -3,8 +3,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs.jsx";
 
 const primitiveDetail = {
   identity: {
-    title: "Identity + Delegation",
-    copy: "Bounded authority for sponsors, agents, and operators with explicit lineage and revocation.",
+    title: "Who can act",
+    copy: "Define who can do what before any agent action runs.",
     bullets: [
       "Delegation lineage checks before execution",
       "Policy scopes and capability allowlists",
@@ -12,8 +12,8 @@ const primitiveDetail = {
     ]
   },
   execution: {
-    title: "Execution + Escalation",
-    copy: "Deterministic command flow with policy gates and signed human overrides when needed.",
+    title: "How actions run",
+    copy: "Run through one predictable flow, and pause when policy says no.",
     bullets: [
       "Quote -> authorize -> execute -> verify",
       "Suspend/resume state for blocked actions",
@@ -21,8 +21,8 @@ const primitiveDetail = {
     ]
   },
   economics: {
-    title: "Economics + Unwind",
-    copy: "Bounded spend and deterministic unwind logic when agents become invalid or insolvent.",
+    title: "How money is handled",
+    copy: "Authorize safely, then unwind cleanly if anything fails.",
     bullets: [
       "Replay-safe bounded authorizations",
       "Automatic freeze and pending state unwind",
@@ -30,8 +30,8 @@ const primitiveDetail = {
     ]
   },
   evidence: {
-    title: "Evidence + Verification",
-    copy: "Portable proof artifacts for audit, dispute resolution, and offline independent verification.",
+    title: "How you verify",
+    copy: "Keep receipts and verify them independently, online or offline.",
     bullets: [
       "Immutable receipts + append-only timeline",
       "Closepack export with offline verifier path",
@@ -47,10 +47,10 @@ export default function KernelNow() {
         <CardHeader>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7f2f1f]">Core Capabilities</p>
           <CardTitle className="text-[clamp(1.9rem,4.4vw,3.2rem)] leading-tight tracking-[-0.02em]">
-            Freedom for agents. Trust for operators.
+            What you get out of the box
           </CardTitle>
           <p className="text-lg leading-relaxed text-[#354152]">
-            The primitives required for real-world autonomous systems, delivered as one deterministic control plane.
+            The essentials to run agent workflows without losing control.
           </p>
         </CardHeader>
         <CardContent>
@@ -84,4 +84,3 @@ export default function KernelNow() {
     </section>
   );
 }
-

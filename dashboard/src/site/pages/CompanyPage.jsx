@@ -38,11 +38,10 @@ export default function CompanyPage() {
           <CardHeader>
             <Badge variant="accent" className="w-fit">Company</Badge>
             <CardTitle className="text-[clamp(2.1rem,5.3vw,3.8rem)] leading-[1] tracking-[-0.02em]">
-              We are building the primitive substrate for autonomous systems.
+              We build open-source infrastructure for safe agent operations.
             </CardTitle>
             <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
-              This is not only agent commerce. It is the full operational primitive layer for identity, authority,
-              execution, evidence, and operations in the autonomous era.
+              Our focus: make agent systems understandable, controllable, and auditable in production.
             </p>
           </CardHeader>
           <CardContent>

@@ -52,11 +52,10 @@ export default function SecurityPage() {
           <CardHeader>
             <Badge variant="accent" className="w-fit">Security & Trust</Badge>
             <CardTitle className="text-[clamp(2.1rem,5vw,3.6rem)] leading-[1] tracking-[-0.02em]">
-              Autonomy without blind trust.
+              Security you can inspect.
             </CardTitle>
             <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
-              Settld enforces cryptographic delegation, policy-bound execution, and durable evidence so every critical
-              agent action is constrained, inspectable, and replayable.
+              Every critical action is checked, logged, and replayable. No hidden state. No trust-me gaps.
             </p>
           </CardHeader>
           <CardContent>
@@ -73,7 +72,7 @@ export default function SecurityPage() {
           <CardHeader>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7f2f1f]">Control Families</p>
             <CardTitle className="text-[clamp(1.7rem,3.8vw,2.6rem)] leading-tight tracking-[-0.02em]">
-              Defense-in-depth mapped to the autonomous control loop.
+              How controls map to real failures.
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -97,4 +96,3 @@ export default function SecurityPage() {
     </PageFrame>
   );
 }
-
