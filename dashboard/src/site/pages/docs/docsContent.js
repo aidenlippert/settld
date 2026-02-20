@@ -8,6 +8,22 @@ export const docsSections = [
     commands: ["npm run dev:api", "npx settld dev:sdk:key --print-only", "npx settld sdk:first-run"]
   },
   {
+    slug: "architecture",
+    href: "/docs/architecture",
+    title: "Architecture",
+    summary: "Control-plane layers, deterministic state machines, and artifact lineage model.",
+    tags: ["architecture", "state-machine", "artifacts"],
+    commands: ["npx settld conformance kernel --ops-token tok_ops", "npx settld closepack verify closepack.zip"]
+  },
+  {
+    slug: "integrations",
+    href: "/docs/integrations",
+    title: "Integrations",
+    summary: "MCP, SDK, webhook, and operator integration patterns for production adoption.",
+    tags: ["mcp", "sdk", "webhooks", "operator"],
+    commands: ["npx settld init capability my-capability", "npx settld sdk:first-run"]
+  },
+  {
     slug: "api",
     href: "/docs/api",
     title: "API Reference",
@@ -43,7 +59,8 @@ export const docsEndpointGroups = [
     rows: [
       { method: "POST", path: "/x402/wallets/:walletId/authorize", purpose: "Mint bounded spend authorization." },
       { method: "POST", path: "/x402/gate/authorize-payment", purpose: "Provider-side payment authorization check." },
-      { method: "POST", path: "/x402/gate/reversal", purpose: "Void/refund lifecycle command dispatch." }
+      { method: "POST", path: "/x402/gate/reversal", purpose: "Void/refund lifecycle command dispatch." },
+      { method: "POST", path: "/x402/gate/verify", purpose: "Execution verification and settlement progression gate." }
     ]
   },
   {
@@ -51,7 +68,8 @@ export const docsEndpointGroups = [
     rows: [
       { method: "GET", path: "/x402/receipts/:receiptId", purpose: "Immutable receipt snapshot retrieval." },
       { method: "GET", path: "/x402/receipts", purpose: "Cursor-based receipt querying." },
-      { method: "GET", path: "/x402/receipts/export.jsonl", purpose: "Deterministic reconciliation export." }
+      { method: "GET", path: "/x402/receipts/export.jsonl", purpose: "Deterministic reconciliation export." },
+      { method: "GET", path: "/x402/receipts/:receiptId/closepack", purpose: "Portable closepack bundle export." }
     ]
   },
   {
@@ -59,7 +77,16 @@ export const docsEndpointGroups = [
     rows: [
       { method: "GET", path: "/x402/gate/escalations", purpose: "List pending/approved/denied escalation items." },
       { method: "POST", path: "/x402/gate/escalations/:id/resolve", purpose: "Approve/deny with signed override decision." },
-      { method: "POST", path: "/x402/webhooks/endpoints", purpose: "Register signed delivery endpoints." }
+      { method: "POST", path: "/x402/webhooks/endpoints", purpose: "Register signed delivery endpoints." },
+      { method: "POST", path: "/x402/webhooks/endpoints/:id/rotate-secret", purpose: "Zero-downtime webhook secret rotation." }
+    ]
+  },
+  {
+    title: "Lifecycle and Risk Controls",
+    rows: [
+      { method: "POST", path: "/x402/gate/agents/:id/wind-down", purpose: "Freeze and unwind insolvent agents." },
+      { method: "GET", path: "/ops/outbox/debug", purpose: "Inspect async delivery and reversal queue states." },
+      { method: "POST", path: "/x402/zk/verification-keys", purpose: "Publish proof verification keys for compute settlement." }
     ]
   }
 ];

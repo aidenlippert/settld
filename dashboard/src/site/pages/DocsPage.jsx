@@ -29,9 +29,19 @@ export default function DocsPage() {
 
   return (
     <DocsShell
-      title="Build with deterministic economic primitives."
-      subtitle="Everything needed to ship production-grade autonomous spend, receipts, and operator control."
+      title="Comprehensive docs for autonomous production systems."
+      subtitle="Architecture, integrations, API contracts, security controls, and operations runbooks in one place."
     >
+      <article className="docs-section-card">
+        <h2>Documentation Modes</h2>
+        <p>Use in-app docs for guided onboarding, and the MkDocs corpus for long-form operator/developer handbooks.</p>
+        <div className="mini-code">
+          <code>pip install mkdocs mkdocs-material</code>
+          <code>mkdocs serve</code>
+          <code>mkdocs build</code>
+        </div>
+      </article>
+
       <article className="docs-section-card">
         <h2>Docs Search</h2>
         <p>Search guides, endpoint surfaces, and runbook content.</p>
@@ -74,4 +84,3 @@ export default function DocsPage() {
     </DocsShell>
   );
 }
-

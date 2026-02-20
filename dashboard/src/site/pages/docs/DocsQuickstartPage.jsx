@@ -29,6 +29,15 @@ export default function DocsQuickstartPage() {
       title="Quickstart"
       subtitle="Go from zero to first enforceable autonomous transaction with deterministic evidence."
     >
+      <article className="docs-section-card">
+        <h2>Prerequisites</h2>
+        <ul className="tight-list">
+          <li>Node.js 20+ and npm available in runtime environment.</li>
+          <li>Tenant ID + ops token + API base URL configured.</li>
+          <li>Provider quote surface and verification keys registered for production workflows.</li>
+        </ul>
+      </article>
+
       {steps.map((step) => (
         <article key={step.title} className="docs-section-card">
           <h2>{step.title}</h2>
@@ -48,7 +57,15 @@ export default function DocsQuickstartPage() {
           <li>Offline verification status shows enforceable lineage and signatures.</li>
         </ul>
       </article>
+
+      <article className="docs-section-card">
+        <h2>Validation Gate</h2>
+        <div className="mini-code">
+          <code>npx settld conformance kernel --ops-token tok_ops</code>
+          <code>npm run test:ops:go-live-gate</code>
+          <code>npx settld closepack verify closepack.zip</code>
+        </div>
+      </article>
     </DocsShell>
   );
 }
-

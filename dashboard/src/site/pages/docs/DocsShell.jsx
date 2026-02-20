@@ -17,6 +17,9 @@ export default function DocsShell({ title, subtitle, children }) {
             <li>
               <a href="/docs">Overview</a>
             </li>
+            <li>
+              <a href="https://www.mkdocs.org/" target="_blank" rel="noreferrer">MkDocs Guide</a>
+            </li>
             {docsSections.map((section) => (
               <li key={section.slug}>
                 <a href={section.href}>{section.title}</a>
@@ -29,4 +32,3 @@ export default function DocsShell({ title, subtitle, children }) {
     </PageFrame>
   );
 }
-

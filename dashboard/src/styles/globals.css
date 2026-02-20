@@ -19,6 +19,9 @@
   --brand-300: #cb7a5f;
   --mint: #275e55;
   --shadow-soft: 0 18px 45px rgba(60, 44, 21, 0.09);
+  --radius-card: 16px;
+  --radius-control: 11px;
+  --container-max: 1200px;
 }
 
 * {
@@ -95,7 +98,7 @@ body {
 }
 
 .site-nav {
-  max-width: 1200px;
+  max-width: var(--container-max);
   margin: 0 auto;
   border: 1px solid var(--line);
   background: rgba(255, 253, 248, 0.88);
@@ -186,7 +189,7 @@ body {
 }
 
 .btn {
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   text-decoration: none;
   font-weight: 700;
   font-size: 0.87rem;
@@ -223,7 +226,7 @@ body {
 }
 
 .section-shell {
-  max-width: 1200px;
+  max-width: var(--container-max);
   margin: 0 auto;
   padding: clamp(2.4rem, 6vw, 5.1rem) clamp(1rem, 3.2vw, 2.3rem);
   position: relative;
@@ -401,6 +404,7 @@ body {
 
 .section-heading {
   margin-bottom: 1.25rem;
+  max-width: 72ch;
 }
 
 .page-hero h1 {
@@ -441,11 +445,7 @@ body {
 }
 
 .pillar-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
   padding: 1rem;
-  box-shadow: 0 5px 15px rgba(60, 44, 21, 0.04);
 }
 
 .pillar-card h3,
@@ -472,9 +472,7 @@ body {
 }
 
 .flow-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 0.9rem;
 }
 
@@ -491,9 +489,7 @@ body {
 }
 
 .panel {
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 1.05rem;
 }
 
@@ -540,10 +536,8 @@ body {
 }
 
 .price-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   padding: 0.95rem;
-  background: var(--surface);
 }
 
 .price-card-recommended {
@@ -596,11 +590,8 @@ body {
 }
 
 .statement-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 0.95rem;
-  box-shadow: 0 5px 15px rgba(60, 44, 21, 0.04);
 }
 
 .statement-card h3 {
@@ -614,9 +605,7 @@ body {
 }
 
 .future-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 0.95rem;
 }
 
@@ -828,9 +817,7 @@ body {
 }
 
 .workspace-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 0.95rem;
 }
 
@@ -854,9 +841,7 @@ body {
 .docs-toc {
   position: sticky;
   top: 98px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 0.9rem;
 }
 
@@ -883,9 +868,7 @@ body {
 }
 
 .docs-section-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: var(--radius-card);
   padding: 1rem;
 }
 
@@ -926,10 +909,8 @@ body {
 }
 
 .docs-ref-card {
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 0.8rem;
-  background: rgba(255, 253, 248, 0.85);
   color: var(--ink-900);
   text-decoration: none;
   font-weight: 700;
@@ -958,12 +939,32 @@ body {
 }
 
 .docs-endpoint-row {
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: rgba(255, 253, 248, 0.82);
+  border-radius: var(--radius-control);
   padding: 0.55rem 0.62rem;
   display: grid;
   gap: 0.3rem;
+}
+
+.compact-pill,
+.pillar-card,
+.flow-card,
+.panel,
+.price-card,
+.statement-card,
+.future-card,
+.workspace-card,
+.docs-toc,
+.docs-section-card,
+.docs-ref-card,
+.docs-endpoint-row {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 5px 15px rgba(60, 44, 21, 0.04);
+}
+
+.docs-ref-card,
+.docs-endpoint-row {
+  background: rgba(255, 253, 248, 0.86);
 }
 
 .docs-method,

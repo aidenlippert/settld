@@ -1,0 +1,48 @@
+site_name: Settld Docs
+site_description: Deterministic primitives for autonomous production systems
+site_url: https://settld.work
+repo_url: https://github.com/aidenlippert/settld
+repo_name: aidenlippert/settld
+edit_uri: edit/main/mkdocs/docs/
+docs_dir: mkdocs/docs
+site_dir: mkdocs/site
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - search.highlight
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - tables
+  - attr_list
+  - def_list
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: guides/quickstart.md
+      - Local Environment: guides/local-environment.md
+      - First Production Cutover: guides/production-cutover.md
+  - Architecture:
+      - Control Plane: architecture/control-plane.md
+      - State Machines: architecture/state-machines.md
+      - Artifact Lineage: architecture/artifact-lineage.md
+  - Reference:
+      - API Surface: reference/api-surface.md
+      - Security Model: reference/security-model.md
+      - Integrations: reference/integrations.md
+  - Runbooks:
+      - Operations: runbooks/operations.md
+      - Incident Response: runbooks/incidents.md
+      - Key Management: runbooks/key-management.md
+  - Roadmap: roadmap.md
+  - FAQ: faq.md

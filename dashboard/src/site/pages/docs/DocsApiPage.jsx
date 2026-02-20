@@ -23,6 +23,15 @@ export default function DocsApiPage() {
       ))}
 
       <article className="docs-section-card">
+        <h2>Request Contract Patterns</h2>
+        <ul className="tight-list">
+          <li>Always pass tenant context and deterministic idempotency keys.</li>
+          <li>Treat quote hash + request hash as first-class settlement inputs.</li>
+          <li>Return structured reason codes for every non-success path.</li>
+        </ul>
+      </article>
+
+      <article className="docs-section-card">
         <h2>API Integration Guardrails</h2>
         <ul className="tight-list">
           <li>Use idempotency keys for all authorize/execute paths.</li>
@@ -34,4 +43,3 @@ export default function DocsApiPage() {
     </DocsShell>
   );
 }
-

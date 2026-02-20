@@ -23,6 +23,13 @@ const operations = [
   }
 ];
 
+const incidentModes = [
+  "Webhook delivery degradation: monitor retries, quarantine dead endpoints, rotate secrets.",
+  "Policy drift incidents: pause new authorizations and compare policy hash mismatches.",
+  "Insolvency/unwind incidents: freeze affected agents and verify reversal queue completion.",
+  "Verification failures: fail-closed settlement and attach closepack evidence to incident timeline."
+];
+
 export default function DocsOpsPage() {
   return (
     <DocsShell
@@ -48,7 +55,15 @@ export default function DocsOpsPage() {
           </div>
         </article>
       ))}
+
+      <article className="docs-section-card">
+        <h2>Incident Modes</h2>
+        <ul className="tight-list">
+          {incidentModes.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </article>
     </DocsShell>
   );
 }
-

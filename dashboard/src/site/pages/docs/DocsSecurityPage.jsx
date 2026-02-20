@@ -15,6 +15,13 @@ const runbook = [
   "Preserve historical key material needed for long-term receipt verification."
 ];
 
+const boundaries = [
+  "Untrusted provider boundary: every quote/output/proof is verified before settlement.",
+  "Operator boundary: escalation decisions require signed commands and one-time replay protection.",
+  "Storage boundary: receipt snapshots immutable; timeline append operations only.",
+  "Transport boundary: webhook payloads signed, timestamped, and verified in constant time."
+];
+
 export default function DocsSecurityPage() {
   return (
     <DocsShell
@@ -40,6 +47,15 @@ export default function DocsSecurityPage() {
       </article>
 
       <article className="docs-section-card">
+        <h2>Trust Boundaries</h2>
+        <ul className="tight-list">
+          {boundaries.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </article>
+
+      <article className="docs-section-card">
         <h2>Verification Commands</h2>
         <div className="mini-code">
           <code>npx settld closepack export --receipt-id rcpt_123</code>
@@ -50,4 +66,3 @@ export default function DocsSecurityPage() {
     </DocsShell>
   );
 }
-
