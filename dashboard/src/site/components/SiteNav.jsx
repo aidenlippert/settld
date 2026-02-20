@@ -22,7 +22,7 @@ const logoUrl =
 const brandSubtitle =
   typeof import.meta !== "undefined" && import.meta.env?.VITE_BRAND_SUBTITLE
     ? String(import.meta.env.VITE_BRAND_SUBTITLE).trim()
-    : "Autonomous Commerce Infrastructure";
+    : "";
 
 function SiteNavShell({ children }) {
   return (
@@ -37,7 +37,7 @@ function SiteNavShell({ children }) {
             )}
             <span className="brand-mark-core">Settld</span>
           </span>
-          <span className="brand-mark-sub">{brandSubtitle}</span>
+          {brandSubtitle ? <span className="brand-mark-sub">{brandSubtitle}</span> : null}
         </a>
         <ul className="site-links">
           {links.map((link) => (
