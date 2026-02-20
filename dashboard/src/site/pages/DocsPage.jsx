@@ -1,8 +1,31 @@
 import { useMemo, useState } from "react";
 
+import { Badge } from "../components/ui/badge.jsx";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.jsx";
 import { Input } from "../components/ui/input.jsx";
 import DocsShell from "./docs/DocsShell.jsx";
 import { docsEndpointGroups, docsSections } from "./docs/docsContent.js";
+
+const rolePaths = [
+  {
+    title: "I want to plug into an agent host",
+    copy: "Use MCP and host-specific integration guidance for Codex, Claude, Cursor, and OpenClaw.",
+    href: "/docs/integrations",
+    badge: "MCP"
+  },
+  {
+    title: "I want to run the first verified flow",
+    copy: "Bring up runtime, execute first bounded action, and verify evidence offline.",
+    href: "/docs/quickstart",
+    badge: "Quickstart"
+  },
+  {
+    title: "I need security and operations controls",
+    copy: "Review trust boundaries, key rotation, incident modes, and production runbooks.",
+    href: "/docs/security",
+    badge: "Security"
+  }
+];
 
 function includesQuery(row, query) {
   const haystack = [row.title, row.summary, ...(Array.isArray(row.tags) ? row.tags : [])].join(" ").toLowerCase();
@@ -28,16 +51,25 @@ export default function DocsPage() {
 
   return (
     <DocsShell
-      title="Comprehensive docs for autonomous production systems."
-      subtitle="Architecture, integrations, API contracts, security controls, and operations runbooks in one place."
+      title="Documentation that gets teams to production."
+      subtitle="Pick a path, run the integration, and harden controls with deterministic verification."
     >
       <article className="docs-section-card">
-        <h2>Documentation Modes</h2>
-        <p>Use in-app docs for guided onboarding, and the MkDocs corpus for long-form operator/developer handbooks.</p>
-        <div className="mini-code">
-          <code>pip install mkdocs mkdocs-material</code>
-          <code>mkdocs serve</code>
-          <code>mkdocs build</code>
+        <h2>Start by Goal</h2>
+        <p>Choose the exact path you need instead of reading docs linearly.</p>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {rolePaths.map((path) => (
+            <Card key={path.title}>
+              <CardHeader>
+                <Badge variant="accent" className="w-fit">{path.badge}</Badge>
+                <CardTitle className="text-xl leading-snug">{path.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-relaxed text-[#354152]">{path.copy}</p>
+                <a className="mt-4 inline-block font-semibold text-[#7f2f1f]" href={path.href}>Open path</a>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </article>
 
@@ -54,7 +86,7 @@ export default function DocsPage() {
 
       <article className="docs-section-card">
         <h2>Guides</h2>
-        <p>Use these as your implementation sequence.</p>
+        <p>Structured references across architecture, integrations, API, security, and operations.</p>
         <div className="docs-card-grid">
           {sectionRows.map((section) => (
             <a key={section.slug} href={section.href} className="docs-ref-card">

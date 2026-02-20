@@ -14,17 +14,17 @@ export default function FinalCta() {
           primitive stack.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <a className={buttonClasses({ className: "bg-[#f7f2ea] text-[#1f1f1f] hover:bg-white" })} href="/signup">
-            Create workspace
+          <a className={buttonClasses({ className: "bg-[#f7f2ea] text-[#1f1f1f] hover:bg-white" })} href="/docs/integrations">
+            Start with MCP
           </a>
           <a
             className={buttonClasses({
               variant: "outline",
               className: "border-[#b5968a] bg-transparent text-[#f7f2ea] hover:bg-[#3a3531]"
             })}
-            href="/docs"
+            href="/pilot"
           >
-            Open docs
+            Request pilot
           </a>
         </div>
       </Card>

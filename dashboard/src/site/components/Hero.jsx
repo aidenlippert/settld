@@ -16,11 +16,11 @@ export default function Hero() {
         </p>
 
         <div className="mt-10 flex flex-wrap gap-3">
-          <a className={buttonClasses({ size: "lg" })} href="/signup">
-            Start building
+          <a className={buttonClasses({ size: "lg" })} href="/docs/integrations">
+            Start with MCP
           </a>
-          <a className={buttonClasses({ variant: "outline", size: "lg" })} href="/docs/quickstart">
-            Read the docs
+          <a className={buttonClasses({ variant: "outline", size: "lg" })} href="/pilot">
+            Request pilot
           </a>
         </div>
       </div>

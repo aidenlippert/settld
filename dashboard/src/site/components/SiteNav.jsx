@@ -73,15 +73,10 @@ function Auth0NavActions() {
   }
   return (
     <>
-      <button type="button" className={buttonClasses({ variant: "outline" })} onClick={() => loginWithRedirect()}>
-        Sign in
-      </button>
-      <button
-        type="button"
-        className={buttonClasses()}
-        onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: "signup" } })}
-      >
-        Get started
+      <a className={buttonClasses({ variant: "outline" })} href="/pilot">Request pilot</a>
+      <a className={buttonClasses()} href="/docs/integrations">Start with MCP</a>
+      <button type="button" className={buttonClasses({ variant: "ghost", className: "px-2" })} onClick={() => loginWithRedirect()}>
+        Log in
       </button>
     </>
   );
@@ -148,12 +143,9 @@ function LegacyNavActions() {
         </>
       ) : (
         <>
-          <a className={buttonClasses({ variant: "outline" })} href="/login">
-            Sign in
-          </a>
-          <a className={buttonClasses()} href="/signup">
-            Get started
-          </a>
+          <a className={buttonClasses({ variant: "outline" })} href="/pilot">Request pilot</a>
+          <a className={buttonClasses()} href="/docs/integrations">Start with MCP</a>
+          <a className={buttonClasses({ variant: "ghost", className: "px-2" })} href="/login">Log in</a>
         </>
       )}
     </>
