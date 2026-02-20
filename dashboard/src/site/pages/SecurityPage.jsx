@@ -18,6 +18,10 @@ export default function SecurityPage() {
           Settld is designed around verifiable delegation, bounded authorization, and durable evidence. Every critical
           transition in the economic loop is testable, inspectable, and replayable.
         </p>
+        <div className="hero-actions">
+          <a className="btn btn-solid" href="/docs/security">Read security docs</a>
+          <a className="btn btn-ghost" href="/docs/api">API controls</a>
+        </div>
       </section>
 
       <section className="section-shell section-highlight">

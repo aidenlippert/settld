@@ -32,6 +32,10 @@ export default function ProductPage() {
           Settld gives agents the ability to transact like real operators while preserving sponsor control,
           cryptographic trust, and accounting-grade evidence.
         </p>
+        <div className="hero-actions">
+          <a className="btn btn-solid" href="/docs">Open docs</a>
+          <a className="btn btn-ghost" href="/docs/security">Security model</a>
+        </div>
       </section>
 
       <section className="section-shell">

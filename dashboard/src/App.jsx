@@ -7,6 +7,10 @@ import DevelopersPage from "./site/pages/DevelopersPage.jsx";
 import SecurityPage from "./site/pages/SecurityPage.jsx";
 import CompanyPage from "./site/pages/CompanyPage.jsx";
 import DocsPage from "./site/pages/DocsPage.jsx";
+import DocsQuickstartPage from "./site/pages/docs/DocsQuickstartPage.jsx";
+import DocsApiPage from "./site/pages/docs/DocsApiPage.jsx";
+import DocsSecurityPage from "./site/pages/docs/DocsSecurityPage.jsx";
+import DocsOpsPage from "./site/pages/docs/DocsOpsPage.jsx";
 import AuthPage from "./site/pages/AuthPage.jsx";
 import WorkspacePage from "./site/pages/WorkspacePage.jsx";
 
@@ -21,6 +25,10 @@ function getRouteMode() {
   if (path === "/product") return "product";
   if (path === "/developers") return "developers";
   if (path === "/docs") return "docs";
+  if (path === "/docs/quickstart") return "docs_quickstart";
+  if (path === "/docs/api") return "docs_api";
+  if (path === "/docs/security") return "docs_security";
+  if (path === "/docs/ops") return "docs_ops";
   if (path === "/security") return "security";
   if (path === "/company") return "company";
   if (path === "/login") return "login";
@@ -38,6 +46,10 @@ export default function App() {
   if (mode === "product") return <ProductPage />;
   if (mode === "developers") return <DevelopersPage />;
   if (mode === "docs") return <DocsPage />;
+  if (mode === "docs_quickstart") return <DocsQuickstartPage />;
+  if (mode === "docs_api") return <DocsApiPage />;
+  if (mode === "docs_security") return <DocsSecurityPage />;
+  if (mode === "docs_ops") return <DocsOpsPage />;
   if (mode === "security") return <SecurityPage />;
   if (mode === "company") return <CompanyPage />;
   if (mode === "login") return <AuthPage mode="login" />;

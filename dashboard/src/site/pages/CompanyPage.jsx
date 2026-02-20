@@ -17,6 +17,10 @@ export default function CompanyPage() {
           The next decade of software will be autonomous systems spending money, buying services, and coordinating
           real work. Settld is the trust and settlement substrate behind that economy.
         </p>
+        <div className="hero-actions">
+          <a className="btn btn-solid" href="/docs/ops">Operations docs</a>
+          <a className="btn btn-ghost" href="/pricing">Pricing</a>
+        </div>
       </section>
 
       <section className="section-shell">

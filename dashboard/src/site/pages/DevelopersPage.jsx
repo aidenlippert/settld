@@ -26,8 +26,8 @@ export default function DevelopersPage() {
           receipts, and replay controls.
         </p>
         <div className="hero-actions">
-          <a className="btn btn-solid" href="/demo">Open demo</a>
-          <a className="btn btn-ghost" href="/pricing">View pricing</a>
+          <a className="btn btn-solid" href="/docs/quickstart">Start quickstart</a>
+          <a className="btn btn-ghost" href="/docs/api">Browse API docs</a>
         </div>
       </section>
 
