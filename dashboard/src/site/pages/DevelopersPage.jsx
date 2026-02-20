@@ -1,9 +1,12 @@
 import PageFrame from "../components/PageFrame.jsx";
+import { buttonClasses } from "../components/ui/button.jsx";
+import { Badge } from "../components/ui/badge.jsx";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.jsx";
 
 const phases = [
   {
     title: "Phase 1: First verified primitive chain",
-    copy: "Run local stack, issue authority, execute bounded action, verify artifacts offline."
+    copy: "Run local stack, issue authority, execute bounded action, and verify artifacts offline."
   },
   {
     title: "Phase 2: Production guardrails",
@@ -18,26 +21,38 @@ const phases = [
 export default function DevelopersPage() {
   return (
     <PageFrame>
-      <section className="section-shell page-hero">
-        <p className="eyebrow">Developers</p>
-        <h1>From first API call to production-grade autonomous systems.</h1>
-        <p>
-          Build fast with SDK and MCP flows, then harden identity, policy, execution, and verification behavior with
-          deterministic controls.
-        </p>
-        <div className="hero-actions">
-          <a className="btn btn-solid" href="/docs/quickstart">Start quickstart</a>
-          <a className="btn btn-ghost" href="/docs/api">Browse API docs</a>
-        </div>
+      <section className="section-shell">
+        <Card className="bg-gradient-to-br from-[rgba(255,253,248,0.96)] to-[rgba(248,241,230,0.92)]">
+          <CardHeader>
+            <Badge variant="accent" className="w-fit">Developers</Badge>
+            <CardTitle className="text-[clamp(2.1rem,5.2vw,3.6rem)] leading-[1] tracking-[-0.02em]">
+              From first API call to production-grade autonomous systems.
+            </CardTitle>
+            <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
+              Build fast with SDK and MCP flows, then harden identity, policy, execution, and verification behavior
+              with deterministic controls.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              <a className={buttonClasses({ size: "lg" })} href="/docs/quickstart">Start quickstart</a>
+              <a className={buttonClasses({ variant: "outline", size: "lg" })} href="/docs/api">Browse API docs</a>
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="section-shell">
-        <div className="statement-grid">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {phases.map((phase) => (
-            <article key={phase.title} className="statement-card">
-              <h3>{phase.title}</h3>
-              <p>{phase.copy}</p>
-            </article>
+            <Card key={phase.title}>
+              <CardHeader>
+                <CardTitle className="text-2xl">{phase.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-base leading-relaxed text-[#354152]">{phase.copy}</p>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </section>

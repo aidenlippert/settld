@@ -1,4 +1,7 @@
 import PageFrame from "../components/PageFrame.jsx";
+import { buttonClasses } from "../components/ui/button.jsx";
+import { Badge } from "../components/ui/badge.jsx";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.jsx";
 
 const principles = [
   "Autonomy requires layered primitives, not isolated features",
@@ -10,25 +13,35 @@ const principles = [
 export default function CompanyPage() {
   return (
     <PageFrame>
-      <section className="section-shell page-hero">
-        <p className="eyebrow">Company</p>
-        <h1>We are building the primitive substrate for autonomous AI systems.</h1>
-        <p>
-          The next decade is not just AI spending money. It is AI agents coordinating identity, authority, work,
-          verification, and operations at scale. Settld is building that underlying primitive stack.
-        </p>
-        <div className="hero-actions">
-          <a className="btn btn-solid" href="/docs/ops">Operations docs</a>
-          <a className="btn btn-ghost" href="/docs">Docs</a>
-        </div>
+      <section className="section-shell">
+        <Card className="bg-gradient-to-br from-[rgba(255,253,248,0.96)] to-[rgba(248,241,230,0.92)]">
+          <CardHeader>
+            <Badge variant="accent" className="w-fit">Company</Badge>
+            <CardTitle className="text-[clamp(2.1rem,5.3vw,3.8rem)] leading-[1] tracking-[-0.02em]">
+              We are building the primitive substrate for autonomous AI systems.
+            </CardTitle>
+            <p className="max-w-4xl text-lg leading-relaxed text-[#354152]">
+              The next decade is not just AI spending money. It is AI agents coordinating identity, authority, work,
+              verification, and operations at scale. Settld is building that underlying primitive stack.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              <a className={buttonClasses({ size: "lg" })} href="/docs/ops">Operations docs</a>
+              <a className={buttonClasses({ variant: "outline", size: "lg" })} href="/docs">Docs</a>
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="section-shell">
-        <div className="statement-grid">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {principles.map((principle) => (
-            <article key={principle} className="statement-card">
-              <p>{principle}</p>
-            </article>
+            <Card key={principle}>
+              <CardContent className="p-6">
+                <p className="text-base font-medium leading-relaxed text-[#354152]">{principle}</p>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </section>
