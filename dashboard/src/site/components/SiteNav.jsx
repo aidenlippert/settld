@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 
+import { auth0Enabled } from "../auth/auth0-config.js";
 import { fetchBuyerMe, logoutBuyerSession } from "../auth/client.js";
 import { clearSession, readSession, subscribeSession, writeSession } from "../auth/session.js";
 
@@ -11,7 +13,68 @@ const links = [
   { href: "/company", label: "Company" }
 ];
 
-export default function SiteNav() {
+function SiteNavShell({ children }) {
+  return (
+    <header className="site-nav-wrap">
+      <nav className="site-nav" aria-label="Primary">
+        <a href="/" className="brand-mark" aria-label="Settld home">
+          <span className="brand-mark-core">Settld</span>
+          <span className="brand-mark-sub">Autonomous Commerce Infrastructure</span>
+        </a>
+        <ul className="site-links">
+          {links.map((link) => (
+            <li key={link.href}>
+              <a href={link.href}>{link.label}</a>
+            </li>
+          ))}
+        </ul>
+        <div className="site-nav-cta">
+          <a className="btn btn-ghost" href="/demo">
+            Interactive demo
+          </a>
+          {children}
+        </div>
+      </nav>
+    </header>
+  );
+}
+
+function Auth0NavActions() {
+  const { isAuthenticated, isLoading, loginWithRedirect, logout } = useAuth0();
+  if (isLoading) return null;
+  if (isAuthenticated) {
+    return (
+      <>
+        <a className="btn btn-solid" href="/app">
+          Open workspace
+        </a>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+        >
+          Sign out
+        </button>
+      </>
+    );
+  }
+  return (
+    <>
+      <button type="button" className="btn btn-ghost" onClick={() => loginWithRedirect()}>
+        Sign in
+      </button>
+      <button
+        type="button"
+        className="btn btn-solid"
+        onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: "signup" } })}
+      >
+        Start free
+      </button>
+    </>
+  );
+}
+
+function LegacyNavActions() {
   const [session, setSession] = useState(() => readSession());
 
   useEffect(() => {
@@ -60,44 +123,30 @@ export default function SiteNav() {
   }
 
   return (
-    <header className="site-nav-wrap">
-      <nav className="site-nav" aria-label="Primary">
-        <a href="/" className="brand-mark" aria-label="Settld home">
-          <span className="brand-mark-core">Settld</span>
-          <span className="brand-mark-sub">Autonomous Commerce Infrastructure</span>
-        </a>
-        <ul className="site-links">
-          {links.map((link) => (
-            <li key={link.href}>
-              <a href={link.href}>{link.label}</a>
-            </li>
-          ))}
-        </ul>
-        <div className="site-nav-cta">
-          <a className="btn btn-ghost" href="/demo">
-            Interactive demo
+    <>
+      {session ? (
+        <>
+          <a className="btn btn-solid" href="/app">
+            Open workspace
           </a>
-          {session ? (
-            <>
-              <a className="btn btn-solid" href="/app">
-                Open workspace
-              </a>
-              <button type="button" className="btn btn-ghost" onClick={onSignOut}>
-                Sign out
-              </button>
-            </>
-          ) : (
-            <>
-              <a className="btn btn-ghost" href="/login">
-                Sign in
-              </a>
-              <a className="btn btn-solid" href="/signup">
-                Start free
-              </a>
-            </>
-          )}
-        </div>
-      </nav>
-    </header>
+          <button type="button" className="btn btn-ghost" onClick={onSignOut}>
+            Sign out
+          </button>
+        </>
+      ) : (
+        <>
+          <a className="btn btn-ghost" href="/login">
+            Sign in
+          </a>
+          <a className="btn btn-solid" href="/signup">
+            Start free
+          </a>
+        </>
+      )}
+    </>
   );
+}
+
+export default function SiteNav() {
+  return <SiteNavShell>{auth0Enabled ? <Auth0NavActions /> : <LegacyNavActions />}</SiteNavShell>;
 }

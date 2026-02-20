@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 
 import PageFrame from "../components/PageFrame.jsx";
+import { auth0Enabled } from "../auth/auth0-config.js";
 import { createPublicWorkspace, fetchBuyerMe, getAuthDefaults, requestBuyerOtp, verifyBuyerOtp } from "../auth/client.js";
 import { writeSession } from "../auth/session.js";
 
@@ -14,7 +16,60 @@ function subtitleFor(mode) {
     : "Access your operator workflows, receipts, and policy controls.";
 }
 
+function Auth0AuthPage({ mode }) {
+  const { loginWithRedirect, isAuthenticated, isLoading, user } = useAuth0();
+  const isSignup = mode === "signup";
+
+  async function onContinue() {
+    if (isAuthenticated) {
+      window.location.href = "/app";
+      return;
+    }
+    await loginWithRedirect({
+      authorizationParams: isSignup ? { screen_hint: "signup" } : undefined,
+      appState: { returnTo: "/app" }
+    });
+  }
+
+  return (
+    <PageFrame>
+      <section className="section-shell auth-shell">
+        <article className="auth-card">
+          <p className="eyebrow">Auth0</p>
+          <h1>{isSignup ? "Create your Settld account" : "Sign in to Settld"}</h1>
+          <p>
+            {isSignup
+              ? "Use your production identity provider flow with secure OIDC sessions."
+              : "Continue with your Auth0 account to access operator workflows and controls."}
+          </p>
+          {isAuthenticated ? (
+            <>
+              <p className="auth-notice">Authenticated as {user?.email ?? "your account"}.</p>
+              <button type="button" className="btn btn-solid" onClick={() => (window.location.href = "/app")}>
+                Open workspace
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn btn-solid" onClick={onContinue} disabled={isLoading}>
+              {isLoading ? "Preparing..." : isSignup ? "Continue with Auth0" : "Sign in with Auth0"}
+            </button>
+          )}
+          <p className="auth-meta">
+            Configure `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` in Vercel.
+          </p>
+          <p className="auth-switch">
+            {isSignup ? "Already have an account? " : "Need an account? "}
+            <a href={isSignup ? "/login" : "/signup"}>{isSignup ? "Sign in" : "Create one"}</a>
+          </p>
+        </article>
+      </section>
+    </PageFrame>
+  );
+}
+
 export default function AuthPage({ mode = "login" }) {
+  if (auth0Enabled) return <Auth0AuthPage mode={mode} />;
+
   const defaults = getAuthDefaults();
   const [fullName, setFullName] = useState("");
   const [company, setCompany] = useState("");
