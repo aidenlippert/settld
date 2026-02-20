@@ -122,10 +122,9 @@ body {
 }
 
 .brand-mark-logo {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
-  border-radius: 6px;
 }
 
 .brand-mark-logo-fallback {
@@ -688,6 +687,18 @@ body {
   margin: 0.35rem 0 0;
   color: var(--ink-700);
   max-width: 62ch;
+}
+
+.footer-brand-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.footer-brand-logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
 }
 
 .footer-links {

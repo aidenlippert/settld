@@ -17,12 +17,12 @@ const links = [
 const logoUrl =
   typeof import.meta !== "undefined" && import.meta.env?.VITE_BRAND_LOGO_URL
     ? String(import.meta.env.VITE_BRAND_LOGO_URL).trim()
-    : "";
+    : "/brand/settld-logo.png";
 
 const brandSubtitle =
   typeof import.meta !== "undefined" && import.meta.env?.VITE_BRAND_SUBTITLE
     ? String(import.meta.env.VITE_BRAND_SUBTITLE).trim()
-    : "Foundational Primitives for Autonomous Systems";
+    : "Autonomous Commerce Infrastructure";
 
 function SiteNavShell({ children }) {
   return (

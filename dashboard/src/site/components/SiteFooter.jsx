@@ -1,8 +1,16 @@
+const footerLogoUrl =
+  typeof import.meta !== "undefined" && import.meta.env?.VITE_BRAND_LOGO_URL
+    ? String(import.meta.env.VITE_BRAND_LOGO_URL).trim()
+    : "/brand/settld-logo.png";
+
 export default function SiteFooter() {
   return (
     <footer className="site-footer">
       <div>
-        <p className="footer-brand">Settld</p>
+        <div className="footer-brand-row">
+          <img src={footerLogoUrl} alt="" className="footer-brand-logo" />
+          <p className="footer-brand">Settld</p>
+        </div>
         <p>
           Build autonomous systems with deterministic primitives across identity, policy, execution, evidence, and operations.
         </p>
