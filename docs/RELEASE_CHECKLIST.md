@@ -7,6 +7,10 @@ This checklist is the “no surprises” gate for shipping Settld as a product (
 - `npm test` is green on main.
 - `CHANGELOG.md` is updated and accurate.
 - Protocol v1 freeze gate is satisfied (no accidental v1 schema/vector drift).
+- Minimum production topology is defined for the target environment:
+  - `docs/ops/MINIMUM_PRODUCTION_TOPOLOGY.md`
+- Production deployment checklist is prepared for this release:
+  - `docs/ops/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
 - Staging billing smoke secrets are configured for `.github/workflows/release.yml`:
   - `SETTLD_STAGING_BASE_URL`
   - `SETTLD_STAGING_OPS_TOKEN`
@@ -113,6 +117,22 @@ Recommended Python dry-run before final tag release:
   - attach conformance pack + checksum
   - attach audit packet zip + checksum
 
+## Kernel v0 ship gate
+
+Before any Kernel v0 release candidate or public OSS push, run:
+
+```sh
+node scripts/ci/run-kernel-v0-ship-gate.mjs
+```
+
+Required report:
+
+- `artifacts/gates/kernel-v0-ship-gate.json`
+
+Runbook:
+
+- `docs/ops/KERNEL_V0_SHIP_GATE.md`
+
 ## S13 launch gate (pre-cutover)
 
 Before production cutover, run:
@@ -133,3 +153,4 @@ Related runbooks:
 - `docs/ops/THROUGHPUT_DRILL_10X.md`
 - `docs/ops/GO_LIVE_GATE_S13.md`
 - `docs/ops/LIGHTHOUSE_PRODUCTION_CLOSE.md`
+- `docs/ops/MCP_COMPATIBILITY_MATRIX.md`
