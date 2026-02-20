@@ -5,6 +5,10 @@ import PageFrame from "../components/PageFrame.jsx";
 import { auth0Enabled } from "../auth/auth0-config.js";
 import { createPublicWorkspace, fetchBuyerMe, getAuthDefaults, requestBuyerOtp, verifyBuyerOtp } from "../auth/client.js";
 import { writeSession } from "../auth/session.js";
+import { Button, buttonClasses } from "../components/ui/button.jsx";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card.jsx";
+import { Input } from "../components/ui/input.jsx";
+import { Label } from "../components/ui/label.jsx";
 
 function titleFor(mode) {
   return mode === "signup" ? "Create your workspace" : "Sign in to your workspace";
@@ -34,34 +38,38 @@ function Auth0AuthPage({ mode }) {
   return (
     <PageFrame>
       <section className="section-shell auth-shell">
-        <article className="auth-card">
-          <p className="eyebrow">Auth0</p>
-          <h1>{isSignup ? "Create your Settld account" : "Sign in to Settld"}</h1>
-          <p>
-            {isSignup
-              ? "Use your production identity provider flow with secure OIDC sessions."
-              : "Continue with your Auth0 account to access operator workflows and controls."}
-          </p>
-          {isAuthenticated ? (
-            <>
-              <p className="auth-notice">Authenticated as {user?.email ?? "your account"}.</p>
-              <button type="button" className="btn btn-solid" onClick={() => (window.location.href = "/app")}>
-                Open workspace
-              </button>
-            </>
-          ) : (
-            <button type="button" className="btn btn-solid" onClick={onContinue} disabled={isLoading}>
-              {isLoading ? "Preparing..." : isSignup ? "Continue with Auth0" : "Sign in with Auth0"}
-            </button>
-          )}
-          <p className="auth-meta">
-            Configure `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` in Vercel.
-          </p>
-          <p className="auth-switch">
-            {isSignup ? "Already have an account? " : "Need an account? "}
-            <a href={isSignup ? "/login" : "/signup"}>{isSignup ? "Sign in" : "Create one"}</a>
-          </p>
-        </article>
+        <Card className="w-full max-w-xl">
+          <CardHeader>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#7f2f1f]">Auth0</p>
+            <CardTitle>{isSignup ? "Create your Settld account" : "Sign in to Settld"}</CardTitle>
+            <CardDescription>
+              {isSignup
+                ? "Use your production identity provider flow with secure OIDC sessions."
+                : "Continue with your Auth0 account to access operator workflows and controls."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isAuthenticated ? (
+              <>
+                <p className="text-sm font-medium text-[#275e55]">Authenticated as {user?.email ?? "your account"}.</p>
+                <Button onClick={() => (window.location.href = "/app")}>Open workspace</Button>
+              </>
+            ) : (
+              <Button onClick={onContinue} disabled={isLoading}>
+                {isLoading ? "Preparing..." : isSignup ? "Continue with Auth0" : "Sign in with Auth0"}
+              </Button>
+            )}
+            <p className="text-xs text-[#657185]">
+              Configure `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` in Vercel.
+            </p>
+            <p className="text-sm text-[#354152]">
+              {isSignup ? "Already have an account? " : "Need an account? "}
+              <a className="font-semibold text-[#7f2f1f]" href={isSignup ? "/login" : "/signup"}>
+                {isSignup ? "Sign in" : "Create one"}
+              </a>
+            </p>
+          </CardContent>
+        </Card>
       </section>
     </PageFrame>
   );
@@ -89,8 +97,8 @@ export default function AuthPage({ mode = "login" }) {
     return /.+@.+\..+/.test(String(email));
   }, [email]);
   const canRequestCode = useMemo(() => {
-    const emailOk = /.+@.+\..+/.test(String(email));
-    if (!emailOk) return false;
+    const currentEmailOk = /.+@.+\..+/.test(String(email));
+    if (!currentEmailOk) return false;
     if (isSignup && String(company).trim().length < 2) return false;
     if (!isSignup && String(tenantId).trim().length < 2) return false;
     if (String(apiBaseUrl).trim().length < 1) return false;
@@ -188,72 +196,85 @@ export default function AuthPage({ mode = "login" }) {
   return (
     <PageFrame>
       <section className="section-shell auth-shell">
-        <article className="auth-card">
-          <p className="eyebrow">{isSignup ? "Sign Up" : "Sign In"}</p>
-          <h1>{titleFor(mode)}</h1>
-          <p>{subtitleFor(mode)}</p>
+        <Card className="w-full max-w-xl">
+          <CardHeader>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#7f2f1f]">{isSignup ? "Sign Up" : "Sign In"}</p>
+            <CardTitle>{titleFor(mode)}</CardTitle>
+            <CardDescription>{subtitleFor(mode)}</CardDescription>
+          </CardHeader>
 
-          <form className="auth-form" onSubmit={onRequestCode}>
-            {isSignup ? (
-              <label>
-                <span>Full name</span>
-                <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Aiden Lippert" />
-              </label>
-            ) : null}
-
-            {isSignup ? (
-              <label>
-                <span>Company</span>
-                <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Robotics" />
-              </label>
-            ) : null}
-
-            <label>
-              <span>API base URL</span>
-              <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} placeholder="/__settld or https://api.settld.work" required />
-            </label>
-
-            <label>
-              <span>Tenant ID {isSignup ? "(optional, auto-generated if blank)" : ""}</span>
-              <input value={tenantId} onChange={(e) => setTenantId(e.target.value)} placeholder="tenant_default" required={!isSignup} />
-            </label>
-
-            <label>
-              <span>Work email</span>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
-            </label>
-
-            {error ? <p className="auth-error">{error}</p> : null}
-            {notice ? <p className="auth-notice">{notice}</p> : null}
-
-            {!otpSent ? (
-              <button type="submit" className="btn btn-solid" disabled={!canRequestCode || loading}>
-                {loading ? "Sending code..." : "Send verification code"}
-              </button>
-            ) : (
-              <div className="auth-otp-panel">
-                <label>
-                  <span>Verification code</span>
-                  <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" required />
+          <CardContent>
+            <form className="grid gap-4" onSubmit={onRequestCode}>
+              {isSignup ? (
+                <label className="grid gap-2">
+                  <Label>Full name</Label>
+                  <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Aiden Lippert" />
                 </label>
-                <button type="button" className="btn btn-solid" disabled={!canVerifyCode || loading} onClick={onVerifyCode}>
-                  {loading ? "Verifying..." : "Verify and continue"}
-                </button>
-                <button type="submit" className="btn btn-ghost" disabled={loading}>
-                  Resend code
-                </button>
-              </div>
-            )}
+              ) : null}
 
-            {expiresAt ? <p className="auth-meta">Code expires at {new Date(expiresAt).toLocaleString()}.</p> : null}
-            <p className="auth-meta">Buyer OTP uses an `HttpOnly` session cookie and your tenant domain policy.</p>
-          </form>
+              {isSignup ? (
+                <label className="grid gap-2">
+                  <Label>Company</Label>
+                  <Input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Robotics" />
+                </label>
+              ) : null}
 
-          <p className="auth-switch">
-            {isSignup ? "Already have an account? " : "New to Settld? "}
-            <a href={isSignup ? "/login" : "/signup"}>{isSignup ? "Sign in" : "Create account"}</a>
-          </p>
-        </article>
+              <label className="grid gap-2">
+                <Label>API base URL</Label>
+                <Input
+                  value={apiBaseUrl}
+                  onChange={(e) => setApiBaseUrl(e.target.value)}
+                  placeholder="/__settld or https://api.settld.work"
+                  required
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <Label>Tenant ID {isSignup ? "(optional, auto-generated if blank)" : ""}</Label>
+                <Input value={tenantId} onChange={(e) => setTenantId(e.target.value)} placeholder="tenant_default" required={!isSignup} />
+              </label>
+
+              <label className="grid gap-2">
+                <Label>Work email</Label>
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
+              </label>
+
+              {error ? <p className="text-sm font-medium text-[#9e2f20]">{error}</p> : null}
+              {notice ? <p className="text-sm font-medium text-[#275e55]">{notice}</p> : null}
+
+              {!otpSent ? (
+                <Button type="submit" disabled={!canRequestCode || loading}>
+                  {loading ? "Sending code..." : "Send verification code"}
+                </Button>
+              ) : (
+                <div className="rounded-xl border border-[#d8d0c1] bg-[rgba(255,253,248,0.85)] p-4">
+                  <label className="grid gap-2">
+                    <Label>Verification code</Label>
+                    <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" required />
+                  </label>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Button type="button" disabled={!canVerifyCode || loading} onClick={onVerifyCode}>
+                      {loading ? "Verifying..." : "Verify and continue"}
+                    </Button>
+                    <button type="submit" className={buttonClasses({ variant: "outline" })} disabled={loading}>
+                      Resend code
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {expiresAt ? <p className="text-xs text-[#657185]">Code expires at {new Date(expiresAt).toLocaleString()}.</p> : null}
+              <p className="text-xs text-[#657185]">Buyer OTP uses an `HttpOnly` session cookie and your tenant domain policy.</p>
+            </form>
+
+            <p className="mt-6 text-sm text-[#354152]">
+              {isSignup ? "Already have an account? " : "New to Settld? "}
+              <a className="font-semibold text-[#7f2f1f]" href={isSignup ? "/login" : "/signup"}>
+                {isSignup ? "Sign in" : "Create account"}
+              </a>
+            </p>
+          </CardContent>
+        </Card>
       </section>
     </PageFrame>
   );

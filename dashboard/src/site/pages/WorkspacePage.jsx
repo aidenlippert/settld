@@ -5,6 +5,9 @@ import PageFrame from "../components/PageFrame.jsx";
 import { auth0Enabled } from "../auth/auth0-config.js";
 import { fetchBuyerMe, logoutBuyerSession } from "../auth/client.js";
 import { clearSession, readSession, subscribeSession, writeSession } from "../auth/session.js";
+import { Badge } from "../components/ui/badge.jsx";
+import { buttonClasses } from "../components/ui/button.jsx";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card.jsx";
 
 const modules = [
   {
@@ -32,27 +35,37 @@ const modules = [
 function WorkspaceLayout({ displayName, metaLabel, onSignOut }) {
   return (
     <PageFrame>
-      <section className="section-shell page-hero workspace-header">
-        <p className="eyebrow">Workspace</p>
-        <h1>Welcome back, {displayName}.</h1>
-        <p>
-          This is your control center for autonomous spend operations, verification outcomes, and policy governance.
-        </p>
-        {metaLabel ? <p className="auth-meta">{metaLabel}</p> : null}
-        <div className="hero-actions">
-          <a className="btn btn-solid" href="/operator">Open inbox</a>
-          <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>
-        </div>
+      <section className="section-shell">
+        <Card className="bg-gradient-to-br from-[rgba(255,253,248,0.96)] to-[rgba(248,241,230,0.92)]">
+          <CardHeader>
+            <Badge variant="accent" className="w-fit">Workspace</Badge>
+            <CardTitle className="text-[clamp(1.9rem,5vw,3rem)]">Welcome back, {displayName}.</CardTitle>
+            <CardDescription className="max-w-3xl text-base">
+              This is your control center for autonomous spend operations, verification outcomes, and policy governance.
+            </CardDescription>
+            {metaLabel ? <p className="text-xs text-[#657185]">{metaLabel}</p> : null}
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              <a className={buttonClasses()} href="/operator">Open inbox</a>
+              <button className={buttonClasses({ variant: "outline" })} onClick={onSignOut}>Sign out</button>
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="section-shell">
-        <div className="workspace-grid">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {modules.map((module) => (
-            <article key={module.title} className="workspace-card">
-              <h3>{module.title}</h3>
-              <p>{module.copy}</p>
-              <a className="text-link" href={module.href}>Open</a>
-            </article>
+            <Card key={module.title}>
+              <CardHeader>
+                <CardTitle className="text-2xl">{module.title}</CardTitle>
+                <CardDescription className="text-base">{module.copy}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <a className="font-semibold text-[#7f2f1f]" href={module.href}>Open</a>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </section>

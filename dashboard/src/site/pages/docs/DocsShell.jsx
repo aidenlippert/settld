@@ -1,4 +1,5 @@
 import PageFrame from "../../components/PageFrame.jsx";
+import { Card } from "../../components/ui/card.jsx";
 import { docsSections } from "./docsContent.js";
 
 export default function DocsShell({ title, subtitle, children }) {
@@ -11,7 +12,7 @@ export default function DocsShell({ title, subtitle, children }) {
       </section>
 
       <section className="section-shell docs-layout">
-        <aside className="docs-toc">
+        <Card as="aside" className="docs-toc">
           <p className="eyebrow">Sections</p>
           <ul>
             <li>
@@ -26,7 +27,7 @@ export default function DocsShell({ title, subtitle, children }) {
               </li>
             ))}
           </ul>
-        </aside>
+        </Card>
         <div className="docs-content">{children}</div>
       </section>
     </PageFrame>

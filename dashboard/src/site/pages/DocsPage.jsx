@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { Input } from "../components/ui/input.jsx";
 import DocsShell from "./docs/DocsShell.jsx";
 import { docsEndpointGroups, docsSections } from "./docs/docsContent.js";
 
@@ -22,9 +23,7 @@ export default function DocsPage() {
       group.rows.map((row) => ({ ...row, groupTitle: group.title }))
     );
     if (!q) return all;
-    return all.filter((row) =>
-      `${row.method} ${row.path} ${row.purpose} ${row.groupTitle}`.toLowerCase().includes(q)
-    );
+    return all.filter((row) => `${row.method} ${row.path} ${row.purpose} ${row.groupTitle}`.toLowerCase().includes(q));
   }, [q]);
 
   return (
@@ -45,11 +44,11 @@ export default function DocsPage() {
       <article className="docs-section-card">
         <h2>Docs Search</h2>
         <p>Search guides, endpoint surfaces, and runbook content.</p>
-        <input
-          className="docs-search-input"
+        <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search docs, endpoints, commands..."
+          className="docs-search-input"
         />
       </article>
 
