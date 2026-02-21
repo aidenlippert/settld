@@ -1,6 +1,8 @@
-## Linked Issue
+## Tracking
 
-- Closes #
+- Linear issue key: `NOO-###`
+- Linear auto-close on merge: `Closes NOO-###`
+- GitHub issue (optional): `Closes #`
 
 ## What Changed
 
@@ -28,3 +30,9 @@
 
 - screenshots / logs / gate artifacts:
   - 
+
+## Checklist
+
+- [ ] PR title includes Linear key (example: `NOO-44 enforce trust middleware on high-risk routes`)
+- [ ] Description includes `Closes NOO-###`
+- [ ] Acceptance criteria from linked Linear issue are covered

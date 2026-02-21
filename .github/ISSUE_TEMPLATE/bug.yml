@@ -3,6 +3,14 @@ description: A defect with reproduction and expected vs actual behavior
 title: "[bug] <short summary>"
 labels: ["type:bug"]
 body:
+  - type: input
+    id: linear_key
+    attributes:
+      label: Linear issue key (optional)
+      description: Link this issue to Linear when applicable (example: NOO-48)
+      placeholder: "NOO-###"
+    validations:
+      required: false
   - type: dropdown
     id: priority
     attributes:
@@ -64,4 +72,3 @@ body:
       render: markdown
     validations:
       required: false
-

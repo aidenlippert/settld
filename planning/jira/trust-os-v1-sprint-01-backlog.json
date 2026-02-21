@@ -1,0 +1,138 @@
+{
+  "name": "Trust OS v1 Sprint 01 (Weeks 1-2)",
+  "window": {
+    "start": "2026-02-23",
+    "end": "2026-03-06"
+  },
+  "project": "Trust OS v1",
+  "committed": [
+    {
+      "key": "NOO-43",
+      "title": "Define and implement PolicyDecision.v1 schema + signing",
+      "owner": "aidenlippert",
+      "role": "Tech Lead/Backend",
+      "estimate": 3,
+      "priority": "Urgent",
+      "dependencies": []
+    },
+    {
+      "key": "NOO-45",
+      "title": "Normalize reason codes and policy fingerprinting across runtimes",
+      "owner": "aidenlippert",
+      "role": "Tech Lead/Backend",
+      "estimate": 3,
+      "priority": "High",
+      "dependencies": []
+    },
+    {
+      "key": "NOO-44",
+      "title": "Enforce trust-kernel middleware on all high-risk routes",
+      "owner": "aidenlippert",
+      "role": "Backend",
+      "estimate": 5,
+      "priority": "Urgent",
+      "dependencies": ["NOO-43", "NOO-45"]
+    },
+    {
+      "key": "NOO-47",
+      "title": "Enforce ExecutionIntent request fingerprint binding across authorize+execute",
+      "owner": "aidenlippert",
+      "role": "Backend",
+      "estimate": 5,
+      "priority": "Urgent",
+      "dependencies": ["NOO-44"]
+    },
+    {
+      "key": "NOO-48",
+      "title": "Implement replay/mutation deterministic denial paths",
+      "owner": "aidenlippert",
+      "role": "Backend",
+      "estimate": 3,
+      "priority": "Urgent",
+      "dependencies": ["NOO-47"]
+    },
+    {
+      "key": "NOO-46",
+      "title": "Add MCP/host bridge bypass regression suite",
+      "owner": "lippertkarson",
+      "role": "QA/DevEx",
+      "estimate": 2,
+      "priority": "Urgent",
+      "dependencies": ["NOO-44"]
+    },
+    {
+      "key": "NOO-50",
+      "title": "Add offline verification parity gate for receipt bundles",
+      "owner": "lippertkarson",
+      "role": "QA",
+      "estimate": 2,
+      "priority": "Urgent",
+      "dependencies": ["NOO-47", "NOO-48"]
+    },
+    {
+      "key": "NOO-55",
+      "title": "Define OperatorAction.v1 schema and signature verification",
+      "owner": "aidenlippert",
+      "role": "Backend/Security",
+      "estimate": 3,
+      "priority": "High",
+      "dependencies": []
+    },
+    {
+      "key": "NOO-57",
+      "title": "Implement emergency control APIs (pause/quarantine/revoke/kill-switch)",
+      "owner": "aidenlippert",
+      "role": "Backend/Security",
+      "estimate": 5,
+      "priority": "Urgent",
+      "dependencies": ["NOO-55"]
+    },
+    {
+      "key": "NOO-62",
+      "title": "Publish hosted baseline evidence packet per release candidate",
+      "owner": "lippertkarson",
+      "role": "DevOps",
+      "estimate": 3,
+      "priority": "Urgent",
+      "dependencies": ["NOO-50"]
+    }
+  ],
+  "stretch": [
+    {
+      "key": "NOO-51",
+      "title": "Implement DisputeCase lifecycle state machine + invariants",
+      "owner": "aidenlippert",
+      "role": "Backend",
+      "estimate": 5,
+      "priority": "Urgent",
+      "dependencies": []
+    },
+    {
+      "key": "NOO-52",
+      "title": "Map arbitration verdicts to idempotent release/refund/reversal outcomes",
+      "owner": "aidenlippert",
+      "role": "Backend",
+      "estimate": 5,
+      "priority": "Urgent",
+      "dependencies": ["NOO-51"]
+    },
+    {
+      "key": "NOO-64",
+      "title": "Automate launch cutover packet generation and signing",
+      "owner": "lippertkarson",
+      "role": "DevOps",
+      "estimate": 3,
+      "priority": "Urgent",
+      "dependencies": ["NOO-50", "NOO-62"]
+    },
+    {
+      "key": "NOO-65",
+      "title": "Enforce release promotion guard on gate pass/fail status",
+      "owner": "lippertkarson",
+      "role": "DevOps",
+      "estimate": 2,
+      "priority": "Urgent",
+      "dependencies": ["NOO-63", "NOO-64"]
+    }
+  ]
+}
