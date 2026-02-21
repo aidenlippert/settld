@@ -165,6 +165,12 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.x402Receipts.clear();
     if (!(store.x402WalletPolicies instanceof Map)) store.x402WalletPolicies = new Map();
     store.x402WalletPolicies.clear();
+    if (!(store.x402Escalations instanceof Map)) store.x402Escalations = new Map();
+    store.x402Escalations.clear();
+    if (!(store.x402EscalationEvents instanceof Map)) store.x402EscalationEvents = new Map();
+    store.x402EscalationEvents.clear();
+    if (!(store.x402EscalationOverrideUsage instanceof Map)) store.x402EscalationOverrideUsage = new Map();
+    store.x402EscalationOverrideUsage.clear();
     if (!(store.x402ZkVerificationKeys instanceof Map)) store.x402ZkVerificationKeys = new Map();
     store.x402ZkVerificationKeys.clear();
     if (!(store.x402ReversalEvents instanceof Map)) store.x402ReversalEvents = new Map();
@@ -241,6 +247,27 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
             policyVersion
           });
         }
+      }
+      if (type === "x402_escalation") {
+        store.x402Escalations.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          escalationId: snap?.escalationId ?? String(id)
+        });
+      }
+      if (type === "x402_escalation_event") {
+        store.x402EscalationEvents.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          eventId: snap?.eventId ?? String(id)
+        });
+      }
+      if (type === "x402_escalation_override_usage") {
+        store.x402EscalationOverrideUsage.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          overrideId: snap?.overrideId ?? String(id)
+        });
       }
       if (type === "x402_zk_verification_key") {
         store.x402ZkVerificationKeys.set(key, {
@@ -1428,6 +1455,119 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     );
   }
 
+  async function persistX402Escalation(client, { tenantId, escalationId, escalation }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!escalation || typeof escalation !== "object" || Array.isArray(escalation)) {
+      throw new TypeError("escalation is required");
+    }
+    const normalizedEscalationId =
+      escalationId && String(escalationId).trim() !== ""
+        ? String(escalationId).trim()
+        : escalation.escalationId && String(escalation.escalationId).trim() !== ""
+          ? String(escalation.escalationId).trim()
+          : null;
+    if (!normalizedEscalationId) throw new TypeError("escalationId is required");
+    const updatedAt =
+      parseIsoOrNull(escalation.updatedAt) ??
+      parseIsoOrNull(escalation.resolvedAt) ??
+      parseIsoOrNull(escalation.createdAt) ??
+      new Date().toISOString();
+    const normalizedEscalation = {
+      ...escalation,
+      tenantId,
+      escalationId: normalizedEscalationId,
+      updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_escalation', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedEscalationId, JSON.stringify(normalizedEscalation), updatedAt]
+    );
+  }
+
+  async function persistX402EscalationEvent(client, { tenantId, eventId, escalationId, event }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new TypeError("event is required");
+    }
+    const normalizedEventId =
+      eventId && String(eventId).trim() !== ""
+        ? String(eventId).trim()
+        : event.eventId && String(event.eventId).trim() !== ""
+          ? String(event.eventId).trim()
+          : event.id && String(event.id).trim() !== ""
+            ? String(event.id).trim()
+            : null;
+    if (!normalizedEventId) throw new TypeError("eventId is required");
+    const normalizedEscalationId =
+      escalationId && String(escalationId).trim() !== ""
+        ? String(escalationId).trim()
+        : event.escalationId && String(event.escalationId).trim() !== ""
+          ? String(event.escalationId).trim()
+          : null;
+    if (!normalizedEscalationId) throw new TypeError("escalationId is required");
+    const updatedAt =
+      parseIsoOrNull(event.occurredAt) ??
+      parseIsoOrNull(event.createdAt) ??
+      new Date().toISOString();
+    const normalizedEvent = {
+      ...event,
+      tenantId,
+      eventId: normalizedEventId,
+      escalationId: normalizedEscalationId,
+      occurredAt: parseIsoOrNull(event.occurredAt) ?? updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_escalation_event', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedEventId, JSON.stringify(normalizedEvent), updatedAt]
+    );
+  }
+
+  async function persistX402EscalationOverrideUsage(client, { tenantId, overrideId, usage }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
+      throw new TypeError("usage is required");
+    }
+    const normalizedOverrideId =
+      overrideId && String(overrideId).trim() !== ""
+        ? String(overrideId).trim()
+        : usage.overrideId && String(usage.overrideId).trim() !== ""
+          ? String(usage.overrideId).trim()
+          : null;
+    if (!normalizedOverrideId) throw new TypeError("overrideId is required");
+    const updatedAt = parseIsoOrNull(usage.usedAt) ?? new Date().toISOString();
+    const normalizedUsage = {
+      ...usage,
+      tenantId,
+      overrideId: normalizedOverrideId,
+      usedAt: parseIsoOrNull(usage.usedAt) ?? updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_escalation_override_usage', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedOverrideId, JSON.stringify(normalizedUsage), updatedAt]
+    );
+  }
+
   async function persistX402ZkVerificationKey(client, { tenantId, verificationKeyId, verificationKey }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     if (!verificationKey || typeof verificationKey !== "object" || Array.isArray(verificationKey)) {
@@ -2079,6 +2219,9 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "X402_AGENT_LIFECYCLE_UPSERT",
       "X402_RECEIPT_PUT",
       "X402_WALLET_POLICY_UPSERT",
+      "X402_ESCALATION_UPSERT",
+      "X402_ESCALATION_EVENT_APPEND",
+      "X402_ESCALATION_OVERRIDE_USAGE_PUT",
       "X402_ZK_VERIFICATION_KEY_PUT",
       "X402_REVERSAL_EVENT_APPEND",
       "X402_REVERSAL_NONCE_PUT",
@@ -2925,6 +3068,31 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
         if (op.kind === "X402_WALLET_POLICY_UPSERT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.policy?.tenantId ?? DEFAULT_TENANT_ID);
           await persistX402WalletPolicy(client, { tenantId, policy: op.policy });
+        }
+        if (op.kind === "X402_ESCALATION_UPSERT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.escalation?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402Escalation(client, {
+            tenantId,
+            escalationId: op.escalationId,
+            escalation: op.escalation
+          });
+        }
+        if (op.kind === "X402_ESCALATION_EVENT_APPEND") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.event?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402EscalationEvent(client, {
+            tenantId,
+            eventId: op.eventId,
+            escalationId: op.escalationId,
+            event: op.event
+          });
+        }
+        if (op.kind === "X402_ESCALATION_OVERRIDE_USAGE_PUT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.usage?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402EscalationOverrideUsage(client, {
+            tenantId,
+            overrideId: op.overrideId,
+            usage: op.usage
+          });
         }
         if (op.kind === "X402_ZK_VERIFICATION_KEY_PUT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.verificationKey?.tenantId ?? DEFAULT_TENANT_ID);
