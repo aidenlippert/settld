@@ -225,6 +225,31 @@ function parseProviderQuoteHeaders(headers) {
   };
 }
 
+function parseAgentPassportHeader(headers) {
+  const rawHeader = headers?.["x-settld-agent-passport"] ?? headers?.["X-Settld-Agent-Passport"] ?? null;
+  const raw = typeof rawHeader === "string" ? rawHeader.trim() : Array.isArray(rawHeader) ? String(rawHeader[0] ?? "").trim() : "";
+  if (!raw) return { ok: true, agentPassport: null };
+  let text = null;
+  try {
+    if (raw.startsWith("{")) {
+      text = raw;
+    } else {
+      text = Buffer.from(raw, "base64url").toString("utf8");
+    }
+  } catch {
+    return { ok: false, message: "x-settld-agent-passport must be base64url JSON or raw JSON object" };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, message: "x-settld-agent-passport must decode to a JSON object" };
+    }
+    return { ok: true, agentPassport: parsed };
+  } catch {
+    return { ok: false, message: "x-settld-agent-passport is not valid JSON" };
+  }
+}
+
 async function verifyProviderQuoteChallenge({
   offerFields,
   amountCents,
@@ -445,10 +470,24 @@ async function handleProxy(req, res) {
 
   const tenantId = tenantIdForRequest(req);
   const upstreamUrl = new URL(url.pathname + url.search, UPSTREAM_URL);
+  const parsedAgentPassportHeader = parseAgentPassportHeader(req.headers);
+  if (!parsedAgentPassportHeader.ok) {
+    res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: "invalid_agent_passport_header",
+        message: parsedAgentPassportHeader.message
+      })
+    );
+    return;
+  }
+  const requestAgentPassport = parsedAgentPassportHeader.agentPassport;
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (v === undefined) continue;
     if (k.toLowerCase() === "host") continue;
+    if (k.toLowerCase() === "x-settld-agent-passport") continue;
     if (Array.isArray(v)) headers.set(k, v.join(","));
     else headers.set(k, String(v));
   }
@@ -642,6 +681,7 @@ async function handleProxy(req, res) {
           holdbackBps: HOLDBACK_BPS,
           disputeWindowMs: DISPUTE_WINDOW_MS,
           ...(offeredToolId ? { toolId: offeredToolId } : {}),
+          ...(requestAgentPassport ? { agentPassport: requestAgentPassport } : {}),
           ...(X402_PROVIDER_PUBLIC_KEY_PEM ? { providerPublicKeyPem: X402_PROVIDER_PUBLIC_KEY_PEM } : {}),
           paymentRequiredHeader: { "x-payment-required": parsed.raw }
         }

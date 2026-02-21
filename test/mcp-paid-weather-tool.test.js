@@ -127,6 +127,11 @@ test("mcp paid weather tool: retries x402 via autopay and returns weather payloa
   assert.equal(payload.result?.response?.city, "Chicago");
   assert.equal(payload.result?.response?.unit, "f");
   assert.equal(payload.result?.headers?.["x-settld-settlement-status"], "released");
+  assert.equal(payload.result?.challenge?.gateId, "gate_weather_paid_1");
+  assert.equal(payload.result?.challenge?.policyChallenge?.quoteRequired, null);
+  assert.equal(payload.result?.challenge?.policyChallenge?.spendAuthorizationMode, null);
+  assert.equal(payload.result?.challenge?.fields?.amountCents, "500");
+  assert.equal(payload.result?.challenge?.fields?.currency, "USD");
 
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.gateId, "");

@@ -123,6 +123,11 @@ test("mcp paid exa tool: retries x402 via autopay and returns search payload", a
   assert.equal(payload.result?.response?.provider, "exa-mock");
   assert.equal(payload.result?.response?.query, "dentist chicago");
   assert.equal(payload.result?.headers?.["x-settld-settlement-status"], "released");
+  assert.equal(payload.result?.challenge?.gateId, "gate_exa_paid_1");
+  assert.equal(payload.result?.challenge?.policyChallenge?.quoteRequired, null);
+  assert.equal(payload.result?.challenge?.policyChallenge?.spendAuthorizationMode, null);
+  assert.equal(payload.result?.challenge?.fields?.amountCents, "500");
+  assert.equal(payload.result?.challenge?.fields?.currency, "USD");
 
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.gateId, "");

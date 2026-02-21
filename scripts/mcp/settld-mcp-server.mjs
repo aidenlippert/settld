@@ -25,6 +25,26 @@ function assertNonEmptyString(v, name) {
   if (typeof v !== "string" || v.trim() === "") throw new TypeError(`${name} must be a non-empty string`);
 }
 
+function parseOptionalJsonObject(value, name) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const raw = String(value).trim();
+  const tryParse = (text) => {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError(`${name} must decode to a JSON object`);
+    return parsed;
+  };
+  try {
+    return tryParse(raw);
+  } catch {
+    try {
+      const decoded = Buffer.from(raw, "base64url").toString("utf8");
+      return tryParse(decoded);
+    } catch (err) {
+      throw new TypeError(`${name} must be JSON or base64url-encoded JSON`);
+    }
+  }
+}
+
 function safeJsonParse(text) {
   try {
     return { ok: true, value: JSON.parse(text) };
@@ -253,7 +273,7 @@ function makeSettldClient({ baseUrl, tenantId, apiKey, protocol }) {
   };
 }
 
-function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
+function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch, agentPassport = null }) {
   const normalizedBaseUrl = (() => {
     if (typeof baseUrl !== "string" || baseUrl.trim() === "") return null;
     return baseUrl.trim();
@@ -274,13 +294,20 @@ function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
     url.searchParams.set("q", normalizedQuery);
     url.searchParams.set("numResults", String(normalizedNumResults));
 
+    let challenge = null;
     const res = await fetchWithSettldAutopay(
       url,
       {
         method: "GET",
         headers: { "x-proxy-tenant-id": tenantId }
       },
-      { fetch: fetchImpl }
+      {
+        fetch: fetchImpl,
+        ...(agentPassport ? { agentPassport } : {}),
+        onChallenge: (metadata) => {
+          challenge = metadata;
+        }
+      }
     );
     const text = await res.text();
     let json = null;
@@ -307,7 +334,8 @@ function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
       query: normalizedQuery,
       numResults: normalizedNumResults,
       response: json,
-      headers
+      headers,
+      challenge
     };
   }
 
@@ -326,13 +354,20 @@ function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
     url.searchParams.set("city", normalizedCity);
     url.searchParams.set("unit", normalizedUnit);
 
+    let challenge = null;
     const res = await fetchWithSettldAutopay(
       url,
       {
         method: "GET",
         headers: { "x-proxy-tenant-id": tenantId }
       },
-      { fetch: fetchImpl }
+      {
+        fetch: fetchImpl,
+        ...(agentPassport ? { agentPassport } : {}),
+        onChallenge: (metadata) => {
+          challenge = metadata;
+        }
+      }
     );
     const text = await res.text();
     let json = null;
@@ -359,7 +394,8 @@ function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
       city: normalizedCity,
       unit: normalizedUnit,
       response: json,
-      headers
+      headers,
+      challenge
     };
   }
 
@@ -380,13 +416,20 @@ function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
     url.searchParams.set("model", normalizedModel);
     url.searchParams.set("maxTokens", String(normalizedMaxTokens));
 
+    let challenge = null;
     const res = await fetchWithSettldAutopay(
       url,
       {
         method: "GET",
         headers: { "x-proxy-tenant-id": tenantId }
       },
-      { fetch: fetchImpl }
+      {
+        fetch: fetchImpl,
+        ...(agentPassport ? { agentPassport } : {}),
+        onChallenge: (metadata) => {
+          challenge = metadata;
+        }
+      }
     );
     const text = await res.text();
     let json = null;
@@ -414,7 +457,8 @@ function makePaidToolsClient({ baseUrl, tenantId, fetchImpl = fetch }) {
       model: normalizedModel,
       maxTokens: normalizedMaxTokens,
       response: json,
-      headers
+      headers,
+      challenge
     };
   }
 
@@ -660,6 +704,10 @@ async function main() {
   const apiKey = process.env.SETTLD_API_KEY || "";
   const protocol = process.env.SETTLD_PROTOCOL || null;
   const paidToolsBaseUrl = process.env.SETTLD_PAID_TOOLS_BASE_URL || "http://127.0.0.1:8402";
+  const paidToolsAgentPassport = parseOptionalJsonObject(
+    process.env.SETTLD_PAID_TOOLS_AGENT_PASSPORT ?? null,
+    "SETTLD_PAID_TOOLS_AGENT_PASSPORT"
+  );
 
   assertNonEmptyString(baseUrl, "SETTLD_BASE_URL");
   assertNonEmptyString(tenantId, "SETTLD_TENANT_ID");
@@ -670,7 +718,7 @@ async function main() {
   process.stderr.write("[mcp] ready (stdio). Use `npm run mcp:probe` or an MCP client; do not paste shell prompts.\n");
 
   const client = makeSettldClient({ baseUrl, tenantId, apiKey, protocol });
-  const paidToolsClient = makePaidToolsClient({ baseUrl: paidToolsBaseUrl, tenantId });
+  const paidToolsClient = makePaidToolsClient({ baseUrl: paidToolsBaseUrl, tenantId, agentPassport: paidToolsAgentPassport });
   const tools = buildTools();
   const toolByName = new Map(tools.map((t) => [t.name, t]));
 

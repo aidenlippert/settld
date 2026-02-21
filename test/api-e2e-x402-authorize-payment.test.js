@@ -7,7 +7,7 @@ import { canonicalJsonStringify } from "../src/core/canonical-json.js";
 import { createEd25519Keypair, sha256Hex } from "../src/core/crypto.js";
 import { createCircleReserveAdapter } from "../src/core/circle-reserve-adapter.js";
 import { hmacSignArtifact } from "../src/core/artifacts.js";
-import { parseSettldPayTokenV1, verifySettldPayTokenV1 } from "../src/core/settld-pay-token.js";
+import { computeSettldPayTokenSha256, parseSettldPayTokenV1, verifySettldPayTokenV1 } from "../src/core/settld-pay-token.js";
 import { request } from "./api-test-harness.js";
 
 async function registerAgent(api, { agentId }) {
@@ -1500,6 +1500,119 @@ test("API e2e: ops x402 wallet policy CRUD and authorize-payment policy enforcem
   });
   assert.equal(issuerDecisionB.statusCode, 409, issuerDecisionB.body);
   assert.equal(issuerDecisionB.json?.code, "X402_WALLET_POLICY_DAILY_LIMIT_EXCEEDED");
+});
+
+test("API e2e: verify rejects spend authorization policy fingerprint mismatch", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_verify_policy_mismatch_payer_1" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_verify_policy_mismatch_payee_1" });
+  await creditWallet(api, {
+    agentId: payerAgentId,
+    amountCents: 5_000,
+    idempotencyKey: "wallet_credit_x402_verify_policy_mismatch_1"
+  });
+
+  const policy = {
+    sponsorRef: "sponsor_verify_policy_mismatch_1",
+    sponsorWalletRef: "wallet_verify_policy_mismatch_1",
+    policyRef: "default",
+    policyVersion: 1,
+    status: "active",
+    maxAmountCents: 2_000,
+    maxDailyAuthorizationCents: 20_000,
+    allowedProviderIds: [],
+    allowedToolIds: [],
+    allowedAgentKeyIds: [],
+    allowedCurrencies: ["USD"],
+    requireQuote: false,
+    requireStrictRequestBinding: false,
+    requireAgentKeyMatch: false
+  };
+  const policyUpsert = await upsertX402WalletPolicy(api, {
+    policy,
+    idempotencyKey: "x402_wallet_policy_upsert_verify_policy_mismatch_1"
+  });
+  assert.equal(policyUpsert.statusCode, 201, policyUpsert.body);
+
+  const gateId = "gate_verify_policy_mismatch_1";
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_verify_policy_mismatch_1" },
+    body: {
+      gateId,
+      payerAgentId,
+      payeeAgentId,
+      toolId: "tool_verify_policy_mismatch_1",
+      amountCents: 500,
+      currency: "USD",
+      agentPassport: {
+        sponsorRef: policy.sponsorRef,
+        sponsorWalletRef: policy.sponsorWalletRef,
+        agentKeyId: "agent_key_verify_policy_mismatch_1",
+        delegationRef: "delegation_verify_policy_mismatch_1",
+        policyRef: policy.policyRef,
+        policyVersion: policy.policyVersion
+      }
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+
+  const issuerDecision = await issueWalletAuthorizationDecision(api, {
+    sponsorWalletRef: policy.sponsorWalletRef,
+    gateId,
+    idempotencyKey: "x402_wallet_issuer_verify_policy_mismatch_1"
+  });
+  assert.equal(issuerDecision.statusCode, 200, issuerDecision.body);
+
+  const auth = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_verify_policy_mismatch_1" },
+    body: {
+      gateId,
+      walletAuthorizationDecisionToken: issuerDecision.json?.walletAuthorizationDecisionToken
+    }
+  });
+  assert.equal(auth.statusCode, 200, auth.body);
+
+  const storedGate = await api.store.getX402Gate({ tenantId: "tenant_default", gateId });
+  assert.ok(storedGate?.authorization?.token?.value);
+  const parsedToken = parseSettldPayTokenV1(storedGate.authorization.token.value);
+  const tamperedEnvelope = {
+    ...parsedToken.envelope,
+    payload: {
+      ...parsedToken.payload,
+      policyFingerprint: "f".repeat(64)
+    }
+  };
+  const tamperedToken = Buffer.from(canonicalJsonStringify(tamperedEnvelope), "utf8").toString("base64url");
+  const tamperedGate = {
+    ...storedGate,
+    authorization: {
+      ...storedGate.authorization,
+      token: {
+        ...storedGate.authorization.token,
+        value: tamperedToken,
+        sha256: computeSettldPayTokenSha256(tamperedToken)
+      }
+    }
+  };
+  await api.store.putX402Gate({ tenantId: "tenant_default", gateId, gate: tamperedGate });
+
+  const verifyRes = await request(api, {
+    method: "POST",
+    path: "/x402/gate/verify",
+    headers: { "x-idempotency-key": "x402_gate_verify_policy_mismatch_1" },
+    body: {
+      gateId
+    }
+  });
+  assert.equal(verifyRes.statusCode, 409, verifyRes.body);
+  assert.equal(verifyRes.json?.code, "X402_SPEND_AUTH_POLICY_FINGERPRINT_MISMATCH");
+  assert.equal(verifyRes.json?.details?.spendAuthorizationPolicyFingerprint, "f".repeat(64));
+  assert.equal(verifyRes.json?.details?.expectedWalletPolicyFingerprint, policyUpsert.json?.policy?.policyFingerprint);
 });
 
 test("API e2e: authorize-payment emits escalation and resumes with approved override", async () => {

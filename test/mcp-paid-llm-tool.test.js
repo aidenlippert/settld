@@ -124,6 +124,11 @@ test("mcp paid llm tool: retries x402 via autopay and returns completion payload
   assert.equal(payload.result?.response?.model, "gpt-4o-mini");
   assert.equal(payload.result?.response?.prompt, "hello world");
   assert.equal(payload.result?.headers?.["x-settld-settlement-status"], "released");
+  assert.equal(payload.result?.challenge?.gateId, "gate_llm_paid_1");
+  assert.equal(payload.result?.challenge?.policyChallenge?.quoteRequired, null);
+  assert.equal(payload.result?.challenge?.policyChallenge?.spendAuthorizationMode, null);
+  assert.equal(payload.result?.challenge?.fields?.amountCents, "500");
+  assert.equal(payload.result?.challenge?.fields?.currency, "USD");
 
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.gateId, "");

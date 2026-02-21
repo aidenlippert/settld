@@ -49,6 +49,31 @@ async function putAuthKey(api, { tenantId = DEFAULT_TENANT_ID } = {}) {
   return `${keyId}.${secret}`;
 }
 
+async function apiJson(url, { method = "GET", apiKey, tenantId = DEFAULT_TENANT_ID, body = null, headers = {} } = {}) {
+  const requestHeaders = {
+    authorization: `Bearer ${apiKey}`,
+    "x-proxy-tenant-id": tenantId,
+    ...headers
+  };
+  if (body !== null && body !== undefined) {
+    requestHeaders["content-type"] = "application/json; charset=utf-8";
+    requestHeaders["x-settld-protocol"] = "1.0";
+  }
+  const res = await fetch(url, {
+    method,
+    headers: requestHeaders,
+    body: body === null || body === undefined ? undefined : JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  return { status: res.status, text, json };
+}
+
 async function waitForGatewayReady({ port, timeoutMs = 10_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -203,6 +228,118 @@ test("x402 gateway: retries with SettldPay token and returns verified response",
     typeof settlementJson?.decisionRecord?.bindings?.spendAuthorization?.delegationRef === "string" &&
       settlementJson.decisionRecord.bindings.spendAuthorization.delegationRef.length > 0
   );
+});
+
+test("x402 gateway: forwards x-settld-agent-passport to gate create and triggers wallet policy authorization checks", async (t) => {
+  const upstream = http.createServer((req, res) => {
+    const authHeader = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+    const hasSettldPay = authHeader.toLowerCase().startsWith("settldpay ");
+    if (!hasSettldPay) {
+      res.writeHead(402, {
+        "content-type": "application/json; charset=utf-8",
+        "x-payment-required": "amountCents=500; currency=USD; toolId=mock_search; address=mock:payee; network=mocknet"
+      });
+      res.end(JSON.stringify({ ok: false, code: "PAYMENT_REQUIRED" }));
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true, provider: "mock" }));
+  });
+  const upstreamBind = await listenOnEphemeralLoopback(upstream, { hosts: ["127.0.0.1"] });
+  const upstreamBase = `http://127.0.0.1:${upstreamBind.port}`;
+
+  const api = createApi();
+  const apiServer = http.createServer(api.handle);
+  const apiBind = await listenOnEphemeralLoopback(apiServer, { hosts: ["127.0.0.1"] });
+  const apiBase = `http://127.0.0.1:${apiBind.port}`;
+  const apiKey = await putAuthKey(api, { tenantId: DEFAULT_TENANT_ID });
+
+  const sponsorRef = "sponsor_gateway_policy_1";
+  const sponsorWalletRef = "wallet_gateway_policy_1";
+  const walletCreate = await apiJson(`${apiBase}/x402/wallets`, {
+    method: "POST",
+    apiKey,
+    body: {
+      sponsorRef,
+      sponsorWalletRef,
+      policy: {
+        policyRef: "default",
+        policyVersion: 1,
+        maxAmountCents: 1000,
+        maxDailyAuthorizationCents: 5000,
+        allowedProviderIds: [],
+        allowedToolIds: [],
+        allowedAgentKeyIds: [],
+        allowedCurrencies: ["USD"],
+        requireQuote: false,
+        requireStrictRequestBinding: false,
+        requireAgentKeyMatch: false
+      }
+    }
+  });
+  assert.equal(walletCreate.status, 201, walletCreate.text);
+
+  const gatewayPort = await reservePort();
+  const gateway = spawn(process.execPath, ["services/x402-gateway/src/server.js"], {
+    cwd: REPO_ROOT,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      PORT: String(gatewayPort),
+      BIND_HOST: "127.0.0.1",
+      SETTLD_API_URL: apiBase,
+      SETTLD_API_KEY: apiKey,
+      UPSTREAM_URL: upstreamBase,
+      X402_AUTOFUND: "1"
+    }
+  });
+
+  t.after(async () => {
+    if (!gateway.killed) gateway.kill("SIGTERM");
+    const exited = await Promise.race([onceProcessExit(gateway), sleep(1_500).then(() => null)]);
+    if (!exited && !gateway.killed) gateway.kill("SIGKILL");
+    await new Promise((resolve) => upstream.close(resolve));
+    await new Promise((resolve) => apiServer.close(resolve));
+  });
+
+  await waitForGatewayReady({ port: gatewayPort });
+  const gatewayBase = `http://127.0.0.1:${gatewayPort}`;
+  const agentPassport = {
+    sponsorRef,
+    sponsorWalletRef,
+    policyRef: "default",
+    policyVersion: 1,
+    agentKeyId: "agent_key_gateway_1"
+  };
+  const agentPassportHeader = Buffer.from(JSON.stringify(agentPassport), "utf8").toString("base64url");
+
+  const first = await fetch(`${gatewayBase}/tools/search?q=policy`, {
+    headers: {
+      "x-settld-agent-passport": agentPassportHeader
+    }
+  });
+  assert.equal(first.status, 402);
+  const gateId = first.headers.get("x-settld-gate-id");
+  assert.ok(gateId && gateId.trim() !== "");
+
+  const second = await fetch(`${gatewayBase}/tools/search?q=policy`, {
+    headers: {
+      "x-settld-gate-id": gateId,
+      "x-settld-agent-passport": agentPassportHeader
+    }
+  });
+  const secondText = await second.text();
+  assert.equal(second.status, 502, secondText);
+  assert.match(secondText, /wallet issuer decision is required/i);
+
+  const gateRead = await apiJson(`${apiBase}/x402/gate/${encodeURIComponent(gateId)}`, {
+    method: "GET",
+    apiKey
+  });
+  assert.equal(gateRead.status, 200, gateRead.text);
+  assert.equal(gateRead.json?.gate?.agentPassport?.sponsorWalletRef, sponsorWalletRef);
+  assert.equal(gateRead.json?.gate?.agentPassport?.policyRef, "default");
+  assert.equal(gateRead.json?.gate?.agentPassport?.policyVersion, 1);
 });
 
 test("x402 gateway: enforces signed provider quote when provider key is configured", async (t) => {

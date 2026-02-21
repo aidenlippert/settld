@@ -38047,6 +38047,39 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid verification/policy inputs", { message: err?.message }, { code: "SCHEMA_INVALID" });
           }
+          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
+          let tokenPayloadForBindings = null;
+          try {
+            if (typeof gateAuthorization?.token?.value === "string" && gateAuthorization.token.value.trim() !== "") {
+              const parsed = parseSettldPayTokenV1(gateAuthorization.token.value);
+              tokenPayloadForBindings = parsed?.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload) ? parsed.payload : null;
+            }
+          } catch {}
+          const spendAuthorizationPolicyFingerprint =
+            typeof tokenPayloadForBindings?.policyFingerprint === "string" && tokenPayloadForBindings.policyFingerprint.trim() !== ""
+              ? tokenPayloadForBindings.policyFingerprint.trim().toLowerCase()
+              : null;
+          const expectedWalletPolicyFingerprint =
+            typeof resolvedWalletPolicy?.policyFingerprint === "string" && resolvedWalletPolicy.policyFingerprint.trim() !== ""
+              ? resolvedWalletPolicy.policyFingerprint.trim().toLowerCase()
+              : null;
+          if (
+            spendAuthorizationPolicyFingerprint &&
+            expectedWalletPolicyFingerprint &&
+            spendAuthorizationPolicyFingerprint !== expectedWalletPolicyFingerprint
+          ) {
+            return sendError(
+              res,
+              409,
+              "spend authorization policy fingerprint does not match resolved wallet policy",
+              {
+                gateId,
+                spendAuthorizationPolicyFingerprint,
+                expectedWalletPolicyFingerprint
+              },
+              { code: "X402_SPEND_AUTH_POLICY_FINGERPRINT_MISMATCH" }
+            );
+          }
 
           const payerAgentId = String(settlement.payerAgentId ?? "");
           const payeeAgentId = String(settlement.agentId ?? "");
@@ -38103,20 +38136,19 @@ export function createApi({
 	            throw err;
 	          }
 
-	          const policyHashUsed = computeSettlementPolicyHash(policyDecision.policy);
-	          const immediateReleaseRatePct =
-	            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
-	          const reasonCodes = (() => {
-	            const out = [];
-	            const push = (v) => {
-	              const s = typeof v === "string" ? v.trim() : "";
-	              if (s) out.push(s);
-	            };
-	            if (Array.isArray(policyDecision.reasonCodes)) for (const c of policyDecision.reasonCodes) push(c);
-	            for (const c of extraReasonCodes) push(c);
-	            // Deterministic ordering for receipts/logs.
-	            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
-	          })();
+          const immediateReleaseRatePct =
+            Number(settlement.amountCents) > 0 ? Math.round((immediateReleaseAmountCents * 100) / Number(settlement.amountCents)) : 0;
+          const reasonCodes = (() => {
+            const out = [];
+            const push = (v) => {
+              const s = typeof v === "string" ? v.trim() : "";
+              if (s) out.push(s);
+            };
+            if (Array.isArray(policyDecision.reasonCodes)) for (const c of policyDecision.reasonCodes) push(c);
+            for (const c of extraReasonCodes) push(c);
+            // Deterministic ordering for receipts/logs.
+            return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
+          })();
           const providerSigReasonCodes = reasonCodes.filter(
             (code) =>
               code === "X402_PROVIDER_SIGNATURE_MISSING" ||
@@ -38164,13 +38196,6 @@ export function createApi({
             verificationMethodHashUsed,
             policyDecision
           });
-          let tokenPayloadForBindings = null;
-          try {
-            if (typeof gateAuthorization?.token?.value === "string" && gateAuthorization.token.value.trim() !== "") {
-              const parsed = parseSettldPayTokenV1(gateAuthorization.token.value);
-              tokenPayloadForBindings = parsed?.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload) ? parsed.payload : null;
-            }
-          } catch {}
           const tokenQuoteId =
             typeof tokenPayloadForBindings?.quoteId === "string" && tokenPayloadForBindings.quoteId.trim() !== ""
               ? tokenPayloadForBindings.quoteId.trim()
@@ -38419,72 +38444,72 @@ export function createApi({
             settlementReceipt: resolvedKernelRefs.settlementReceipt
           };
 
-	          const resolvedSettlement = resolveAgentRunSettlement({
-	            settlement,
-	            status: policyDecision.settlementStatus,
-	            runStatus: policyDecision.runStatus,
-	            releasedAmountCents: immediateReleaseAmountCents,
-	            refundedAmountCents: immediateRefundAmountCents,
-	            releaseRatePct: immediateReleaseRatePct,
-		            decisionStatus: settlementDecisionStatus,
-		            decisionMode: settlementDecisionMode,
-		            decisionPolicyHash: policyHashUsed,
-		            decisionReason: reasonCodes[0] ?? null,
-		            decisionTrace,
-		            resolutionEventId,
-		            at
-		          });
+          const resolvedSettlement = resolveAgentRunSettlement({
+            settlement,
+            status: policyDecision.settlementStatus,
+            runStatus: policyDecision.runStatus,
+            releasedAmountCents: immediateReleaseAmountCents,
+            refundedAmountCents: immediateRefundAmountCents,
+            releaseRatePct: immediateReleaseRatePct,
+            decisionStatus: settlementDecisionStatus,
+            decisionMode: settlementDecisionMode,
+            decisionPolicyHash: policyHashUsed,
+            decisionReason: reasonCodes[0] ?? null,
+            decisionTrace,
+            resolutionEventId,
+            at
+          });
 
-	          let holdbackSettlement = null;
-	          let holdbackSettlementResolved = null;
-	          let holdbackRunId = null;
-	          if (holdbackAmountCents > 0) {
-	            holdbackRunId = `${runId}_holdback`;
-	            const existingHoldback =
-	              typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId: holdbackRunId }) : null;
-	            if (existingHoldback && String(existingHoldback.status ?? "").toLowerCase() !== "locked") {
-	              holdbackSettlementResolved = existingHoldback;
-	            } else if (existingHoldback) {
-	              holdbackSettlement = existingHoldback;
-	            } else {
-	              // Re-lock the holdback funds into escrow for the follow-on settlement.
-	              try {
-	                payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents: holdbackAmountCents, at });
-	              } catch (err) {
-	                if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
-	                  return sendError(res, 409, "insufficient wallet balance for holdback lock", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
-	                }
-	                throw err;
-	              }
-	              holdbackSettlement = createAgentRunSettlement({
-	                tenantId,
-	                runId: holdbackRunId,
-	                agentId: payeeAgentId,
-	                payerAgentId,
-	                amountCents: holdbackAmountCents,
-	                currency: settlement.currency ?? "USD",
-	                disputeWindowDays: 0,
-	                at
-	              });
-	            }
+          let holdbackSettlement = null;
+          let holdbackSettlementResolved = null;
+          let holdbackRunId = null;
+          if (holdbackAmountCents > 0) {
+            holdbackRunId = `${runId}_holdback`;
+            const existingHoldback =
+              typeof store.getAgentRunSettlement === "function" ? await store.getAgentRunSettlement({ tenantId, runId: holdbackRunId }) : null;
+            if (existingHoldback && String(existingHoldback.status ?? "").toLowerCase() !== "locked") {
+              holdbackSettlementResolved = existingHoldback;
+            } else if (existingHoldback) {
+              holdbackSettlement = existingHoldback;
+            } else {
+              // Re-lock the holdback funds into escrow for the follow-on settlement.
+              try {
+                payerWallet = lockAgentWalletEscrow({ wallet: payerWallet, amountCents: holdbackAmountCents, at });
+              } catch (err) {
+                if (err?.code === "INSUFFICIENT_WALLET_BALANCE") {
+                  return sendError(res, 409, "insufficient wallet balance for holdback lock", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+                }
+                throw err;
+              }
+              holdbackSettlement = createAgentRunSettlement({
+                tenantId,
+                runId: holdbackRunId,
+                agentId: payeeAgentId,
+                payerAgentId,
+                amountCents: holdbackAmountCents,
+                currency: settlement.currency ?? "USD",
+                disputeWindowDays: 0,
+                at
+              });
+            }
 
-	            // If there's no dispute window, resolve the holdback immediately.
-	            if (holdbackSettlement && disputeWindowMsEffective <= 0) {
-	              try {
-	                const moved = releaseAgentWalletEscrowToPayee({
-	                  payerWallet,
-	                  payeeWallet,
-	                  amountCents: holdbackAmountCents,
-	                  at
-	                });
-	                payerWallet = moved.payerWallet;
-	                payeeWallet = moved.payeeWallet;
-	              } catch (err) {
-	                if (err?.code === "INSUFFICIENT_ESCROW_BALANCE") {
-	                  return sendError(res, 409, "insufficient escrow balance for holdback release", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
-	                }
-	                throw err;
-	              }
+            // If there's no dispute window, resolve the holdback immediately.
+            if (holdbackSettlement && disputeWindowMsEffective <= 0) {
+              try {
+                const moved = releaseAgentWalletEscrowToPayee({
+                  payerWallet,
+                  payeeWallet,
+                  amountCents: holdbackAmountCents,
+                  at
+                });
+                payerWallet = moved.payerWallet;
+                payeeWallet = moved.payeeWallet;
+              } catch (err) {
+                if (err?.code === "INSUFFICIENT_ESCROW_BALANCE") {
+                  return sendError(res, 409, "insufficient escrow balance for holdback release", { message: err?.message }, { code: "INSUFFICIENT_FUNDS" });
+                }
+                throw err;
+              }
 
 	              holdbackSettlementResolved = resolveAgentRunSettlement({
 	                settlement: holdbackSettlement,
