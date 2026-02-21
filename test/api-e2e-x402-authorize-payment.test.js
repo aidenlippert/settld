@@ -1308,6 +1308,174 @@ test("API e2e: quote-bound authorization carries spend claims into settlement bi
   assert.equal(verified.json?.decisionRecord?.bindings?.spendAuthorization?.policyFingerprint, payload.policyFingerprint);
 });
 
+test("API e2e: verify enforces strict request binding evidence for quote-bound authorization", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_bind_verify_payer_1" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_bind_verify_payee_1" });
+  await creditWallet(api, {
+    agentId: payerAgentId,
+    amountCents: 8000,
+    idempotencyKey: "wallet_credit_x402_auth_bind_verify_1"
+  });
+
+  const policyUpsert = await upsertX402WalletPolicy(api, {
+    policy: {
+      schemaVersion: "X402WalletPolicy.v1",
+      sponsorRef: "sponsor_bind_verify",
+      sponsorWalletRef: "wallet_bind_verify_1",
+      policyRef: "policy_bind_verify",
+      policyVersion: 1,
+      status: "active",
+      requireQuote: true,
+      requireStrictRequestBinding: true
+    },
+    idempotencyKey: "x402_wallet_policy_upsert_bind_verify_1"
+  });
+  assert.equal(policyUpsert.statusCode, 201, policyUpsert.body);
+
+  const gateId = "gate_bind_verify_1";
+  const createGate = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_bind_verify_1" },
+    body: {
+      gateId,
+      payerAgentId,
+      payeeAgentId,
+      toolId: "mock_search",
+      amountCents: 900,
+      currency: "USD",
+      agentPassport: {
+        sponsorRef: "sponsor_bind_verify",
+        sponsorWalletRef: "wallet_bind_verify_1",
+        agentKeyId: "agent_key_bind_verify",
+        delegationRef: "delegation_bind_verify",
+        policyRef: "policy_bind_verify",
+        policyVersion: 1
+      }
+    }
+  });
+  assert.equal(createGate.statusCode, 201, createGate.body);
+
+  const requestBindingSha256 = "1".repeat(64);
+  const quoteRes = await request(api, {
+    method: "POST",
+    path: "/x402/gate/quote",
+    headers: { "x-idempotency-key": "x402_gate_quote_bind_verify_1" },
+    body: {
+      gateId,
+      requestBindingMode: "strict",
+      requestBindingSha256
+    }
+  });
+  assert.equal(quoteRes.statusCode, 200, quoteRes.body);
+  const quoteId = quoteRes.json?.quote?.quoteId;
+  assert.ok(typeof quoteId === "string" && quoteId.length > 0);
+
+  const issuerDecision = await issueWalletAuthorizationDecision(api, {
+    sponsorWalletRef: "wallet_bind_verify_1",
+    gateId,
+    quoteId,
+    requestBindingMode: "strict",
+    requestBindingSha256,
+    idempotencyKey: "x402_wallet_issuer_bind_verify_1"
+  });
+  assert.equal(issuerDecision.statusCode, 200, issuerDecision.body);
+
+  const authorize = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_bind_verify_1" },
+    body: {
+      gateId,
+      quoteId,
+      requestBindingMode: "strict",
+      requestBindingSha256,
+      walletAuthorizationDecisionToken: issuerDecision.json?.walletAuthorizationDecisionToken
+    }
+  });
+  assert.equal(authorize.statusCode, 200, authorize.body);
+
+  const verifyMissingRequestEvidence = await request(api, {
+    method: "POST",
+    path: "/x402/gate/verify",
+    headers: { "x-idempotency-key": "x402_gate_verify_bind_verify_missing_1" },
+    body: {
+      gateId,
+      verificationStatus: "green",
+      runStatus: "completed",
+      policy: {
+        mode: "automatic",
+        rules: {
+          autoReleaseOnGreen: true,
+          greenReleaseRatePct: 100,
+          autoReleaseOnAmber: false,
+          amberReleaseRatePct: 0,
+          autoReleaseOnRed: true,
+          redReleaseRatePct: 0
+        }
+      },
+      verificationMethod: { mode: "deterministic", source: "http_status_v1" },
+      evidenceRefs: [`http:response_sha256:${"2".repeat(64)}`]
+    }
+  });
+  assert.equal(verifyMissingRequestEvidence.statusCode, 409, verifyMissingRequestEvidence.body);
+  assert.equal(verifyMissingRequestEvidence.json?.code, "X402_REQUEST_BINDING_EVIDENCE_REQUIRED");
+
+  const verifyMismatchedRequestEvidence = await request(api, {
+    method: "POST",
+    path: "/x402/gate/verify",
+    headers: { "x-idempotency-key": "x402_gate_verify_bind_verify_mismatch_1" },
+    body: {
+      gateId,
+      verificationStatus: "green",
+      runStatus: "completed",
+      policy: {
+        mode: "automatic",
+        rules: {
+          autoReleaseOnGreen: true,
+          greenReleaseRatePct: 100,
+          autoReleaseOnAmber: false,
+          amberReleaseRatePct: 0,
+          autoReleaseOnRed: true,
+          redReleaseRatePct: 0
+        }
+      },
+      verificationMethod: { mode: "deterministic", source: "http_status_v1" },
+      evidenceRefs: [`http:request_sha256:${"3".repeat(64)}`, `http:response_sha256:${"2".repeat(64)}`]
+    }
+  });
+  assert.equal(verifyMismatchedRequestEvidence.statusCode, 409, verifyMismatchedRequestEvidence.body);
+  assert.equal(verifyMismatchedRequestEvidence.json?.code, "X402_REQUEST_BINDING_EVIDENCE_MISMATCH");
+
+  const verifyOk = await request(api, {
+    method: "POST",
+    path: "/x402/gate/verify",
+    headers: { "x-idempotency-key": "x402_gate_verify_bind_verify_ok_1" },
+    body: {
+      gateId,
+      verificationStatus: "green",
+      runStatus: "completed",
+      policy: {
+        mode: "automatic",
+        rules: {
+          autoReleaseOnGreen: true,
+          greenReleaseRatePct: 100,
+          autoReleaseOnAmber: false,
+          amberReleaseRatePct: 0,
+          autoReleaseOnRed: true,
+          redReleaseRatePct: 0
+        }
+      },
+      verificationMethod: { mode: "deterministic", source: "http_status_v1" },
+      evidenceRefs: [`http:request_sha256:${requestBindingSha256}`, `http:response_sha256:${"2".repeat(64)}`]
+    }
+  });
+  assert.equal(verifyOk.statusCode, 200, verifyOk.body);
+  assert.equal(verifyOk.json?.decisionRecord?.bindings?.request?.sha256, requestBindingSha256);
+});
+
 test("API e2e: ops x402 wallet policy CRUD and authorize-payment policy enforcement", async () => {
   const api = createApi({ opsToken: "tok_ops" });
 

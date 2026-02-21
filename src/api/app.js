@@ -38189,6 +38189,66 @@ export function createApi({
           ).sort((left, right) => String(left).localeCompare(String(right)));
           const requestSha256 = parseEvidenceRefSha256(enrichedEvidenceRefs, "http:request_sha256:");
           const responseSha256 = parseEvidenceRefSha256(enrichedEvidenceRefs, "http:response_sha256:");
+          const tokenRequestBindingMode =
+            typeof tokenPayloadForBindings?.requestBindingMode === "string" && tokenPayloadForBindings.requestBindingMode.trim() !== ""
+              ? tokenPayloadForBindings.requestBindingMode.trim().toLowerCase()
+              : null;
+          const tokenRequestBindingSha256 =
+            typeof tokenPayloadForBindings?.requestBindingSha256 === "string" && tokenPayloadForBindings.requestBindingSha256.trim() !== ""
+              ? tokenPayloadForBindings.requestBindingSha256.trim().toLowerCase()
+              : null;
+          const quoteRequestBindingMode =
+            typeof gateAuthorization?.quote?.requestBindingMode === "string" && gateAuthorization.quote.requestBindingMode.trim() !== ""
+              ? gateAuthorization.quote.requestBindingMode.trim().toLowerCase()
+              : typeof gate?.quote?.requestBindingMode === "string" && gate.quote.requestBindingMode.trim() !== ""
+                ? gate.quote.requestBindingMode.trim().toLowerCase()
+                : null;
+          const quoteRequestBindingSha256 =
+            typeof gateAuthorization?.quote?.requestBindingSha256 === "string" && gateAuthorization.quote.requestBindingSha256.trim() !== ""
+              ? gateAuthorization.quote.requestBindingSha256.trim().toLowerCase()
+              : typeof gate?.quote?.requestBindingSha256 === "string" && gate.quote.requestBindingSha256.trim() !== ""
+                ? gate.quote.requestBindingSha256.trim().toLowerCase()
+                : null;
+          const effectiveRequestBindingMode = tokenRequestBindingMode ?? quoteRequestBindingMode ?? null;
+          const effectiveRequestBindingSha256 = tokenRequestBindingSha256 ?? quoteRequestBindingSha256 ?? null;
+          if (effectiveRequestBindingMode === "strict") {
+            if (!effectiveRequestBindingSha256) {
+              return sendError(
+                res,
+                409,
+                "strict request binding is missing from spend authorization",
+                { gateId },
+                { code: "X402_REQUEST_BINDING_REQUIRED" }
+              );
+            }
+            if (!requestSha256) {
+              return sendError(
+                res,
+                409,
+                "strict request binding requires request hash evidence",
+                { gateId, expectedRequestBindingSha256: effectiveRequestBindingSha256 },
+                { code: "X402_REQUEST_BINDING_EVIDENCE_REQUIRED" }
+              );
+            }
+            if (requestSha256 !== effectiveRequestBindingSha256) {
+              return sendError(
+                res,
+                409,
+                "request hash evidence does not match strict request binding",
+                { gateId, requestSha256, expectedRequestBindingSha256: effectiveRequestBindingSha256 },
+                { code: "X402_REQUEST_BINDING_EVIDENCE_MISMATCH" }
+              );
+            }
+          } else if (effectiveRequestBindingSha256 && requestSha256 && requestSha256 !== effectiveRequestBindingSha256) {
+            return sendError(
+              res,
+              409,
+              "request hash evidence does not match spend authorization binding",
+              { gateId, requestSha256, expectedRequestBindingSha256: effectiveRequestBindingSha256 },
+              { code: "X402_REQUEST_BINDING_EVIDENCE_MISMATCH" }
+            );
+          }
+          const decisionRequestSha256 = requestSha256 ?? effectiveRequestBindingSha256 ?? null;
           const verificationMethodHashUsed = computeVerificationMethodHash(policyDecision.verificationMethod ?? {});
           const policyDecisionFingerprint = buildPolicyDecisionFingerprint({
             policyInput: body?.policy ?? null,
@@ -38243,7 +38303,7 @@ export function createApi({
               expiresAt: gateAuthorization?.token?.expiresAt ?? null
             },
             request: {
-              sha256: requestSha256 ?? null
+              sha256: decisionRequestSha256
             },
             response: {
               status:
