@@ -53,7 +53,8 @@ async function makeCliFixture() {
 
 test("CLI: settld doctor prints PASS and report path when smoke passes", async () => {
   const { tmpRoot, cliPath } = await makeCliFixture();
-  const expectedReportPath = path.join(tmpRoot, "artifacts", "ops", "mcp-host-smoke.json");
+  const expectedRoot = await fs.realpath(tmpRoot);
+  const expectedReportPath = path.join(expectedRoot, "artifacts", "ops", "mcp-host-smoke.json");
 
   const res = spawnSync(process.execPath, [cliPath, "doctor"], {
     cwd: tmpRoot,
@@ -72,7 +73,8 @@ test("CLI: settld doctor prints PASS and report path when smoke passes", async (
 
 test("CLI: settld doctor prints FAIL and custom report path when smoke fails", async () => {
   const { tmpRoot, cliPath } = await makeCliFixture();
-  const expectedReportPath = path.join(tmpRoot, "artifacts", "ops", "custom-doctor-report.json");
+  const expectedRoot = await fs.realpath(tmpRoot);
+  const expectedReportPath = path.join(expectedRoot, "artifacts", "ops", "custom-doctor-report.json");
 
   const res = spawnSync(process.execPath, [cliPath, "doctor", "--report", expectedReportPath], {
     cwd: tmpRoot,

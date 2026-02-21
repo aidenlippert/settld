@@ -15,19 +15,18 @@ PROBLEM_TESTS=(
   "test/trust-config-wizard-cli.test.js"
 )
 
-declare -A PROBLEM_SET=()
-for fp in "${PROBLEM_TESTS[@]}"; do
-  PROBLEM_SET["$fp"]=1
-done
-
-mapfile -t ALL_TESTS < <(ls test/*.test.js | sort)
-
 SAFE_TESTS=()
-for fp in "${ALL_TESTS[@]}"; do
-  if [[ -n "${PROBLEM_SET[$fp]+x}" ]]; then
-    continue
+for fp in $(ls test/*.test.js | sort); do
+  is_problem_test=0
+  for problem in "${PROBLEM_TESTS[@]}"; do
+    if [[ "$fp" == "$problem" ]]; then
+      is_problem_test=1
+      break
+    fi
+  done
+  if [[ "$is_problem_test" -eq 0 ]]; then
+    SAFE_TESTS+=("$fp")
   fi
-  SAFE_TESTS+=("$fp")
 done
 
 # Phase 1: bulk suite (fast).

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "ProtocolV1Freeze.v1",
   "files": {
-    "test/fixtures/protocol-vectors/v1.json": "be9d6357f83d7389bf0490d790ccd71703aac88fb1d06d1377808a1358171709",
+    "test/fixtures/protocol-vectors/v1.json": "7b1248ef5ab79893b27f2362b9f68f3424d2e43e0c471ccdc3b19b8e141654e9",
     "docs/spec/schemas/AgreementDelegation.v1.schema.json": "55c2bd349a4393dd3bf54de948653c519a85d57e6366471f4dcd144594b6dd9e",
     "docs/spec/schemas/BundleHeadAttestation.v1.schema.json": "101345071099e8bc0daebe4d39f09e68c1c439f20d5f9d5ef817b1e8ef32555d",
     "docs/spec/schemas/FinancePackBundleManifest.v1.schema.json": "05ec300543ae87b231462906b9df8253b1cbdec9170df4e962451b5d0580aeea",

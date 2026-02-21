@@ -107,9 +107,10 @@ test("CLI: settld policy simulate reports deterministic deny reasons", async (t)
 });
 
 test("CLI: settld policy publish writes deterministic local publication report", async (t) => {
-  const { packPath } = await createPolicyFixture(t);
+  const { tmpDir, packPath } = await createPolicyFixture(t);
+  const outPath = path.join(tmpDir, "engineering-spend.publish.local.json");
 
-  const firstRun = runSettld(["policy", "publish", packPath, "--format", "json"]);
+  const firstRun = runSettld(["policy", "publish", packPath, "--out", outPath, "--format", "json"]);
   assert.equal(firstRun.status, 0, `stdout:\n${firstRun.stdout}\n\nstderr:\n${firstRun.stderr}`);
   const firstReport = parseJson(firstRun.stdout, "policy publish stdout#1");
   assert.equal(firstReport.schemaVersion, "SettldPolicyPublishReport.v1");
