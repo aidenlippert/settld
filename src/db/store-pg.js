@@ -3234,6 +3234,356 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     };
   }
 
+  function x402WalletPolicySnapshotRowToRecord(row) {
+    const policy = row?.snapshot_json ?? null;
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? policy?.tenantId ?? DEFAULT_TENANT_ID);
+    const sponsorWalletRef =
+      typeof policy?.sponsorWalletRef === "string" && policy.sponsorWalletRef.trim() !== "" ? policy.sponsorWalletRef.trim() : null;
+    const policyRef = typeof policy?.policyRef === "string" && policy.policyRef.trim() !== "" ? policy.policyRef.trim() : null;
+    const policyVersion = parseSafeIntegerOrNull(policy?.policyVersion);
+    if (!sponsorWalletRef || !policyRef || policyVersion === null || policyVersion <= 0) return null;
+    return {
+      ...policy,
+      tenantId,
+      sponsorWalletRef,
+      policyRef,
+      policyVersion
+    };
+  }
+
+  function x402EscalationSnapshotRowToRecord(row) {
+    const escalation = row?.snapshot_json ?? null;
+    if (!escalation || typeof escalation !== "object" || Array.isArray(escalation)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? escalation?.tenantId ?? DEFAULT_TENANT_ID);
+    const escalationId =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== ""
+        ? String(row.aggregate_id).trim()
+        : typeof escalation?.escalationId === "string" && escalation.escalationId.trim() !== ""
+          ? escalation.escalationId.trim()
+          : null;
+    if (!escalationId) return null;
+    return {
+      ...escalation,
+      tenantId,
+      escalationId
+    };
+  }
+
+  function x402EscalationEventSnapshotRowToRecord(row) {
+    const event = row?.snapshot_json ?? null;
+    if (!event || typeof event !== "object" || Array.isArray(event)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? event?.tenantId ?? DEFAULT_TENANT_ID);
+    const eventId =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== ""
+        ? String(row.aggregate_id).trim()
+        : typeof event?.eventId === "string" && event.eventId.trim() !== ""
+          ? event.eventId.trim()
+          : null;
+    const escalationId =
+      typeof event?.escalationId === "string" && event.escalationId.trim() !== "" ? event.escalationId.trim() : null;
+    if (!eventId || !escalationId) return null;
+    return {
+      ...event,
+      tenantId,
+      eventId,
+      escalationId
+    };
+  }
+
+  function x402EscalationOverrideUsageSnapshotRowToRecord(row) {
+    const usage = row?.snapshot_json ?? null;
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? usage?.tenantId ?? DEFAULT_TENANT_ID);
+    const overrideId =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== ""
+        ? String(row.aggregate_id).trim()
+        : typeof usage?.overrideId === "string" && usage.overrideId.trim() !== ""
+          ? usage.overrideId.trim()
+          : null;
+    if (!overrideId) return null;
+    return {
+      ...usage,
+      tenantId,
+      overrideId
+    };
+  }
+
+  store.getX402WalletPolicy = async function getX402WalletPolicy({
+    tenantId = DEFAULT_TENANT_ID,
+    sponsorWalletRef,
+    policyRef,
+    policyVersion
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(sponsorWalletRef, "sponsorWalletRef");
+    assertNonEmptyString(policyRef, "policyRef");
+    const safePolicyVersion = parseSafeIntegerOrNull(policyVersion);
+    if (safePolicyVersion === null || safePolicyVersion <= 0) {
+      throw new TypeError("policyVersion must be a positive safe integer");
+    }
+    const aggregateId = `${String(sponsorWalletRef).trim()}::${String(policyRef).trim()}::${safePolicyVersion}`;
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_wallet_policy' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, aggregateId]
+      );
+      return res.rows.length ? x402WalletPolicySnapshotRowToRecord(res.rows[0]) : null;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return (
+        store.x402WalletPolicies.get(
+          makeScopedKey({
+            tenantId,
+            id: aggregateId
+          })
+        ) ?? null
+      );
+    }
+  };
+
+  store.listX402WalletPolicies = async function listX402WalletPolicies({
+    tenantId = DEFAULT_TENANT_ID,
+    sponsorWalletRef = null,
+    sponsorRef = null,
+    policyRef = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const sponsorWalletFilter =
+      sponsorWalletRef === null || sponsorWalletRef === undefined || String(sponsorWalletRef).trim() === ""
+        ? null
+        : String(sponsorWalletRef).trim();
+    const sponsorFilter = sponsorRef === null || sponsorRef === undefined || String(sponsorRef).trim() === "" ? null : String(sponsorRef).trim();
+    const policyFilter = policyRef === null || policyRef === undefined || String(policyRef).trim() === "" ? null : String(policyRef).trim();
+    const statusFilter = status === null || status === undefined || String(status).trim() === "" ? null : String(status).trim().toLowerCase();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_wallet_policy'
+          ORDER BY updated_at DESC, aggregate_id ASC
+        `,
+        [tenantId]
+      );
+      const rows = res.rows.map(x402WalletPolicySnapshotRowToRecord).filter(Boolean);
+      const filtered = [];
+      for (const row of rows) {
+        if (sponsorWalletFilter && String(row.sponsorWalletRef ?? "") !== sponsorWalletFilter) continue;
+        if (sponsorFilter && String(row.sponsorRef ?? "") !== sponsorFilter) continue;
+        if (policyFilter && String(row.policyRef ?? "") !== policyFilter) continue;
+        if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+        filtered.push(row);
+      }
+      filtered.sort((left, right) => {
+        const leftAt = Number.isFinite(Date.parse(String(left?.updatedAt ?? ""))) ? Date.parse(String(left.updatedAt)) : Number.NaN;
+        const rightAt = Number.isFinite(Date.parse(String(right?.updatedAt ?? ""))) ? Date.parse(String(right.updatedAt)) : Number.NaN;
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        const sponsorOrder = String(left?.sponsorWalletRef ?? "").localeCompare(String(right?.sponsorWalletRef ?? ""));
+        if (sponsorOrder !== 0) return sponsorOrder;
+        const policyOrder = String(left?.policyRef ?? "").localeCompare(String(right?.policyRef ?? ""));
+        if (policyOrder !== 0) return policyOrder;
+        return Number(right?.policyVersion ?? 0) - Number(left?.policyVersion ?? 0);
+      });
+      return filtered.slice(safeOffset, safeOffset + safeLimit);
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      const out = [];
+      for (const row of store.x402WalletPolicies.values()) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (sponsorWalletFilter && String(row.sponsorWalletRef ?? "") !== sponsorWalletFilter) continue;
+        if (sponsorFilter && String(row.sponsorRef ?? "") !== sponsorFilter) continue;
+        if (policyFilter && String(row.policyRef ?? "") !== policyFilter) continue;
+        if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+        out.push(row);
+      }
+      out.sort((left, right) => {
+        const leftAt = Number.isFinite(Date.parse(String(left?.updatedAt ?? ""))) ? Date.parse(String(left.updatedAt)) : Number.NaN;
+        const rightAt = Number.isFinite(Date.parse(String(right?.updatedAt ?? ""))) ? Date.parse(String(right.updatedAt)) : Number.NaN;
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        const sponsorOrder = String(left?.sponsorWalletRef ?? "").localeCompare(String(right?.sponsorWalletRef ?? ""));
+        if (sponsorOrder !== 0) return sponsorOrder;
+        const policyOrder = String(left?.policyRef ?? "").localeCompare(String(right?.policyRef ?? ""));
+        if (policyOrder !== 0) return policyOrder;
+        return Number(right?.policyVersion ?? 0) - Number(left?.policyVersion ?? 0);
+      });
+      return out.slice(safeOffset, safeOffset + safeLimit);
+    }
+  };
+
+  store.getX402Escalation = async function getX402Escalation({ tenantId = DEFAULT_TENANT_ID, escalationId } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(escalationId, "escalationId");
+    const normalizedEscalationId = String(escalationId).trim();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_escalation' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, normalizedEscalationId]
+      );
+      return res.rows.length ? x402EscalationSnapshotRowToRecord(res.rows[0]) : null;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return store.x402Escalations.get(makeScopedKey({ tenantId, id: normalizedEscalationId })) ?? null;
+    }
+  };
+
+  store.listX402Escalations = async function listX402Escalations({
+    tenantId = DEFAULT_TENANT_ID,
+    gateId = null,
+    agentId = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const gateFilter = gateId === null || gateId === undefined || String(gateId).trim() === "" ? null : String(gateId).trim();
+    const agentFilter = agentId === null || agentId === undefined || String(agentId).trim() === "" ? null : String(agentId).trim();
+    const statusFilter = status === null || status === undefined || String(status).trim() === "" ? null : String(status).trim().toLowerCase();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_escalation'
+          ORDER BY updated_at DESC, aggregate_id ASC
+        `,
+        [tenantId]
+      );
+      const rows = res.rows.map(x402EscalationSnapshotRowToRecord).filter(Boolean);
+      const filtered = [];
+      for (const row of rows) {
+        if (gateFilter && String(row.gateId ?? "") !== gateFilter) continue;
+        if (agentFilter && String(row.requesterAgentId ?? "") !== agentFilter) continue;
+        if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+        filtered.push(row);
+      }
+      filtered.sort((left, right) => {
+        const leftAt = Number.isFinite(Date.parse(String(left?.updatedAt ?? left?.createdAt ?? "")))
+          ? Date.parse(String(left.updatedAt ?? left.createdAt))
+          : Number.NaN;
+        const rightAt = Number.isFinite(Date.parse(String(right?.updatedAt ?? right?.createdAt ?? "")))
+          ? Date.parse(String(right.updatedAt ?? right.createdAt))
+          : Number.NaN;
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        return String(left?.escalationId ?? "").localeCompare(String(right?.escalationId ?? ""));
+      });
+      return filtered.slice(safeOffset, safeOffset + safeLimit);
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      const out = [];
+      for (const row of store.x402Escalations.values()) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (gateFilter && String(row.gateId ?? "") !== gateFilter) continue;
+        if (agentFilter && String(row.requesterAgentId ?? "") !== agentFilter) continue;
+        if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+        out.push(row);
+      }
+      out.sort((left, right) => {
+        const leftAt = Number.isFinite(Date.parse(String(left?.updatedAt ?? left?.createdAt ?? "")))
+          ? Date.parse(String(left.updatedAt ?? left.createdAt))
+          : Number.NaN;
+        const rightAt = Number.isFinite(Date.parse(String(right?.updatedAt ?? right?.createdAt ?? "")))
+          ? Date.parse(String(right.updatedAt ?? right.createdAt))
+          : Number.NaN;
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        return String(left?.escalationId ?? "").localeCompare(String(right?.escalationId ?? ""));
+      });
+      return out.slice(safeOffset, safeOffset + safeLimit);
+    }
+  };
+
+  store.listX402EscalationEvents = async function listX402EscalationEvents({
+    tenantId = DEFAULT_TENANT_ID,
+    escalationId = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const escalationFilter =
+      escalationId === null || escalationId === undefined || String(escalationId).trim() === "" ? null : String(escalationId).trim();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_escalation_event'
+          ORDER BY updated_at ASC, aggregate_id ASC
+        `,
+        [tenantId]
+      );
+      const rows = res.rows.map(x402EscalationEventSnapshotRowToRecord).filter(Boolean);
+      const filtered = escalationFilter ? rows.filter((row) => String(row.escalationId ?? "") === escalationFilter) : rows;
+      return filtered.slice(safeOffset, safeOffset + safeLimit);
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      const out = [];
+      for (const row of store.x402EscalationEvents.values()) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (escalationFilter && String(row.escalationId ?? "") !== escalationFilter) continue;
+        out.push(row);
+      }
+      out.sort((left, right) => {
+        const leftAt = Number.isFinite(Date.parse(String(left?.occurredAt ?? ""))) ? Date.parse(String(left.occurredAt)) : Number.NaN;
+        const rightAt = Number.isFinite(Date.parse(String(right?.occurredAt ?? ""))) ? Date.parse(String(right.occurredAt)) : Number.NaN;
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && leftAt !== rightAt) return leftAt - rightAt;
+        return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
+      });
+      return out.slice(safeOffset, safeOffset + safeLimit);
+    }
+  };
+
+  store.getX402EscalationOverrideUsage = async function getX402EscalationOverrideUsage({
+    tenantId = DEFAULT_TENANT_ID,
+    overrideId
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(overrideId, "overrideId");
+    const normalizedOverrideId = String(overrideId).trim();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_escalation_override_usage' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, normalizedOverrideId]
+      );
+      return res.rows.length ? x402EscalationOverrideUsageSnapshotRowToRecord(res.rows[0]) : null;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return store.x402EscalationOverrideUsage.get(makeScopedKey({ tenantId, id: normalizedOverrideId })) ?? null;
+    }
+  };
+
   store.getAgentIdentity = async function getAgentIdentity({ tenantId = DEFAULT_TENANT_ID, agentId } = {}) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     assertNonEmptyString(agentId, "agentId");
