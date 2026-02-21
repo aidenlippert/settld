@@ -304,6 +304,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     operators: new Map(), // `${tenantId}\n${operatorId}` -> snapshot
     operatorEvents: new Map(), // `${tenantId}\n${operatorId}` -> chained events
     agentIdentities: new Map(), // `${tenantId}\n${agentId}` -> AgentIdentity.v1 record
+    agentPassports: new Map(), // `${tenantId}\n${agentId}` -> AgentPassport.v1 record
     agentWallets: new Map(), // `${tenantId}\n${agentId}` -> AgentWallet.v1 record
     agentRuns: new Map(), // `${tenantId}\n${runId}` -> AgentRun.v1 snapshot
     agentRunEvents: new Map(), // `${tenantId}\n${runId}` -> AgentEvent.v1[]
@@ -827,6 +828,39 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     }
     out.sort((left, right) => String(left.agentId ?? "").localeCompare(String(right.agentId ?? "")));
     return out.slice(safeOffset, safeOffset + safeLimit);
+  };
+
+  store.putAgentPassport = async function putAgentPassport({ tenantId = DEFAULT_TENANT_ID, agentPassport, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!agentPassport || typeof agentPassport !== "object" || Array.isArray(agentPassport)) {
+      throw new TypeError("agentPassport is required");
+    }
+    const agentId = typeof agentPassport.agentId === "string" ? agentPassport.agentId.trim() : "";
+    if (!agentId) throw new TypeError("agentPassport.agentId is required");
+    const status = typeof agentPassport.status === "string" ? agentPassport.status.trim().toLowerCase() : "";
+    if (status !== "active" && status !== "suspended" && status !== "revoked") {
+      throw new TypeError("agentPassport.status must be active|suspended|revoked");
+    }
+    const at = agentPassport.updatedAt ?? agentPassport.createdAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [
+        {
+          kind: "AGENT_PASSPORT_UPSERT",
+          tenantId,
+          agentId,
+          agentPassport: { ...agentPassport, tenantId, agentId, status }
+        }
+      ],
+      audit
+    });
+    return store.agentPassports.get(makeScopedKey({ tenantId, id: agentId })) ?? null;
+  };
+
+  store.getAgentPassport = async function getAgentPassport({ tenantId = DEFAULT_TENANT_ID, agentId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof agentId !== "string" || agentId.trim() === "") throw new TypeError("agentId is required");
+    return store.agentPassports.get(makeScopedKey({ tenantId, id: String(agentId) })) ?? null;
   };
 
   store.getAgentWallet = async function getAgentWallet({ tenantId = DEFAULT_TENANT_ID, agentId } = {}) {

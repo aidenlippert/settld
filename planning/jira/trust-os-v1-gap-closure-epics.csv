@@ -1,0 +1,3 @@
+Epic Key,Summary,Description,Owner,Priority,Labels
+STLD-E2480,Trust OS v1 Contract + Gate Hardening,"Close remaining Trust OS v1 governance and verification gaps by formalizing hard guarantees, authority boundaries, adapter invariants, and no-bypass evidence gates.",Platform + PM + Security,Highest,"trust-os,contract,release-gates,hardening"
+

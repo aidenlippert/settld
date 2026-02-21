@@ -385,6 +385,480 @@
           }
         }
       },
+      "AgentPassportV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "passportId",
+          "agentId",
+          "tenantId",
+          "principalRef",
+          "identityAnchors",
+          "delegationRoot",
+          "policyEnvelope",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "sponsorRef",
+          "agentKeyId",
+          "delegationRef",
+          "lineageRequired"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "AgentPassport.v1"
+            ]
+          },
+          "passportId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "principalRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "principalType",
+              "principalId"
+            ],
+            "properties": {
+              "principalType": {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "business",
+                  "service",
+                  "dao"
+                ]
+              },
+              "principalId": {
+                "type": "string"
+              },
+              "jurisdiction": {
+                "type": "string"
+              }
+            }
+          },
+          "identityAnchors": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "jwksUri",
+              "activeKeyId",
+              "keysetHash"
+            ],
+            "properties": {
+              "did": {
+                "type": "string"
+              },
+              "jwksUri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "activeKeyId": {
+                "type": "string"
+              },
+              "keysetHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          },
+          "delegationRoot": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rootGrantId",
+              "rootGrantHash",
+              "issuedAt"
+            ],
+            "properties": {
+              "rootGrantId": {
+                "type": "string"
+              },
+              "rootGrantHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "issuedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "revokedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          },
+          "capabilityCredentials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "policyEnvelope": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "maxPerCallCents",
+              "maxDailyCents",
+              "allowedRiskClasses"
+            ],
+            "properties": {
+              "maxPerCallCents": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxDailyCents": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "allowedRiskClasses": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "compute",
+                    "action",
+                    "financial"
+                  ]
+                }
+              },
+              "requireApprovalAboveCents": {
+                "type": "integer",
+                "minimum": 0,
+                "nullable": true
+              },
+              "allowlistRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended",
+              "revoked"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sponsorRef": {
+            "type": "string"
+          },
+          "sponsorWalletRef": {
+            "type": "string"
+          },
+          "agentKeyId": {
+            "type": "string"
+          },
+          "delegationRef": {
+            "type": "string"
+          },
+          "policyRef": {
+            "type": "string"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "delegationDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDelegationDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lineageRequired": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AgentPassportUpsertRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentPassport"
+        ],
+        "properties": {
+          "agentPassport": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "passportId",
+              "agentId",
+              "tenantId",
+              "principalRef",
+              "identityAnchors",
+              "delegationRoot",
+              "policyEnvelope",
+              "status",
+              "createdAt",
+              "updatedAt",
+              "sponsorRef",
+              "agentKeyId",
+              "delegationRef",
+              "lineageRequired"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "string",
+                "enum": [
+                  "AgentPassport.v1"
+                ]
+              },
+              "passportId": {
+                "type": "string"
+              },
+              "agentId": {
+                "type": "string"
+              },
+              "tenantId": {
+                "type": "string"
+              },
+              "principalRef": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "principalType",
+                  "principalId"
+                ],
+                "properties": {
+                  "principalType": {
+                    "type": "string",
+                    "enum": [
+                      "human",
+                      "business",
+                      "service",
+                      "dao"
+                    ]
+                  },
+                  "principalId": {
+                    "type": "string"
+                  },
+                  "jurisdiction": {
+                    "type": "string"
+                  }
+                }
+              },
+              "identityAnchors": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "jwksUri",
+                  "activeKeyId",
+                  "keysetHash"
+                ],
+                "properties": {
+                  "did": {
+                    "type": "string"
+                  },
+                  "jwksUri": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "activeKeyId": {
+                    "type": "string"
+                  },
+                  "keysetHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              },
+              "delegationRoot": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "rootGrantId",
+                  "rootGrantHash",
+                  "issuedAt"
+                ],
+                "properties": {
+                  "rootGrantId": {
+                    "type": "string"
+                  },
+                  "rootGrantHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "issuedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "revokedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  }
+                }
+              },
+              "capabilityCredentials": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "policyEnvelope": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "maxPerCallCents",
+                  "maxDailyCents",
+                  "allowedRiskClasses"
+                ],
+                "properties": {
+                  "maxPerCallCents": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maxDailyCents": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "allowedRiskClasses": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "compute",
+                        "action",
+                        "financial"
+                      ]
+                    }
+                  },
+                  "requireApprovalAboveCents": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "nullable": true
+                  },
+                  "allowlistRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "suspended",
+                  "revoked"
+                ]
+              },
+              "metadata": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": true
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "sponsorRef": {
+                "type": "string"
+              },
+              "sponsorWalletRef": {
+                "type": "string"
+              },
+              "agentKeyId": {
+                "type": "string"
+              },
+              "delegationRef": {
+                "type": "string"
+              },
+              "policyRef": {
+                "type": "string"
+              },
+              "policyVersion": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "delegationDepth": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxDelegationDepth": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "lineageRequired": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "AgentPassportRevokeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reasonCode": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "ToolCallAgreementV1": {
         "type": "object",
         "additionalProperties": false,
@@ -37704,6 +38178,1496 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{agentId}/passport": {
+      "get": {
+        "summary": "Get an issued agent passport",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "agentPassport": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "passportId",
+                        "agentId",
+                        "tenantId",
+                        "principalRef",
+                        "identityAnchors",
+                        "delegationRoot",
+                        "policyEnvelope",
+                        "status",
+                        "createdAt",
+                        "updatedAt",
+                        "sponsorRef",
+                        "agentKeyId",
+                        "delegationRef",
+                        "lineageRequired"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "AgentPassport.v1"
+                          ]
+                        },
+                        "passportId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "principalRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "principalType",
+                            "principalId"
+                          ],
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": [
+                                "human",
+                                "business",
+                                "service",
+                                "dao"
+                              ]
+                            },
+                            "principalId": {
+                              "type": "string"
+                            },
+                            "jurisdiction": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "identityAnchors": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "jwksUri",
+                            "activeKeyId",
+                            "keysetHash"
+                          ],
+                          "properties": {
+                            "did": {
+                              "type": "string"
+                            },
+                            "jwksUri": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "activeKeyId": {
+                              "type": "string"
+                            },
+                            "keysetHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          }
+                        },
+                        "delegationRoot": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "rootGrantId",
+                            "rootGrantHash",
+                            "issuedAt"
+                          ],
+                          "properties": {
+                            "rootGrantId": {
+                              "type": "string"
+                            },
+                            "rootGrantHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "issuedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "revokedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "capabilityCredentials": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "policyEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "maxPerCallCents",
+                            "maxDailyCents",
+                            "allowedRiskClasses"
+                          ],
+                          "properties": {
+                            "maxPerCallCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "maxDailyCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "allowedRiskClasses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "read",
+                                  "compute",
+                                  "action",
+                                  "financial"
+                                ]
+                              }
+                            },
+                            "requireApprovalAboveCents": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "nullable": true
+                            },
+                            "allowlistRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "suspended",
+                            "revoked"
+                          ]
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "nullable": true,
+                          "additionalProperties": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "sponsorRef": {
+                          "type": "string"
+                        },
+                        "sponsorWalletRef": {
+                          "type": "string"
+                        },
+                        "agentKeyId": {
+                          "type": "string"
+                        },
+                        "delegationRef": {
+                          "type": "string"
+                        },
+                        "policyRef": {
+                          "type": "string"
+                        },
+                        "policyVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "delegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxDelegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lineageRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Issue or rotate an agent passport",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "agentPassport"
+                ],
+                "properties": {
+                  "agentPassport": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "passportId",
+                      "agentId",
+                      "tenantId",
+                      "principalRef",
+                      "identityAnchors",
+                      "delegationRoot",
+                      "policyEnvelope",
+                      "status",
+                      "createdAt",
+                      "updatedAt",
+                      "sponsorRef",
+                      "agentKeyId",
+                      "delegationRef",
+                      "lineageRequired"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "string",
+                        "enum": [
+                          "AgentPassport.v1"
+                        ]
+                      },
+                      "passportId": {
+                        "type": "string"
+                      },
+                      "agentId": {
+                        "type": "string"
+                      },
+                      "tenantId": {
+                        "type": "string"
+                      },
+                      "principalRef": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "principalType",
+                          "principalId"
+                        ],
+                        "properties": {
+                          "principalType": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "business",
+                              "service",
+                              "dao"
+                            ]
+                          },
+                          "principalId": {
+                            "type": "string"
+                          },
+                          "jurisdiction": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "identityAnchors": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "jwksUri",
+                          "activeKeyId",
+                          "keysetHash"
+                        ],
+                        "properties": {
+                          "did": {
+                            "type": "string"
+                          },
+                          "jwksUri": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "activeKeyId": {
+                            "type": "string"
+                          },
+                          "keysetHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          }
+                        }
+                      },
+                      "delegationRoot": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "rootGrantId",
+                          "rootGrantHash",
+                          "issuedAt"
+                        ],
+                        "properties": {
+                          "rootGrantId": {
+                            "type": "string"
+                          },
+                          "rootGrantHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "issuedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "revokedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        }
+                      },
+                      "capabilityCredentials": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      },
+                      "policyEnvelope": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "maxPerCallCents",
+                          "maxDailyCents",
+                          "allowedRiskClasses"
+                        ],
+                        "properties": {
+                          "maxPerCallCents": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "maxDailyCents": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "allowedRiskClasses": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "read",
+                                "compute",
+                                "action",
+                                "financial"
+                              ]
+                            }
+                          },
+                          "requireApprovalAboveCents": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "nullable": true
+                          },
+                          "allowlistRefs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "suspended",
+                          "revoked"
+                        ]
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": true
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "sponsorRef": {
+                        "type": "string"
+                      },
+                      "sponsorWalletRef": {
+                        "type": "string"
+                      },
+                      "agentKeyId": {
+                        "type": "string"
+                      },
+                      "delegationRef": {
+                        "type": "string"
+                      },
+                      "policyRef": {
+                        "type": "string"
+                      },
+                      "policyVersion": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "delegationDepth": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxDelegationDepth": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "lineageRequired": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "agentPassport": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "passportId",
+                        "agentId",
+                        "tenantId",
+                        "principalRef",
+                        "identityAnchors",
+                        "delegationRoot",
+                        "policyEnvelope",
+                        "status",
+                        "createdAt",
+                        "updatedAt",
+                        "sponsorRef",
+                        "agentKeyId",
+                        "delegationRef",
+                        "lineageRequired"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "AgentPassport.v1"
+                          ]
+                        },
+                        "passportId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "principalRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "principalType",
+                            "principalId"
+                          ],
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": [
+                                "human",
+                                "business",
+                                "service",
+                                "dao"
+                              ]
+                            },
+                            "principalId": {
+                              "type": "string"
+                            },
+                            "jurisdiction": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "identityAnchors": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "jwksUri",
+                            "activeKeyId",
+                            "keysetHash"
+                          ],
+                          "properties": {
+                            "did": {
+                              "type": "string"
+                            },
+                            "jwksUri": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "activeKeyId": {
+                              "type": "string"
+                            },
+                            "keysetHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          }
+                        },
+                        "delegationRoot": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "rootGrantId",
+                            "rootGrantHash",
+                            "issuedAt"
+                          ],
+                          "properties": {
+                            "rootGrantId": {
+                              "type": "string"
+                            },
+                            "rootGrantHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "issuedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "revokedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "capabilityCredentials": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "policyEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "maxPerCallCents",
+                            "maxDailyCents",
+                            "allowedRiskClasses"
+                          ],
+                          "properties": {
+                            "maxPerCallCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "maxDailyCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "allowedRiskClasses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "read",
+                                  "compute",
+                                  "action",
+                                  "financial"
+                                ]
+                              }
+                            },
+                            "requireApprovalAboveCents": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "nullable": true
+                            },
+                            "allowlistRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "suspended",
+                            "revoked"
+                          ]
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "nullable": true,
+                          "additionalProperties": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "sponsorRef": {
+                          "type": "string"
+                        },
+                        "sponsorWalletRef": {
+                          "type": "string"
+                        },
+                        "agentKeyId": {
+                          "type": "string"
+                        },
+                        "delegationRef": {
+                          "type": "string"
+                        },
+                        "policyRef": {
+                          "type": "string"
+                        },
+                        "policyVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "delegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxDelegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lineageRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "agentPassport": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "passportId",
+                        "agentId",
+                        "tenantId",
+                        "principalRef",
+                        "identityAnchors",
+                        "delegationRoot",
+                        "policyEnvelope",
+                        "status",
+                        "createdAt",
+                        "updatedAt",
+                        "sponsorRef",
+                        "agentKeyId",
+                        "delegationRef",
+                        "lineageRequired"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "AgentPassport.v1"
+                          ]
+                        },
+                        "passportId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "principalRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "principalType",
+                            "principalId"
+                          ],
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": [
+                                "human",
+                                "business",
+                                "service",
+                                "dao"
+                              ]
+                            },
+                            "principalId": {
+                              "type": "string"
+                            },
+                            "jurisdiction": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "identityAnchors": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "jwksUri",
+                            "activeKeyId",
+                            "keysetHash"
+                          ],
+                          "properties": {
+                            "did": {
+                              "type": "string"
+                            },
+                            "jwksUri": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "activeKeyId": {
+                              "type": "string"
+                            },
+                            "keysetHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          }
+                        },
+                        "delegationRoot": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "rootGrantId",
+                            "rootGrantHash",
+                            "issuedAt"
+                          ],
+                          "properties": {
+                            "rootGrantId": {
+                              "type": "string"
+                            },
+                            "rootGrantHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "issuedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "revokedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "capabilityCredentials": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "policyEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "maxPerCallCents",
+                            "maxDailyCents",
+                            "allowedRiskClasses"
+                          ],
+                          "properties": {
+                            "maxPerCallCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "maxDailyCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "allowedRiskClasses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "read",
+                                  "compute",
+                                  "action",
+                                  "financial"
+                                ]
+                              }
+                            },
+                            "requireApprovalAboveCents": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "nullable": true
+                            },
+                            "allowlistRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "suspended",
+                            "revoked"
+                          ]
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "nullable": true,
+                          "additionalProperties": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "sponsorRef": {
+                          "type": "string"
+                        },
+                        "sponsorWalletRef": {
+                          "type": "string"
+                        },
+                        "agentKeyId": {
+                          "type": "string"
+                        },
+                        "delegationRef": {
+                          "type": "string"
+                        },
+                        "policyRef": {
+                          "type": "string"
+                        },
+                        "policyVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "delegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxDelegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lineageRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{agentId}/passport/revoke": {
+      "post": {
+        "summary": "Revoke an issued agent passport",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-settld-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "revokedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "reasonCode": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "agentPassport": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "passportId",
+                        "agentId",
+                        "tenantId",
+                        "principalRef",
+                        "identityAnchors",
+                        "delegationRoot",
+                        "policyEnvelope",
+                        "status",
+                        "createdAt",
+                        "updatedAt",
+                        "sponsorRef",
+                        "agentKeyId",
+                        "delegationRef",
+                        "lineageRequired"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "AgentPassport.v1"
+                          ]
+                        },
+                        "passportId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "principalRef": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "principalType",
+                            "principalId"
+                          ],
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": [
+                                "human",
+                                "business",
+                                "service",
+                                "dao"
+                              ]
+                            },
+                            "principalId": {
+                              "type": "string"
+                            },
+                            "jurisdiction": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "identityAnchors": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "jwksUri",
+                            "activeKeyId",
+                            "keysetHash"
+                          ],
+                          "properties": {
+                            "did": {
+                              "type": "string"
+                            },
+                            "jwksUri": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "activeKeyId": {
+                              "type": "string"
+                            },
+                            "keysetHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          }
+                        },
+                        "delegationRoot": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "rootGrantId",
+                            "rootGrantHash",
+                            "issuedAt"
+                          ],
+                          "properties": {
+                            "rootGrantId": {
+                              "type": "string"
+                            },
+                            "rootGrantHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "issuedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "revokedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "capabilityCredentials": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "policyEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "maxPerCallCents",
+                            "maxDailyCents",
+                            "allowedRiskClasses"
+                          ],
+                          "properties": {
+                            "maxPerCallCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "maxDailyCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "allowedRiskClasses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "read",
+                                  "compute",
+                                  "action",
+                                  "financial"
+                                ]
+                              }
+                            },
+                            "requireApprovalAboveCents": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "nullable": true
+                            },
+                            "allowlistRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "suspended",
+                            "revoked"
+                          ]
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "nullable": true,
+                          "additionalProperties": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "sponsorRef": {
+                          "type": "string"
+                        },
+                        "sponsorWalletRef": {
+                          "type": "string"
+                        },
+                        "agentKeyId": {
+                          "type": "string"
+                        },
+                        "delegationRef": {
+                          "type": "string"
+                        },
+                        "policyRef": {
+                          "type": "string"
+                        },
+                        "policyVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "delegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxDelegationDepth": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lineageRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {

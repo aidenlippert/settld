@@ -11421,6 +11421,12 @@ export function createApi({
     throw new TypeError("agent identities not supported for this store");
   }
 
+  async function getAgentPassportRecord({ tenantId, agentId }) {
+    if (typeof store.getAgentPassport === "function") return store.getAgentPassport({ tenantId, agentId });
+    if (store.agentPassports instanceof Map) return store.agentPassports.get(makeScopedKey({ tenantId, id: String(agentId) })) ?? null;
+    throw new TypeError("agent passports not supported for this store");
+  }
+
   async function getX402AgentLifecycleRecord({ tenantId, agentId }) {
     if (typeof store.getX402AgentLifecycle === "function") return store.getX402AgentLifecycle({ tenantId, agentId });
     if (store.x402AgentLifecycles instanceof Map) return store.x402AgentLifecycles.get(makeScopedKey({ tenantId, id: String(agentId) })) ?? null;
@@ -43623,6 +43629,213 @@ export function createApi({
             reputationWindow
           });
           return sendJson(res, 200, { reputation });
+        }
+
+        if (parts[2] === "passport") {
+          const hasPassportStore = typeof store.getAgentPassport === "function" || store.agentPassports instanceof Map;
+          if (!hasPassportStore) return sendError(res, 501, "agent passports not supported for this store");
+
+          if (req.method === "GET" && parts.length === 3) {
+            let agentPassport = null;
+            try {
+              agentPassport = await getAgentPassportRecord({ tenantId, agentId });
+            } catch (err) {
+              return sendError(res, 400, "invalid agent passport query", { message: err?.message });
+            }
+            if (!agentPassport) return sendError(res, 404, "agent passport not found");
+            return sendJson(res, 200, { agentPassport });
+          }
+
+          if (req.method === "POST" && parts.length === 3) {
+            if (!requireProtocolHeaderForWrite(req, res)) return;
+            const body = await readJsonBody(req);
+            let idemStoreKey = null;
+            let idemRequestHash = null;
+            try {
+              ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+            } catch (err) {
+              return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+            }
+            if (idemStoreKey) {
+              const existing = store.idempotency.get(idemStoreKey);
+              if (existing) {
+                if (existing.requestHash !== idemRequestHash) {
+                  return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+                }
+                return sendJson(res, existing.statusCode, existing.body);
+              }
+            }
+
+            let agentPassport = null;
+            try {
+              const agentPassportInput =
+                body?.agentPassport && typeof body.agentPassport === "object" && !Array.isArray(body.agentPassport)
+                  ? body.agentPassport
+                  : body;
+              agentPassport = normalizeX402AgentPassportInput(agentPassportInput, { fieldPath: "agentPassport", allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid agent passport", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            if (!x402AgentPassportHasProtocolEnvelope(agentPassport)) {
+              return sendError(
+                res,
+                400,
+                "invalid agent passport",
+                { message: "agent passport must include full protocol envelope fields" },
+                { code: "X402_AGENT_PASSPORT_PROTOCOL_ENVELOPE_REQUIRED" }
+              );
+            }
+
+            const passportAgentId = typeof agentPassport.agentId === "string" ? agentPassport.agentId.trim() : "";
+            if (passportAgentId !== agentId) {
+              return sendError(res, 409, "agent passport agentId mismatch", { agentId, passportAgentId }, { code: "AGENT_PASSPORT_AGENT_MISMATCH" });
+            }
+            const passportTenantId = typeof agentPassport.tenantId === "string" ? normalizeTenant(agentPassport.tenantId) : null;
+            if (passportTenantId !== tenantId) {
+              return sendError(
+                res,
+                409,
+                "agent passport tenantId mismatch",
+                { tenantId, passportTenantId },
+                { code: "AGENT_PASSPORT_TENANT_MISMATCH" }
+              );
+            }
+
+            let existingPassport = null;
+            try {
+              existingPassport = await getAgentPassportRecord({ tenantId, agentId });
+            } catch (err) {
+              return sendError(res, 400, "invalid agent passport query", { message: err?.message });
+            }
+            const nowAt = nowIso();
+            const createdAt =
+              existingPassport && typeof existingPassport.createdAt === "string" && existingPassport.createdAt.trim() !== ""
+                ? existingPassport.createdAt.trim()
+                : agentPassport.createdAt;
+            const persistedPassport = normalizeForCanonicalJson(
+              {
+                ...agentPassport,
+                tenantId,
+                agentId,
+                createdAt,
+                updatedAt: nowAt
+              },
+              { path: "$" }
+            );
+            const statusCode = existingPassport ? 200 : 201;
+            const responseBody = { agentPassport: persistedPassport };
+            const ops = [{ kind: "AGENT_PASSPORT_UPSERT", tenantId, agentId, agentPassport: persistedPassport }];
+            if (idemStoreKey) {
+              ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode, body: responseBody } });
+            }
+            await commitTx(ops);
+            return sendJson(res, statusCode, responseBody);
+          }
+
+          if (req.method === "POST" && parts[3] === "revoke" && parts.length === 4) {
+            if (!requireProtocolHeaderForWrite(req, res)) return;
+            const body = await readJsonBody(req);
+            let idemStoreKey = null;
+            let idemRequestHash = null;
+            try {
+              ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+            } catch (err) {
+              return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+            }
+            if (idemStoreKey) {
+              const existing = store.idempotency.get(idemStoreKey);
+              if (existing) {
+                if (existing.requestHash !== idemRequestHash) {
+                  return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+                }
+                return sendJson(res, existing.statusCode, existing.body);
+              }
+            }
+
+            let existingPassport = null;
+            try {
+              existingPassport = await getAgentPassportRecord({ tenantId, agentId });
+            } catch (err) {
+              return sendError(res, 400, "invalid agent passport query", { message: err?.message });
+            }
+            if (!existingPassport) return sendError(res, 404, "agent passport not found");
+            if (!x402AgentPassportHasProtocolEnvelope(existingPassport)) {
+              return sendError(
+                res,
+                409,
+                "agent passport does not include protocol envelope",
+                null,
+                { code: "X402_AGENT_PASSPORT_PROTOCOL_ENVELOPE_REQUIRED" }
+              );
+            }
+
+            const revokedAtInput =
+              typeof body?.revokedAt === "string" && body.revokedAt.trim() !== ""
+                ? body.revokedAt.trim()
+                : body?.revokedAt === null || body?.revokedAt === undefined || body?.revokedAt === ""
+                  ? null
+                  : null;
+            if (body?.revokedAt !== null && body?.revokedAt !== undefined && body?.revokedAt !== "" && revokedAtInput === null) {
+              return sendError(res, 400, "revokedAt must be an ISO timestamp or null");
+            }
+            const nowAt = revokedAtInput ?? nowIso();
+            if (!Number.isFinite(Date.parse(nowAt))) return sendError(res, 400, "revokedAt must be an ISO timestamp or null");
+
+            let reasonCode = null;
+            try {
+              reasonCode = normalizeOptionalX402RefInput(body?.reasonCode ?? null, "reasonCode", { allowNull: true, max: 200 });
+            } catch (err) {
+              return sendError(res, 400, "invalid reasonCode", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            const reasonMessage =
+              typeof body?.reason === "string" && body.reason.trim() !== "" ? body.reason.trim().slice(0, 500) : null;
+
+            const existingMetadata =
+              existingPassport.metadata && typeof existingPassport.metadata === "object" && !Array.isArray(existingPassport.metadata)
+                ? existingPassport.metadata
+                : null;
+            const lifecycleMetadataBase =
+              existingMetadata?.lifecycle && typeof existingMetadata.lifecycle === "object" && !Array.isArray(existingMetadata.lifecycle)
+                ? existingMetadata.lifecycle
+                : {};
+            const nextMetadata = normalizeForCanonicalJson(
+              {
+                ...(existingMetadata ? existingMetadata : {}),
+                lifecycle: {
+                  ...lifecycleMetadataBase,
+                  revokedAt: nowAt,
+                  ...(reasonCode ? { reasonCode } : {}),
+                  ...(reasonMessage ? { reasonMessage } : {})
+                }
+              },
+              { path: "$.metadata" }
+            );
+
+            const nextPassportSeed = {
+              ...existingPassport,
+              status: "revoked",
+              updatedAt: nowAt,
+              delegationRoot: {
+                ...existingPassport.delegationRoot,
+                revokedAt: nowAt
+              },
+              metadata: nextMetadata
+            };
+
+            let revokedPassport = null;
+            try {
+              revokedPassport = normalizeX402AgentPassportInput(nextPassportSeed, { fieldPath: "agentPassport", allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid agent passport revoke payload", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            const responseBody = { agentPassport: revokedPassport };
+            const ops = [{ kind: "AGENT_PASSPORT_UPSERT", tenantId, agentId, agentPassport: revokedPassport }];
+            if (idemStoreKey) {
+              ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+            }
+            await commitTx(ops);
+            return sendJson(res, 200, responseBody);
+          }
         }
 
         if (parts[2] === "wallet") {

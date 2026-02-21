@@ -14,6 +14,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 - Policy pack quickstart doc: `docs/QUICKSTART_POLICY_PACKS.md`.
 - Ops HITL x402 escalation smoke runner: `scripts/ops/run-x402-hitl-smoke.mjs` executes `blocked -> escalation -> approve|deny -> receipt` using live `/x402/gate/*` and `/x402/receipts/*` endpoints and writes `artifacts/ops/x402-hitl-smoke.json`.
 - npm alias `ops:x402:hitl:smoke` and runbook command in `mkdocs/docs/runbooks/operations.md` for operator execution.
+- Agent passport lifecycle API for registered agents: `GET|POST /agents/{agentId}/passport` and `POST /agents/{agentId}/passport/revoke`, with idempotent writes and store support in memory + Postgres.
 - Public MCP distribution path:
   - npm-published MCP runtime assets (`scripts/mcp/*`, `docs/QUICKSTART_MCP*.md`) are now included in package files.
   - New CLI entrypoint `settld-mcp` (`bin/settld-mcp`) for direct host MCP registration.

@@ -153,6 +153,8 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.months.clear();
     if (!(store.agentRuns instanceof Map)) store.agentRuns = new Map();
     store.agentRuns.clear();
+    if (!(store.agentPassports instanceof Map)) store.agentPassports = new Map();
+    store.agentPassports.clear();
     if (!(store.arbitrationCases instanceof Map)) store.arbitrationCases = new Map();
     store.arbitrationCases.clear();
     if (!(store.agreementDelegations instanceof Map)) store.agreementDelegations = new Map();
@@ -197,6 +199,17 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       if (type === "operator") store.operators.set(key, { ...snap, tenantId: snap?.tenantId ?? tenantId });
       if (type === "month") store.months.set(key, { ...snap, tenantId: snap?.tenantId ?? tenantId });
       if (type === "agent_run") store.agentRuns.set(key, { ...snap, tenantId: snap?.tenantId ?? tenantId, runId: snap?.runId ?? String(id) });
+      if (type === "agent_passport") {
+        const status = typeof snap?.status === "string" ? snap.status.trim().toLowerCase() : "";
+        if (status === "active" || status === "suspended" || status === "revoked") {
+          store.agentPassports.set(key, {
+            ...snap,
+            tenantId: snap?.tenantId ?? tenantId,
+            agentId: snap?.agentId ?? String(id),
+            status
+          });
+        }
+      }
       if (type === "arbitration_case") {
         store.arbitrationCases.set(key, {
           ...snap,
@@ -862,6 +875,26 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     };
   }
 
+  function agentPassportSnapshotRowToRecord(row) {
+    const passport = row?.snapshot_json ?? null;
+    if (!passport || typeof passport !== "object" || Array.isArray(passport)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? passport?.tenantId ?? DEFAULT_TENANT_ID);
+    const agentId = row?.aggregate_id ? String(row.aggregate_id) : passport?.agentId ? String(passport.agentId) : null;
+    if (!agentId) return null;
+    const status = passport?.status ? String(passport.status).trim().toLowerCase() : "active";
+    if (status !== "active" && status !== "suspended" && status !== "revoked") return null;
+    const createdAt = parseIsoOrNull(passport?.createdAt) ?? parseIsoOrNull(row?.updated_at) ?? new Date(0).toISOString();
+    const updatedAt = parseIsoOrNull(passport?.updatedAt) ?? parseIsoOrNull(row?.updated_at) ?? createdAt;
+    return {
+      ...passport,
+      tenantId,
+      agentId,
+      status,
+      createdAt,
+      updatedAt
+    };
+  }
+
   async function refreshAgentIdentities() {
     if (!(store.agentIdentities instanceof Map)) store.agentIdentities = new Map();
     store.agentIdentities.clear();
@@ -1360,6 +1393,46 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           updated_at = EXCLUDED.updated_at
       `,
       [tenantId, normalizedAgentId, JSON.stringify(normalizedAgentLifecycle), updatedAt]
+    );
+  }
+
+  async function persistAgentPassport(client, { tenantId, agentId, agentPassport }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!agentPassport || typeof agentPassport !== "object" || Array.isArray(agentPassport)) {
+      throw new TypeError("agentPassport is required");
+    }
+    const normalizedAgentId =
+      agentId && String(agentId).trim() !== ""
+        ? String(agentId).trim()
+        : agentPassport.agentId && String(agentPassport.agentId).trim() !== ""
+          ? String(agentPassport.agentId).trim()
+          : null;
+    if (!normalizedAgentId) throw new TypeError("agentId is required");
+
+    const status = String(agentPassport.status ?? "").trim().toLowerCase();
+    if (status !== "active" && status !== "suspended" && status !== "revoked") {
+      throw new TypeError("agentPassport.status must be active|suspended|revoked");
+    }
+    const createdAt = parseIsoOrNull(agentPassport.createdAt) ?? new Date().toISOString();
+    const updatedAt = parseIsoOrNull(agentPassport.updatedAt) ?? createdAt;
+    const normalizedAgentPassport = {
+      ...agentPassport,
+      tenantId,
+      agentId: normalizedAgentId,
+      status,
+      createdAt,
+      updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'agent_passport', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedAgentId, JSON.stringify(normalizedAgentPassport), updatedAt]
     );
   }
 
@@ -2210,6 +2283,7 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "SIGNER_KEY_UPSERT",
       "SIGNER_KEY_STATUS_SET",
       "AGENT_IDENTITY_UPSERT",
+      "AGENT_PASSPORT_UPSERT",
       "AGENT_WALLET_UPSERT",
       "AGENT_RUN_EVENTS_APPENDED",
       "AGENT_RUN_SETTLEMENT_UPSERT",
@@ -3032,6 +3106,10 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           const tenantId = normalizeTenantId(op.tenantId ?? op.agentIdentity?.tenantId ?? DEFAULT_TENANT_ID);
           await persistAgentIdentity(client, { tenantId, agentIdentity: op.agentIdentity });
         }
+        if (op.kind === "AGENT_PASSPORT_UPSERT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.agentPassport?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistAgentPassport(client, { tenantId, agentId: op.agentId, agentPassport: op.agentPassport });
+        }
         if (op.kind === "AGENT_WALLET_UPSERT") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.wallet?.tenantId ?? DEFAULT_TENANT_ID);
           await persistAgentWallet(client, { tenantId, wallet: op.wallet });
@@ -3646,6 +3724,41 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       out.sort((left, right) => String(left.agentId ?? "").localeCompare(String(right.agentId ?? "")));
       return out.slice(safeOffset, safeOffset + safeLimit);
     }
+  };
+
+  store.getAgentPassport = async function getAgentPassport({ tenantId = DEFAULT_TENANT_ID, agentId } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(agentId, "agentId");
+    const normalizedAgentId = String(agentId).trim();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json, updated_at
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'agent_passport' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, normalizedAgentId]
+      );
+      return res.rows.length ? agentPassportSnapshotRowToRecord(res.rows[0]) : null;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return store.agentPassports.get(makeScopedKey({ tenantId, id: normalizedAgentId })) ?? null;
+    }
+  };
+
+  store.putAgentPassport = async function putAgentPassport({ tenantId = DEFAULT_TENANT_ID, agentPassport } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!agentPassport || typeof agentPassport !== "object" || Array.isArray(agentPassport)) {
+      throw new TypeError("agentPassport is required");
+    }
+    const agentId = typeof agentPassport.agentId === "string" ? agentPassport.agentId.trim() : "";
+    if (!agentId) throw new TypeError("agentPassport.agentId is required");
+    await store.commitTx({
+      at: agentPassport.updatedAt ?? agentPassport.createdAt ?? new Date().toISOString(),
+      ops: [{ kind: "AGENT_PASSPORT_UPSERT", tenantId, agentId, agentPassport: { ...agentPassport, tenantId, agentId } }]
+    });
+    return store.getAgentPassport({ tenantId, agentId });
   };
 
   store.getAgentWallet = async function getAgentWallet({ tenantId = DEFAULT_TENANT_ID, agentId } = {}) {

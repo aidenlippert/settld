@@ -1,0 +1,4 @@
+Epic Key,Summary,Description,Owner,Priority,Labels
+STLD-E2490,Agent Identity and Wallet Orchestration,"Implement deterministic agent identity issuance, wallet assignment, and funding controls for autonomous economic actors.",Platform + Security + Integrations,Highest,"agent-economy,identity,wallet,trust-os"
+STLD-E2491,Autonomy Tiers and Safety Gates,"Ship tiered autonomy controls with release-blocking no-bypass, determinism, and onboarding SLO gates.",Platform + QA + DevEx,Highest,"agent-economy,autonomy,gates,safety"
+

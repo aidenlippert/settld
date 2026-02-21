@@ -1,0 +1,93 @@
+{
+  "epics": [
+    {
+      "Epic Key": "STLD-E2480",
+      "Summary": "Trust OS v1 Contract + Gate Hardening",
+      "Description": "Close remaining Trust OS v1 governance and verification gaps by formalizing hard guarantees, authority boundaries, adapter invariants, and no-bypass evidence gates.",
+      "Owner": "Platform + PM + Security",
+      "Priority": "Highest",
+      "Labels": "trust-os,contract,release-gates,hardening"
+    }
+  ],
+  "tickets": [
+    {
+      "Ticket Key": "STLD-T2480",
+      "Epic Key": "STLD-E2480",
+      "Summary": "Publish canonical Trust OS v1 contract document",
+      "Description": "Freeze a single v1 contract document defining hard guarantees, explicit non-goals, fail-closed semantics, and deterministic evidence requirements.",
+      "Owner": "PM + Architecture",
+      "Estimate": "2d",
+      "Priority": "Highest",
+      "Sprint": "S1",
+      "Dependencies": "",
+      "Labels": "contract,scope,governance",
+      "Acceptance Criteria": "Contract doc is published in docs with in-scope and out-of-scope boundaries; fail-closed guarantees are explicit; release checklist references the contract as a required artifact."
+    },
+    {
+      "Ticket Key": "STLD-T2481",
+      "Epic Key": "STLD-E2480",
+      "Summary": "Add numeric SLO thresholds for Trust OS runtime and onboarding",
+      "Description": "Define and enforce numeric thresholds for policy latency, deterministic hash stability, dispute SLA timing, and time-to-first-verified-receipt.",
+      "Owner": "Platform + DevEx",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "S1",
+      "Dependencies": "STLD-T2480",
+      "Labels": "slo,observability,onboarding",
+      "Acceptance Criteria": "SLO thresholds are documented and measured; CI gates fail when threshold checks regress; weekly reports include baseline and delta per SLO."
+    },
+    {
+      "Ticket Key": "STLD-T2482",
+      "Epic Key": "STLD-E2480",
+      "Summary": "Enforce authority boundary contract for signer and emergency controls",
+      "Description": "Codify who can sign policy, who can rotate/revoke keys, and who can trigger pause/quarantine/kill controls, with rollback requirements.",
+      "Owner": "Security + Backend",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "S1",
+      "Dependencies": "STLD-T2480",
+      "Labels": "authority,signing,emergency-controls",
+      "Acceptance Criteria": "Authority model is documented and tested; unauthorized signer/control actions fail with stable codes; rollback path is verified in automated test flow."
+    },
+    {
+      "Ticket Key": "STLD-T2483",
+      "Epic Key": "STLD-E2480",
+      "Summary": "Require adapter invariant conformance for new rail lanes",
+      "Description": "Block adapter promotion unless shared trust-kernel invariants pass for policy enforcement, replay protection, receipt determinism, and reversal idempotency.",
+      "Owner": "Integrations + QA",
+      "Estimate": "3d",
+      "Priority": "High",
+      "Sprint": "S2",
+      "Dependencies": "STLD-T2481",
+      "Labels": "adapters,conformance,invariants",
+      "Acceptance Criteria": "Adapter conformance suite runs in CI for each lane; merge/release fails on invariant regression; report artifact includes invariant IDs and failed surfaces."
+    },
+    {
+      "Ticket Key": "STLD-T2484",
+      "Epic Key": "STLD-E2480",
+      "Summary": "Add no-bypass negative matrix for MCP and bridge paths",
+      "Description": "Add explicit deny/challenge bypass attempts across stdio MCP, HTTP MCP bridge, and paid tool bridges to prove policy runtime cannot be skipped.",
+      "Owner": "MCP + QA",
+      "Estimate": "2d",
+      "Priority": "Highest",
+      "Sprint": "S1",
+      "Dependencies": "STLD-T2480",
+      "Labels": "mcp,no-bypass,security",
+      "Acceptance Criteria": "Negative matrix test suite covers stdio and HTTP paths; all bypass attempts fail deterministically with stable reason codes; suite is included in required release gates."
+    },
+    {
+      "Ticket Key": "STLD-T2485",
+      "Epic Key": "STLD-E2480",
+      "Summary": "Add deterministic repeat-run export soak check",
+      "Description": "Stress deterministic export paths with repeated runs and assert stable canonical hashes for equivalent inputs.",
+      "Owner": "Protocol + QA",
+      "Estimate": "2d",
+      "Priority": "High",
+      "Sprint": "S2",
+      "Dependencies": "STLD-T2481",
+      "Labels": "determinism,receipts,soak",
+      "Acceptance Criteria": "Repeated export runs for fixed fixtures produce identical canonical hashes; drift is surfaced with artifact diffs; soak check is release-blocking."
+    }
+  ]
+}
+

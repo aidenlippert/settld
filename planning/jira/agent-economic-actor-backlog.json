@@ -1,0 +1,114 @@
+{
+  "epics": [
+    {
+      "Epic Key": "STLD-E2490",
+      "Summary": "Agent Identity and Wallet Orchestration",
+      "Description": "Implement deterministic agent identity issuance, wallet assignment, and funding controls for autonomous economic actors.",
+      "Owner": "Platform + Security + Integrations",
+      "Priority": "Highest",
+      "Labels": "agent-economy,identity,wallet,trust-os"
+    },
+    {
+      "Epic Key": "STLD-E2491",
+      "Summary": "Autonomy Tiers and Safety Gates",
+      "Description": "Ship tiered autonomy controls with release-blocking no-bypass, determinism, and onboarding SLO gates.",
+      "Owner": "Platform + QA + DevEx",
+      "Priority": "Highest",
+      "Labels": "agent-economy,autonomy,gates,safety"
+    }
+  ],
+  "tickets": [
+    {
+      "Ticket Key": "STLD-T2490",
+      "Epic Key": "STLD-E2490",
+      "Summary": "Implement passport issuance and lifecycle endpoint",
+      "Description": "Add API surface to issue, rotate, expire, and revoke `AgentPassport.v1` with auditable lifecycle events.",
+      "Owner": "Backend + Security",
+      "Estimate": "4d",
+      "Priority": "Highest",
+      "Sprint": "S1",
+      "Dependencies": "",
+      "Labels": "passport,identity,lifecycle",
+      "Acceptance Criteria": "Passport issuance endpoint validates schema and signer authority; revoke/expire states are enforced in privileged paid actions; audit trail is queryable."
+    },
+    {
+      "Ticket Key": "STLD-T2491",
+      "Epic Key": "STLD-E2490",
+      "Summary": "Implement deterministic wallet assignment resolver",
+      "Description": "Resolve `sponsorWalletRef + policyRef + policyVersion` from tenant environment profile risk tier and delegation depth.",
+      "Owner": "Backend Platform",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "S1",
+      "Dependencies": "STLD-T2490",
+      "Labels": "wallet-assignment,policy-routing",
+      "Acceptance Criteria": "Resolver returns deterministic mapping for identical inputs; resolver output is embedded into passport and settlement decision metadata; e2e tests cover dedicated vs pooled wallet assignment."
+    },
+    {
+      "Ticket Key": "STLD-T2492",
+      "Epic Key": "STLD-E2490",
+      "Summary": "Add funding policy and top-up automation",
+      "Description": "Introduce threshold-based funding policy for managed and BYO rails with reserve rollback guarantees.",
+      "Owner": "Integrations + Backend",
+      "Estimate": "4d",
+      "Priority": "High",
+      "Sprint": "S1",
+      "Dependencies": "STLD-T2491",
+      "Labels": "funding,topup,reserve",
+      "Acceptance Criteria": "Wallet funding thresholds are configurable per policy; top-up flow emits deterministic events; failed reserve/top-up paths roll back cleanly without double-settlement."
+    },
+    {
+      "Ticket Key": "STLD-T2493",
+      "Epic Key": "STLD-E2490",
+      "Summary": "Bind execution intent to authorization and settlement",
+      "Description": "Require `ExecutionIntent.v1` hash and request fingerprint to match authorize-payment and settlement verification paths.",
+      "Owner": "Backend Platform",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "S2",
+      "Dependencies": "STLD-T2491",
+      "Labels": "execution-intent,binding,replay-protection",
+      "Acceptance Criteria": "Authorize-payment rejects intent mismatch with stable codes; settlement verification rechecks intent binding; mutation/replay attempts fail in deterministic tests."
+    },
+    {
+      "Ticket Key": "STLD-T2494",
+      "Epic Key": "STLD-E2491",
+      "Summary": "Implement autonomy tier policy packs",
+      "Description": "Ship `Tier0..Tier4` policy/profile packs with explicit spend/risk/delegation constraints and upgrade criteria.",
+      "Owner": "Product + Protocol + CLI",
+      "Estimate": "3d",
+      "Priority": "High",
+      "Sprint": "S2",
+      "Dependencies": "STLD-T2493",
+      "Labels": "autonomy-tier,profiles,policy-packs",
+      "Acceptance Criteria": "Tier policy packs are versioned and simulatable via CLI; each tier maps to concrete allowlists and spend limits; migration guidance is documented."
+    },
+    {
+      "Ticket Key": "STLD-T2495",
+      "Epic Key": "STLD-E2491",
+      "Summary": "Add no-bypass and authority boundary gate suite",
+      "Description": "Create release-blocking negative tests for MCP stdio bridge HTTP and gateway paths plus signer/control authority boundary violations.",
+      "Owner": "QA + Security",
+      "Estimate": "3d",
+      "Priority": "Highest",
+      "Sprint": "S2",
+      "Dependencies": "STLD-T2493",
+      "Labels": "no-bypass,authority,gates",
+      "Acceptance Criteria": "Bypass attempts fail deterministically in CI; unauthorized signer/control actions fail with stable codes; suite is mandatory in release workflow."
+    },
+    {
+      "Ticket Key": "STLD-T2496",
+      "Epic Key": "STLD-E2491",
+      "Summary": "Add onboarding and autonomy readiness SLO gates",
+      "Description": "Gate release on first-paid-call runtime SLO and policy decision latency/error SLO across host compatibility matrix.",
+      "Owner": "DevEx + Observability + QA",
+      "Estimate": "2d",
+      "Priority": "Highest",
+      "Sprint": "S2",
+      "Dependencies": "STLD-T2495",
+      "Labels": "slo,onboarding,host-matrix",
+      "Acceptance Criteria": "SLO thresholds are codified and enforced in CI; regression fails release gates; reports include per-host readiness and failure reasons."
+    }
+  ]
+}
+

@@ -105,6 +105,24 @@ export function applyTxRecord(store, record) {
       continue;
     }
 
+    if (kind === "AGENT_PASSPORT_UPSERT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const agentPassport = op.agentPassport ?? null;
+      if (!agentPassport || typeof agentPassport !== "object" || Array.isArray(agentPassport)) {
+        throw new TypeError("AGENT_PASSPORT_UPSERT requires agentPassport");
+      }
+      const agentId = agentPassport.agentId ?? op.agentId ?? null;
+      if (!agentId) throw new TypeError("AGENT_PASSPORT_UPSERT requires agentPassport.agentId");
+      const status = typeof agentPassport.status === "string" ? agentPassport.status.trim().toLowerCase() : "";
+      if (status !== "active" && status !== "suspended" && status !== "revoked") {
+        throw new TypeError("AGENT_PASSPORT_UPSERT requires status active|suspended|revoked");
+      }
+      if (!(store.agentPassports instanceof Map)) store.agentPassports = new Map();
+      const key = makeScopedKey({ tenantId, id: String(agentId) });
+      store.agentPassports.set(key, { ...agentPassport, tenantId, agentId: String(agentId), status });
+      continue;
+    }
+
     if (kind === "AGENT_WALLET_UPSERT") {
       const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
       const wallet = op.wallet ?? null;

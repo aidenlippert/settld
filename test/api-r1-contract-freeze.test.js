@@ -21,6 +21,9 @@ test("R1 API contract freeze: required operations remain published", () => {
   assert.equal(spec?.openapi, "3.0.3");
 
   assertOperation(spec, "/agents/register", "post");
+  assertOperation(spec, "/agents/{agentId}/passport", "get");
+  assertOperation(spec, "/agents/{agentId}/passport", "post");
+  assertOperation(spec, "/agents/{agentId}/passport/revoke", "post");
   assertOperation(spec, "/agents/{agentId}/wallet/credit", "post");
   assertOperation(spec, "/agents/{agentId}/runs", "post");
   assertOperation(spec, "/agents/{agentId}/runs/{runId}/events", "post");
