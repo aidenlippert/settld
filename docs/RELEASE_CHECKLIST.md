@@ -47,6 +47,7 @@ Release-gate evidence should also include:
 - `artifacts/throughput/10x-drill-summary.json`
 - `artifacts/gates/s13-go-live-gate.json`
 - `artifacts/gates/s13-launch-cutover-packet.json`
+- `artifacts/gates/production-cutover-gate.json`
 
 See `docs/spec/SUPPLY_CHAIN.md` for the release-channel threat model and verification posture.
 
@@ -145,6 +146,7 @@ Required gate reports:
 
 - `artifacts/throughput/10x-drill-summary.json`
 - `artifacts/throughput/10x-incident-rehearsal-summary.json`
+- `artifacts/gates/production-cutover-gate.json`
 - `artifacts/gates/s13-go-live-gate.json`
 - `artifacts/gates/s13-launch-cutover-packet.json`
 

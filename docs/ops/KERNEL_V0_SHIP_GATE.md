@@ -21,7 +21,8 @@ Report output:
 ## CI enforcement
 
 1. `.github/workflows/tests.yml` runs `kernel_v0_ship_gate` on every `push` to `main`.
-2. `.github/workflows/release.yml` blocks release unless that same commit has a successful `kernel_v0_ship_gate` result from `tests.yml`.
+2. `.github/workflows/tests.yml` also runs `production_cutover_gate` on every `push` to `main`.
+3. `.github/workflows/release.yml` blocks release unless that same commit has successful `kernel_v0_ship_gate` and `production_cutover_gate` results from `tests.yml`.
 
 ## Included checks
 

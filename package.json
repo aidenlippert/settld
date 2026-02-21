@@ -104,6 +104,7 @@
     "test:ops:self-serve-gate": "node scripts/ci/run-self-serve-launch-gate.mjs",
     "test:ops:self-serve-benchmark": "node scripts/ci/build-self-serve-benchmark-report.mjs",
     "test:ops:launch-cutover-packet": "node scripts/ci/build-launch-cutover-packet.mjs",
+    "test:ops:production-cutover-gate": "node scripts/ci/run-production-cutover-gate.mjs",
     "test:ci:mcp-host-smoke": "node scripts/ci/run-mcp-host-smoke.mjs",
     "test:ci:mcp-host-cert-matrix": "node scripts/ci/run-mcp-host-cert-matrix.mjs",
     "test:x402:circle:sandbox:batch-e2e": "node --test test/circle-sandbox-batch-settlement-e2e.test.js",

@@ -163,6 +163,31 @@ jobs:
           path: artifacts/gates/kernel-v0-ship-gate.json
           if-no-files-found: warn
 
+  production_cutover_gate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run production cutover gate
+        run: npm run -s test:ops:production-cutover-gate
+      - name: Upload production cutover gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cutover-gate-${{ github.run_id }}
+          path: |
+            artifacts/gates/production-cutover-gate.json
+            artifacts/ops/mcp-host-smoke.json
+            artifacts/ops/mcp-host-cert-matrix.json
+            artifacts/ops/x402-hitl-smoke.json
+          if-no-files-found: warn
+
   flake_budget_guard:
     runs-on: ubuntu-latest
     timeout-minutes: 5

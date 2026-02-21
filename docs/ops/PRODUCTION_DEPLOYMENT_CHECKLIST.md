@@ -4,8 +4,8 @@ Use this checklist to launch and verify a real hosted Settld environment.
 
 ## Phase 0: Preflight
 
-1. Confirm branch protection includes `tests / kernel_v0_ship_gate`.
-2. Confirm release workflow is blocked unless ship gate is green.
+1. Confirm branch protection includes `tests / kernel_v0_ship_gate` and `tests / production_cutover_gate`.
+2. Confirm release workflow is blocked unless both required gates are green for the release commit.
 3. Confirm staging and production have separate domains, databases, secrets, and signer keys.
 4. Confirm required services are deployable: `npm run start:prod`, `npm run start:maintenance`, `npm run start:x402-gateway`.
 
@@ -90,7 +90,7 @@ npm run demo:mcp-paid-exa
 
 Ship only when all are true:
 
-1. Kernel v0 ship gate is green.
+1. Kernel v0 ship gate and production cutover gate are green.
 2. Hosted baseline evidence is green.
 3. MCP compatibility matrix is green for supported hosts.
 4. Paid MCP run artifacts verify cleanly.
