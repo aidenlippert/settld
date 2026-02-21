@@ -41,6 +41,7 @@
       }
     },
     "policyHashUsed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "profileHashUsed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "verificationMethodHashUsed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "verifierRef": {
       "type": "object",

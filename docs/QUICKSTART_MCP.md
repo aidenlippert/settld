@@ -10,6 +10,22 @@ For host-specific setup (Claude, Cursor, Codex, OpenClaw), see `docs/QUICKSTART_
 - A Settld API key with appropriate scopes (`keyId.secret` format)
 - Settld API reachable (local `npm run dev:api` or hosted)
 
+## Fast Path (Recommended)
+
+Run guided setup first:
+
+```bash
+settld setup
+```
+
+Then run a smoke probe:
+
+```bash
+npm run mcp:probe
+```
+
+If you prefer to wire everything manually, use the fallback steps in `Run The MCP Server` below.
+
 ## One-Command Local Demo (Paid MCP Exa Flow)
 
 Boots local API + provider wrapper + x402 gateway, runs MCP `settld.exa_search_paid`, verifies signatures/tokens, and writes an artifact bundle.
@@ -107,7 +123,14 @@ Reference specs:
 
 ## Run The MCP Server
 
-Set environment variables:
+Primary path:
+
+```bash
+settld setup
+npm run mcp:server
+```
+
+Manual fallback (if you skip setup):
 
 ```bash
 export SETTLD_BASE_URL='https://api.settld.work'   # or http://127.0.0.1:3000

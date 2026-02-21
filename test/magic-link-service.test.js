@@ -1378,7 +1378,7 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
 
     const out = await postTenantRuntimeConformanceMatrix({
       tenantId,
-      body: { targets: ["codex", "claude", "openhands"] }
+      body: { targets: ["codex", "claude", "cursor", "openclaw"] }
     });
     assert.equal(out.statusCode, 200, JSON.stringify(out.json));
     assert.equal(out.json?.ok, true);
@@ -1391,6 +1391,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.ok(out.json.matrix.checks.some((row) => row?.checkId === "first_paid_call" && row?.status === "pass"));
     assert.ok(Array.isArray(out.json?.matrix?.targets));
     assert.ok(out.json.matrix.targets.length >= 3);
+    const targetNames = out.json.matrix.targets.map((row) => row?.target).filter(Boolean);
+    assert.ok(targetNames.includes("cursor"));
+    assert.ok(targetNames.includes("openclaw"));
     assert.equal(out.json?.idempotency?.reused, false);
 
     const history = await getTenantFirstPaidCallHistory({ tenantId });

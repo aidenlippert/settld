@@ -8739,12 +8739,14 @@ export function createApi({
     // Stage 2: cancel active quote windows that have not progressed past pending authorization.
     const gates = listX402GatesForPayerAgent({ tenantId: normalizedTenantId, agentId: normalizedAgentId });
     const quoteCancelOps = [];
+    const reversalDispatchGateOps = [];
     const reversalDispatchMessages = [];
     const reversalQueuedGateIds = new Set();
     for (const gate of gates) {
       if (!gate || typeof gate !== "object" || Array.isArray(gate)) continue;
       const gateId = typeof gate.gateId === "string" && gate.gateId.trim() !== "" ? gate.gateId.trim() : null;
       if (!gateId) continue;
+      let nextGateCandidate = gate;
       const gateStatus = String(gate.status ?? "").trim().toLowerCase();
       if (gateStatus === "resolved") continue;
       const authorization =
@@ -8761,31 +8763,32 @@ export function createApi({
           settlement &&
           String(settlement.status ?? "").toLowerCase() === AGENT_RUN_SETTLEMENT_STATUS.LOCKED &&
           !reversalQueuedGateIds.has(gateId) &&
+          !gateHasTerminalX402Reversal(gate) &&
           authorization &&
           authorizationStatus !== "voided" &&
           authorizationStatus !== "settled"
         ) {
-          reversalQueuedGateIds.add(gateId);
-          reversalDispatchMessages.push(
-            normalizeForCanonicalJson(
-              {
-                type: X402_AGENT_WINDDOWN_REVERSAL_OUTBOX_TOPIC,
-                tenantId: normalizedTenantId,
-                agentId: normalizedAgentId,
-                gateId,
-                runId,
-                reasonCode: "AGENT_INSOLVENT_AUTO_VOID",
-                source: "x402_agent_freeze_unwind_v1",
-                at
-              },
-              { path: "$" }
-            )
-          );
+          const currentDispatch = readX402ReversalDispatchState(gate);
+          if (currentDispatch?.status !== "queued" && currentDispatch?.status !== "completed") {
+            reversalQueuedGateIds.add(gateId);
+            const reversalMessage = buildX402WinddownReversalOutboxMessage({
+              tenantId: normalizedTenantId,
+              agentId: normalizedAgentId,
+              gateId,
+              runId,
+              reasonCode: "AGENT_INSOLVENT_AUTO_VOID",
+              source: "x402_agent_freeze_unwind_v1",
+              at
+            });
+            reversalDispatchMessages.push(reversalMessage);
+            nextGateCandidate = markX402ReversalDispatchQueued({ gate: nextGateCandidate, message: reversalMessage, at });
+            reversalDispatchGateOps.push({ kind: "X402_GATE_UPSERT", tenantId: normalizedTenantId, gateId, gate: nextGateCandidate });
+          }
         }
       }
 
       if (authorizationStatus && authorizationStatus !== "pending") continue;
-      const quote = gate.quote && typeof gate.quote === "object" && !Array.isArray(gate.quote) ? gate.quote : null;
+      const quote = nextGateCandidate.quote && typeof nextGateCandidate.quote === "object" && !Array.isArray(nextGateCandidate.quote) ? nextGateCandidate.quote : null;
       if (!quote) continue;
       const quoteExpiresAtMs = Number.isFinite(Date.parse(String(quote.expiresAt ?? "")))
         ? Date.parse(String(quote.expiresAt))
@@ -8844,7 +8847,7 @@ export function createApi({
 
       const nextGate = normalizeForCanonicalJson(
         {
-          ...gate,
+          ...nextGateCandidate,
           quote: canceledQuote,
           quoteCanceledAt: at,
           quoteCancelReasonCode: "X402_AGENT_FROZEN",
@@ -8855,6 +8858,9 @@ export function createApi({
       quoteCancelOps.push({ kind: "X402_GATE_UPSERT", tenantId: normalizedTenantId, gateId, gate: nextGate });
     }
     const unwindOps = [];
+    if (reversalDispatchGateOps.length > 0) {
+      unwindOps.push(...reversalDispatchGateOps);
+    }
     if (quoteCancelOps.length > 0) {
       unwindOps.push(...quoteCancelOps);
       summary.quotesCanceled = quoteCancelOps.length;
@@ -11479,6 +11485,127 @@ export function createApi({
     return rows;
   }
 
+  function buildX402WinddownReversalOutboxMessage({
+    tenantId,
+    agentId,
+    gateId,
+    runId,
+    reasonCode = "AGENT_INSOLVENT_AUTO_VOID",
+    source = "x402_agent_freeze_unwind_v1",
+    at = nowIso()
+  } = {}) {
+    const normalizedTenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedAgentId = normalizeOptionalX402RefInput(agentId, "agentId", { allowNull: false, max: 200 });
+    const normalizedGateId = normalizeOptionalX402RefInput(gateId, "gateId", { allowNull: false, max: 200 });
+    const normalizedRunId = normalizeOptionalX402RefInput(runId, "runId", { allowNull: false, max: 200 });
+    const normalizedReasonCode =
+      typeof reasonCode === "string" && reasonCode.trim() !== "" ? reasonCode.trim() : "AGENT_INSOLVENT_AUTO_VOID";
+    const normalizedSource =
+      typeof source === "string" && source.trim() !== "" ? source.trim() : "x402_agent_freeze_unwind_v1";
+    const normalizedAt = typeof at === "string" && at.trim() !== "" ? at.trim() : nowIso();
+    const dispatchScope = normalizeForCanonicalJson(
+      {
+        type: X402_AGENT_WINDDOWN_REVERSAL_OUTBOX_TOPIC,
+        tenantId: normalizedTenantId,
+        agentId: normalizedAgentId,
+        gateId: normalizedGateId,
+        runId: normalizedRunId,
+        reasonCode: normalizedReasonCode,
+        source: normalizedSource
+      },
+      { path: "$" }
+    );
+    return normalizeForCanonicalJson(
+      {
+        ...dispatchScope,
+        dispatchId: sha256Hex(canonicalJsonStringify(dispatchScope)),
+        at: normalizedAt
+      },
+      { path: "$" }
+    );
+  }
+
+  function readX402ReversalDispatchState(gate) {
+    const reversalDispatch =
+      gate?.reversalDispatch && typeof gate.reversalDispatch === "object" && !Array.isArray(gate.reversalDispatch)
+        ? gate.reversalDispatch
+        : null;
+    if (!reversalDispatch) return null;
+    const dispatchId =
+      typeof reversalDispatch.dispatchId === "string" && reversalDispatch.dispatchId.trim() !== ""
+        ? reversalDispatch.dispatchId.trim()
+        : null;
+    const status =
+      typeof reversalDispatch.status === "string" && reversalDispatch.status.trim() !== ""
+        ? reversalDispatch.status.trim().toLowerCase()
+        : null;
+    return { dispatchId, status, raw: reversalDispatch };
+  }
+
+  function gateHasTerminalX402Reversal(gate) {
+    const reversal =
+      gate?.reversal && typeof gate.reversal === "object" && !Array.isArray(gate.reversal) ? gate.reversal : null;
+    const reversalStatus = String(reversal?.status ?? "").trim().toLowerCase();
+    const authorizationStatus = String(gate?.authorization?.status ?? "").trim().toLowerCase();
+    return reversalStatus === "voided" || authorizationStatus === "voided";
+  }
+
+  function markX402ReversalDispatchQueued({ gate, message, at = nowIso() } = {}) {
+    if (!gate || typeof gate !== "object" || Array.isArray(gate)) return gate;
+    const dispatchId = typeof message?.dispatchId === "string" && message.dispatchId.trim() !== "" ? message.dispatchId.trim() : null;
+    if (!dispatchId) return gate;
+    return normalizeForCanonicalJson(
+      {
+        ...gate,
+        reversalDispatch: {
+          schemaVersion: "X402ReversalDispatch.v1",
+          dispatchId,
+          status: "queued",
+          reasonCode:
+            typeof message?.reasonCode === "string" && message.reasonCode.trim() !== "" ? message.reasonCode.trim() : null,
+          source: typeof message?.source === "string" && message.source.trim() !== "" ? message.source.trim() : null,
+          queuedAt: typeof message?.at === "string" && message.at.trim() !== "" ? message.at.trim() : at,
+          processedAt: null,
+          resultReason: null,
+          resultEventId: null
+        },
+        updatedAt: at
+      },
+      { path: "$" }
+    );
+  }
+
+  function markX402ReversalDispatchProcessed({ gate, message, at = nowIso(), status = "completed", resultReason = null, eventId = null } = {}) {
+    if (!gate || typeof gate !== "object" || Array.isArray(gate)) return gate;
+    const dispatchId = typeof message?.dispatchId === "string" && message.dispatchId.trim() !== "" ? message.dispatchId.trim() : null;
+    const existing = readX402ReversalDispatchState(gate);
+    if (!dispatchId || (existing?.dispatchId && existing.dispatchId !== dispatchId)) return gate;
+    return normalizeForCanonicalJson(
+      {
+        ...gate,
+        reversalDispatch: {
+          schemaVersion: "X402ReversalDispatch.v1",
+          dispatchId,
+          status: String(status ?? "completed").trim().toLowerCase(),
+          reasonCode:
+            typeof message?.reasonCode === "string" && message.reasonCode.trim() !== "" ? message.reasonCode.trim() : null,
+          source: typeof message?.source === "string" && message.source.trim() !== "" ? message.source.trim() : null,
+          queuedAt:
+            typeof existing?.raw?.queuedAt === "string" && existing.raw.queuedAt.trim() !== ""
+              ? existing.raw.queuedAt
+              : typeof message?.at === "string" && message.at.trim() !== ""
+                ? message.at.trim()
+                : at,
+          processedAt: at,
+          resultReason: typeof resultReason === "string" && resultReason.trim() !== "" ? resultReason.trim() : null,
+          resultEventId: typeof eventId === "string" && eventId.trim() !== "" ? eventId.trim() : null
+        },
+        updatedAt: at
+      },
+      { path: "$" }
+    );
+  }
+
   function gateIsActiveForInsolvency(gate) {
     if (!gate || typeof gate !== "object" || Array.isArray(gate)) return false;
     const authorization =
@@ -11709,6 +11836,7 @@ export function createApi({
     decisionReason = null,
     verificationStatus = null,
     policyHash = null,
+    profileHash = null,
     verificationMethodHash = null,
     verificationMethodMode = null,
     verifierId = "settld.policy-engine",
@@ -11737,6 +11865,7 @@ export function createApi({
 	      return trimmed;
 	    };
 	    let effectivePolicyHash = lowerHexOrNull(policyHash);
+	    let effectiveProfileHash = lowerHexOrNull(profileHash);
 	    let effectiveVerificationMethodHash = lowerHexOrNull(verificationMethodHash);
 	    try {
 	      if (!effectivePolicyHash || !/^[0-9a-f]{64}$/.test(effectivePolicyHash)) {
@@ -11762,6 +11891,26 @@ export function createApi({
 	    } catch {
 	      effectiveVerificationMethodHash = null;
 	    }
+	    if (!effectiveProfileHash || !/^[0-9a-f]{64}$/.test(effectiveProfileHash)) {
+	      const bindingsProfileHash =
+	        bindings?.spendAuthorization && typeof bindings.spendAuthorization === "object" && !Array.isArray(bindings.spendAuthorization)
+	          ? bindings.spendAuthorization.policyFingerprint
+	          : null;
+	      const traceBindingsProfileHash =
+	        settlement?.decisionTrace?.bindings?.spendAuthorization &&
+	        typeof settlement.decisionTrace.bindings.spendAuthorization === "object" &&
+	        !Array.isArray(settlement.decisionTrace.bindings.spendAuthorization)
+	          ? settlement.decisionTrace.bindings.spendAuthorization.policyFingerprint
+	          : null;
+	      const traceDecisionProfileHash =
+	        settlement?.decisionTrace?.decisionRecord &&
+	        typeof settlement.decisionTrace.decisionRecord === "object" &&
+	        !Array.isArray(settlement.decisionTrace.decisionRecord)
+	          ? settlement.decisionTrace.decisionRecord.profileHashUsed
+	          : null;
+	      const candidateProfileHash = lowerHexOrNull(bindingsProfileHash ?? traceBindingsProfileHash ?? traceDecisionProfileHash);
+	      effectiveProfileHash = candidateProfileHash && /^[0-9a-f]{64}$/.test(candidateProfileHash) ? candidateProfileHash : null;
+	    }
 	    if (!effectivePolicyHash) {
 	      // Default policy hash must always exist; if this fails, something is badly wrong with policy normalization.
 	      effectivePolicyHash = parseSettlementPolicyInput(null).policyHash;
@@ -11781,6 +11930,7 @@ export function createApi({
 		      decisionReason,
 		      verificationStatus,
 		      policyHashUsed: effectivePolicyHash,
+		      profileHashUsed: effectiveProfileHash ?? undefined,
 		      verificationMethodHashUsed: effectiveVerificationMethodHash ?? undefined,
 		      policyRef: { policyHash: effectivePolicyHash, verificationMethodHash: effectiveVerificationMethodHash },
       verifierRef: {
@@ -37601,23 +37751,26 @@ export function createApi({
                   ? gate.payerAgentId.trim()
                   : null;
             if (!payerAgentIdForVoid) return;
+            if (gateHasTerminalX402Reversal(gate)) return;
+            const dispatchState = readX402ReversalDispatchState(gate);
+            if (dispatchState?.status === "queued" || dispatchState?.status === "completed") return;
             const nowAt = nowIso();
-            const outboxMessage = normalizeForCanonicalJson(
-              {
-                type: X402_AGENT_WINDDOWN_REVERSAL_OUTBOX_TOPIC,
-                tenantId,
-                agentId: payerAgentIdForVoid,
-                gateId,
-                runId,
-                reasonCode,
-                source: "x402_zk_proof_verification_v1",
-                at: nowAt
-              },
-              { path: "$" }
-            );
+            const outboxMessage = buildX402WinddownReversalOutboxMessage({
+              tenantId,
+              agentId: payerAgentIdForVoid,
+              gateId,
+              runId,
+              reasonCode,
+              source: "x402_zk_proof_verification_v1",
+              at: nowAt
+            });
+            const gateWithDispatch = markX402ReversalDispatchQueued({ gate, message: outboxMessage, at: nowAt });
             await store.commitTx({
               at: nowAt,
-              ops: [{ kind: "OUTBOX_ENQUEUE", messages: [outboxMessage] }]
+              ops: [
+                { kind: "X402_GATE_UPSERT", tenantId, gateId, gate: gateWithDispatch },
+                { kind: "OUTBOX_ENQUEUE", messages: [outboxMessage] }
+              ]
             });
           };
           if (policyZkVerificationKeyRef) {
@@ -41541,7 +41694,18 @@ export function createApi({
         const kernelVerification = verifySettlementKernelArtifacts({ settlement, runId });
 
         const replayPolicyHash = agreementPolicyMaterial.policyHash ?? null;
+        const replayProfileHash =
+          settlement?.decisionTrace?.bindings?.spendAuthorization &&
+          typeof settlement.decisionTrace.bindings.spendAuthorization === "object" &&
+          !Array.isArray(settlement.decisionTrace.bindings.spendAuthorization) &&
+          typeof settlement.decisionTrace.bindings.spendAuthorization.policyFingerprint === "string" &&
+          /^[0-9a-f]{64}$/i.test(settlement.decisionTrace.bindings.spendAuthorization.policyFingerprint.trim())
+            ? settlement.decisionTrace.bindings.spendAuthorization.policyFingerprint.trim().toLowerCase()
+            : null;
         const replayVerificationMethodHash = agreementPolicyMaterial.verificationMethodHash ?? null;
+        const storedProfileHash =
+          typeof storedDecisionRecordRaw?.profileHashUsed === "string" ? storedDecisionRecordRaw.profileHashUsed.trim().toLowerCase() : "";
+        const profileHashMatchesStored = storedProfileHash ? Boolean(replayProfileHash) && replayProfileHash === storedProfileHash : true;
 
         const replayCriticalMatchesStored =
           storedDecisionRecordRaw && String(storedDecisionRecordRaw.schemaVersion ?? "") === "SettlementDecisionRecord.v2"
@@ -41551,7 +41715,8 @@ export function createApi({
                 ? (typeof storedDecisionRecordRaw.verificationMethodHashUsed === "string"
                     ? storedDecisionRecordRaw.verificationMethodHashUsed.trim().toLowerCase()
                     : "") === String(replayVerificationMethodHash).toLowerCase()
-                : true)
+                : true) &&
+              profileHashMatchesStored
             : null;
 
         const normalizeVerifierRefForCompare = (value) => {
@@ -41591,6 +41756,7 @@ export function createApi({
           agreementId: agreement?.agreementId ?? null,
           policyVersion: agreementPolicyMaterial.policyVersion ?? null,
           policyHash: replayPolicyHash,
+          profileHash: replayProfileHash,
           verificationMethodHash: replayVerificationMethodHash,
           policyRef: agreementPolicyMaterial.policyRef ?? null,
           verifierRef: replayVerifierExecution.verifierRef,
@@ -46869,40 +47035,75 @@ export function createApi({
     const tenantId = normalizeTenantId(message.tenantId ?? DEFAULT_TENANT_ID);
     const gateId = normalizeOptionalX402RefInput(message.gateId, "gateId", { allowNull: false, max: 200 });
     const agentId = normalizeOptionalX402RefInput(message.agentId, "agentId", { allowNull: false, max: 200 });
+    const dispatchId = typeof message.dispatchId === "string" && message.dispatchId.trim() !== "" ? message.dispatchId.trim() : null;
     const reason =
       typeof message.reasonCode === "string" && message.reasonCode.trim() !== "" ? message.reasonCode.trim() : "AGENT_INSOLVENT_AUTO_VOID";
     const nowAt = nowIso();
 
+    const finishWithSkip = async (reasonCode, gateForUpdate = null, { settlementStatusBefore = null } = {}) => {
+      if (gateForUpdate && dispatchId) {
+        const nextGate = markX402ReversalDispatchProcessed({
+          gate: gateForUpdate,
+          message,
+          at: nowAt,
+          status: reasonCode === "dispatch_already_completed" ? "completed" : "skipped",
+          resultReason: reasonCode
+        });
+        if (nextGate !== gateForUpdate) {
+          await commitTx([{ kind: "X402_GATE_UPSERT", tenantId, gateId, gate: nextGate }]);
+        }
+      }
+      return {
+        tenantId,
+        gateId,
+        agentId,
+        status: "skipped",
+        reason: reasonCode,
+        ...(settlementStatusBefore ? { settlementStatusBefore } : null)
+      };
+    };
+
     const gate = typeof store.getX402Gate === "function" ? await store.getX402Gate({ tenantId, gateId }) : null;
     if (!gate) return { tenantId, gateId, agentId, status: "skipped", reason: "gate_not_found" };
+    const gateDispatchState = readX402ReversalDispatchState(gate);
+    if (dispatchId && gateDispatchState?.dispatchId && gateDispatchState.dispatchId !== dispatchId) {
+      return finishWithSkip("dispatch_id_mismatch", gate);
+    }
+    if (
+      dispatchId &&
+      gateDispatchState?.dispatchId === dispatchId &&
+      gateDispatchState?.status === "completed"
+    ) {
+      return finishWithSkip("dispatch_already_completed", gate);
+    }
     if (String(gate.payerAgentId ?? "").trim() !== agentId) {
-      return { tenantId, gateId, agentId, status: "skipped", reason: "payer_mismatch" };
+      return finishWithSkip("payer_mismatch", gate);
     }
     if (String(gate.status ?? "").toLowerCase() === "resolved") {
-      return { tenantId, gateId, agentId, status: "skipped", reason: "gate_already_resolved" };
+      return finishWithSkip("gate_already_resolved", gate);
     }
 
     const runId = typeof gate.runId === "string" && gate.runId.trim() !== "" ? gate.runId.trim() : null;
-    if (!runId) return { tenantId, gateId, agentId, status: "skipped", reason: "gate_run_missing" };
+    if (!runId) return finishWithSkip("gate_run_missing", gate);
     const settlement = await getAgentRunSettlementRecord({ tenantId, runId });
-    if (!settlement) return { tenantId, gateId, agentId, status: "skipped", reason: "settlement_not_found" };
+    if (!settlement) return finishWithSkip("settlement_not_found", gate);
     const settlementStatusBefore = String(settlement.status ?? "").toLowerCase();
     if (settlementStatusBefore !== AGENT_RUN_SETTLEMENT_STATUS.LOCKED) {
-      return { tenantId, gateId, agentId, status: "skipped", reason: "settlement_not_locked", settlementStatusBefore };
+      return finishWithSkip("settlement_not_locked", gate, { settlementStatusBefore });
     }
 
     const existingAuthorization =
       gate?.authorization && typeof gate.authorization === "object" && !Array.isArray(gate.authorization) ? gate.authorization : null;
     if (!existingAuthorization) {
-      return { tenantId, gateId, agentId, status: "skipped", reason: "authorization_missing" };
+      return finishWithSkip("authorization_missing", gate);
     }
     if (String(existingAuthorization.status ?? "").toLowerCase() === "voided") {
-      return { tenantId, gateId, agentId, status: "skipped", reason: "authorization_already_voided" };
+      return finishWithSkip("authorization_already_voided", gate);
     }
 
     const amountCents = Number(settlement.amountCents ?? gate?.terms?.amountCents ?? 0);
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
-      return { tenantId, gateId, agentId, status: "skipped", reason: "amount_invalid" };
+      return finishWithSkip("amount_invalid", gate);
     }
     const currency =
       typeof settlement.currency === "string" && settlement.currency.trim() !== ""
@@ -46911,10 +47112,10 @@ export function createApi({
           ? gate.terms.currency.trim().toUpperCase()
           : "USD";
     const payerAgentId = typeof gate?.payerAgentId === "string" && gate.payerAgentId.trim() !== "" ? gate.payerAgentId.trim() : null;
-    if (!payerAgentId) return { tenantId, gateId, agentId, status: "skipped", reason: "payer_missing" };
+    if (!payerAgentId) return finishWithSkip("payer_missing", gate);
 
     const payerWalletExisting = typeof store.getAgentWallet === "function" ? await store.getAgentWallet({ tenantId, agentId: payerAgentId }) : null;
-    if (!payerWalletExisting) return { tenantId, gateId, agentId, status: "skipped", reason: "payer_wallet_missing" };
+    if (!payerWalletExisting) return finishWithSkip("payer_wallet_missing", gate);
     const payerWallet = refundAgentWalletEscrow({ wallet: payerWalletExisting, amountCents, at: nowAt });
 
     let reserveOutcome = null;
@@ -47155,7 +47356,7 @@ export function createApi({
       },
       { path: "$" }
     );
-    const nextGate = normalizeForCanonicalJson(
+    const nextGateRaw = normalizeForCanonicalJson(
       {
         ...gate,
         status: "resolved",
@@ -47166,6 +47367,14 @@ export function createApi({
       },
       { path: "$" }
     );
+    const nextGate = markX402ReversalDispatchProcessed({
+      gate: nextGateRaw,
+      message,
+      at: nowAt,
+      status: "completed",
+      resultReason: "authorization_voided",
+      eventId: reversalEventRecord.eventId
+    });
     const commandUsageRecord = normalizeForCanonicalJson(
       {
         schemaVersion: "X402ReversalCommandUsage.v1",

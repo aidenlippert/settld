@@ -11,7 +11,33 @@ This runbook covers the production onboarding control loop:
 - Settld API + ops token configured on Magic Link service
 - MCP server executable available (`npx -y settld-mcp`)
 
-## Golden Path
+## CLI fast path (host + starter policy)
+
+Use one command per host:
+
+```bash
+settld setup --yes --mode manual --host codex --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --yes --mode manual --host claude --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --yes --mode manual --host cursor --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --yes --mode manual --host openclaw --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+```
+
+Useful flags:
+
+- `--skip-profile-apply` for host setup only
+- `--profile-file ./path/to/profile.json` to apply your own profile
+- `--dry-run` to preview writes only
+
+Policy wizard flow (template-based):
+
+```bash
+npm run trust:wizard -- list --format text
+npm run trust:wizard -- show --template delivery_standard_v1 --format text
+npm run trust:wizard -- render --template delivery_standard_v1 --overrides-json '{"metrics":{"targetCompletionMinutes":60}}' --out ./policy.delivery.json --format json
+npm run trust:wizard -- validate --template delivery_standard_v1 --overrides-json '{"metrics":{"targetCompletionMinutes":60}}' --format json
+```
+
+## Hosted API golden path
 
 1. Generate runtime credentials:
 
@@ -51,7 +77,7 @@ curl -sS -X POST \
   -H "x-idempotency-key: matrix_<tenant_id>_<build_id>" \
   -H "content-type: application/json" \
   http://127.0.0.1:3090/v1/tenants/<tenant_id>/onboarding/conformance-matrix \
-  -d '{"targets":["codex","claude","openhands"]}'
+  -d '{"targets":["codex","claude","cursor","openclaw"]}'
 ```
 
 ## Replay and History

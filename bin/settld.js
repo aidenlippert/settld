@@ -8,6 +8,7 @@ function usage() {
   // eslint-disable-next-line no-console
   console.error("usage:");
   console.error("  settld --version");
+  console.error("  settld setup [--help]");
   console.error("  settld conformance test [--case <id>] [--bin settld-verify] [--node-bin <path/to/settld-verify.js>] [--keep-temp]");
   console.error("  settld conformance list");
   console.error("  settld conformance kernel --ops-token <tok_opsw> [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0] [--case <id>]");
@@ -15,12 +16,26 @@ function usage() {
   console.error("  settld closepack export --agreement-hash <sha256> --out <path.zip> [--ops-token tok_ops] [--base-url http://127.0.0.1:3000] [--tenant-id tenant_default] [--protocol 1.0]");
   console.error("  settld closepack verify <path.zip> [--json-out <path.json>]");
   console.error("  settld x402 receipt verify <receipt.json|-> [--strict] [--format json|text] [--json-out <path>]");
+  console.error("  settld profile list [--format json|text] [--json-out <path>]");
+  console.error("  settld profile init <profile-id> [--out <path>] [--force] [--format json|text] [--json-out <path>]");
+  console.error(
+    "  settld profile wizard [--template <profile-id>] [--non-interactive] [--profile-id <id>] [--name <text>] [--vertical <text>] [--description <text>] [--currency <code>] [--per-request-usd-cents <int>] [--monthly-usd-cents <int>] [--providers <csv>] [--tools <csv>] [--out <path>] [--force] [--format json|text] [--json-out <path>]"
+  );
+  console.error("  settld profile validate <profile.json|-> [--format json|text] [--json-out <path>]");
+  console.error(
+    "  settld profile simulate <profile.json|-> [--scenario <scenario.json|->|--scenario-json <json>] [--format json|text] [--json-out <path>]"
+  );
   console.error("  settld dev up [--no-build] [--foreground]");
   console.error("  settld dev down [--wipe]");
   console.error("  settld dev ps");
   console.error("  settld dev logs [--follow] [--service api]");
   console.error("  settld dev info");
   console.error("  settld init capability <name> [--out <dir>] [--force]");
+  console.error("");
+  console.error("onboarding:");
+  console.error("  settld setup");
+  console.error("  settld setup --help");
+  console.error("  settld dev up");
 }
 
 function repoRoot() {
@@ -90,6 +105,10 @@ function main() {
     // eslint-disable-next-line no-console
     console.log(readVersion() ?? "unknown");
     process.exit(0);
+  }
+
+  if (cmd === "setup") {
+    return runNodeScript("scripts/setup/wizard.mjs", argv.slice(1));
   }
 
   if (cmd === "conformance") {
@@ -214,6 +233,10 @@ function main() {
     // eslint-disable-next-line no-console
     console.error(`unknown x402 subcommand: ${sub}${sub2 ? ` ${sub2}` : ""}`);
     process.exit(1);
+  }
+
+  if (cmd === "profile") {
+    return runNodeScript("scripts/profile/cli.mjs", argv.slice(1));
   }
 
   usage();

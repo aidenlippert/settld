@@ -223,7 +223,7 @@ test("live contract: magic-link onboarding runtime flow stays green against real
       method: "POST",
       route: `/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/conformance-matrix`,
       headers: { "x-idempotency-key": idemKey },
-      body: { targets: ["codex", "claude", "openhands"] }
+      body: { targets: ["codex", "claude", "cursor", "openclaw"] }
     });
     assert.equal(conformance.status, 200, conformance.text);
     assert.equal(conformance.json?.ok, true, conformance.text);

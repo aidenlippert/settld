@@ -5454,13 +5454,19 @@ async function handleTenantRuntimeConformanceMatrix(req, res, tenantId) {
     });
   }
 
-  const targetsRaw = Array.isArray(json.targets) ? json.targets : ["codex", "claude", "openhands"];
+  const targetsRaw = Array.isArray(json.targets) ? json.targets : ["codex", "claude", "cursor", "openclaw"];
   const targets = [...new Set(
     targetsRaw
       .map((row) => String(row ?? "").trim().toLowerCase())
-      .filter((row) => row === "codex" || row === "claude" || row === "openhands")
+      .filter((row) => row === "codex" || row === "claude" || row === "cursor" || row === "openclaw" || row === "openhands")
   )];
-  if (!targets.length) return sendJson(res, 400, { ok: false, code: "INVALID_TARGETS", message: "targets must include codex|claude|openhands" });
+  if (!targets.length) {
+    return sendJson(res, 400, {
+      ok: false,
+      code: "INVALID_TARGETS",
+      message: "targets must include codex|claude|cursor|openclaw|openhands"
+    });
+  }
 
   const matrixRunId = `mx_${Date.now().toString(16)}_${crypto.randomBytes(3).toString("hex")}`;
   const checks = [];
@@ -5588,21 +5594,31 @@ async function handleTenantRuntimeConformanceMatrix(req, res, tenantId) {
   const bootstrapOk = checkById.get("runtime_bootstrap")?.status === "pass";
   const smokeOk = checkById.get("mcp_smoke")?.status === "pass";
   const paidOk = checkById.get("first_paid_call")?.status === "pass";
-  const targetRows = targets.map((target) => ({
-    target,
-    status: bootstrapOk && smokeOk && paidOk ? "pass" : "fail",
-    config: target === "openhands"
-      ? {
-          env: mcpEnv
-            ? Object.entries(mcpEnv).map(([k, v]) => `export ${k}=${JSON.stringify(String(v))}`).join("\n")
-            : null
-        }
-      : {
-          mcpServers: mcpEnv
-            ? { settld: { command: "npx", args: ["-y", "settld-mcp"], env: mcpEnv } }
-            : null
-        }
-  }));
+  const targetRows = targets.map((target) => {
+    const serverConfig = mcpEnv ? { command: "npx", args: ["-y", "settld-mcp"], env: mcpEnv } : null;
+    let config;
+    if (target === "openhands") {
+      config = {
+        env: mcpEnv
+          ? Object.entries(mcpEnv).map(([k, v]) => `export ${k}=${JSON.stringify(String(v))}`).join("\n")
+          : null
+      };
+    } else if (target === "openclaw") {
+      config = {
+        mcpServer: serverConfig,
+        mcpServers: serverConfig ? { settld: serverConfig } : null
+      };
+    } else {
+      config = {
+        mcpServers: serverConfig ? { settld: serverConfig } : null
+      };
+    }
+    return {
+      target,
+      status: bootstrapOk && smokeOk && paidOk ? "pass" : "fail",
+      config
+    };
+  });
 
   const matrix = {
     schemaVersion: "MagicLinkRuntimeConformanceMatrix.v1",
@@ -9308,7 +9324,7 @@ async function handleTenantOnboardingPage(req, res, tenantId, url) {
     "async function runFirstPaidCall(){ const status=document.getElementById('firstPaidCallStatus'); if(!status) return; status.className='status'; status.textContent='Running first paid call…'; try{ const out=await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/first-paid-call`, {}); state.firstPaidCall=out; renderFirstPaidCall(out); await refreshFirstPaidHistory(); await refreshChecklist(); } catch(e){ status.className='status bad'; status.textContent='First paid call failed: '+e.message; } }",
     "async function replayFirstPaidCall(){ const status=document.getElementById('firstPaidCallStatus'); const select=document.getElementById('firstPaidCallHistorySelect'); if(!status||!select) return; const attemptId=String(select.value||'').trim(); if(!attemptId){ status.className='status bad'; status.textContent='Select an attempt to replay.'; return; } status.className='status'; status.textContent='Replaying stored first paid call attempt…'; try{ const out=await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/first-paid-call`, { replayAttemptId: attemptId }); state.firstPaidCall=out; renderFirstPaidCall(out); } catch(e){ status.className='status bad'; status.textContent='Replay failed: '+e.message; } }",
     "function renderRuntimeConformance(out){ const status=document.getElementById('runtimeConformanceStatus'); const pre=document.getElementById('runtimeConformanceOutput'); if(!status||!pre) return; if(!out||typeof out!=='object'){ status.className='status'; status.textContent='Conformance matrix not run yet.'; pre.textContent='{}'; return; } const matrix=out&&out.matrix&&typeof out.matrix==='object'?out.matrix:null; const ready=Boolean(matrix&&matrix.ready); const runId=String(matrix&&matrix.runId?matrix.runId:'n/a'); const checks=Array.isArray(matrix&&matrix.checks)?matrix.checks:[]; const failed=checks.filter((c)=>String(c&&c.status||'').toLowerCase()!=='pass').map((c)=>String(c&&c.checkId||'unknown')); status.className='status '+(ready?'good':'warn'); status.textContent=ready?`Conformance passed. run=${runId}`:`Conformance incomplete. run=${runId}. failed=${failed.join(', ')||'unknown'}`; pre.textContent=JSON.stringify(out, null, 2); }",
-    "async function runRuntimeConformance(){ const status=document.getElementById('runtimeConformanceStatus'); if(!status) return; status.className='status'; status.textContent='Running conformance matrix…'; try{ const out=await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/conformance-matrix`, { targets:['codex','claude','openhands'] }); state.runtimeConformance=out; renderRuntimeConformance(out); await refreshFirstPaidHistory(); await refreshChecklist(); } catch(e){ status.className='status bad'; status.textContent='Conformance run failed: '+e.message; } }",
+    "async function runRuntimeConformance(){ const status=document.getElementById('runtimeConformanceStatus'); if(!status) return; status.className='status'; status.textContent='Running conformance matrix…'; try{ const out=await postJson(`/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/conformance-matrix`, { targets:['codex','claude','cursor','openclaw'] }); state.runtimeConformance=out; renderRuntimeConformance(out); await refreshFirstPaidHistory(); await refreshChecklist(); } catch(e){ status.className='status bad'; status.textContent='Conformance run failed: '+e.message; } }",
     "function statusFromVerify(v){ const ok=!!(v&&v.ok); const verificationOk=!!(v&&v.verificationOk); const warnings=Array.isArray(v&&v.warnings)?v.warnings:[]; if(!ok||!verificationOk) return 'red'; if(warnings.length) return 'amber'; return 'green'; }",
     "function summarizeTemplate(t){ if(!t) return 'None selected'; return `${t.templateId} (${t.vertical})`; }",
     "function renderTemplateCards(){",

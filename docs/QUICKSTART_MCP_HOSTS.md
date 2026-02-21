@@ -1,16 +1,99 @@
-# Quickstart: MCP Host Integrations (Claude, Cursor, Codex, OpenClaw)
+# Quickstart: MCP Host Integrations (Codex, Claude, Cursor, OpenClaw)
 
-Use this when you want to connect a real agent host to Settld MCP in under 5 minutes.
+Use this when you want to connect a host app to Settld MCP quickly.
 
-For core MCP flow details and paid-tool artifacts, see `docs/QUICKSTART_MCP.md`.
+For deeper MCP flow details and artifact examples, see `docs/QUICKSTART_MCP.md`.
 
 ## 0) Prerequisites
 
 - Node.js 20+
 - Settld API reachable (`http://127.0.0.1:3000` for local or your hosted API)
-- A tenant-scoped Settld API key (`keyId.secret` format)
+- Tenant API key (`keyId.secret`)
 
-Export env once in your shell:
+## 1) One-command host setup (recommended)
+
+Each command below does all of this:
+
+- writes Settld MCP config for the selected host
+- sets runtime env values for that host config
+- applies starter policy profile `engineering-spend`
+- runs a smoke check (`settld.about`)
+
+### Codex
+
+```bash
+settld setup --yes --mode manual --host codex --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+```
+
+### Claude
+
+```bash
+settld setup --yes --mode manual --host claude --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+```
+
+### Cursor
+
+```bash
+settld setup --yes --mode manual --host cursor --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+```
+
+### OpenClaw
+
+```bash
+settld setup --yes --mode manual --host openclaw --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+```
+
+Hosted bootstrap mode (runtime key minted by onboarding endpoint):
+
+```bash
+settld setup --yes --mode bootstrap --host codex --base-url https://api.settld.work --tenant-id tenant_default --bootstrap-api-key mlk_admin_xxx --bootstrap-key-id sk_runtime --bootstrap-scopes runs:read,runs:write --idempotency-key setup_codex_bootstrap_1
+```
+
+Common setup flags:
+
+- `--skip-profile-apply`: host setup only, no policy apply
+- `--profile-file ./path/to/profile.json`: use your own profile file
+- `--dry-run`: preview file updates only (no writes)
+
+Sanity check anytime:
+
+```bash
+npm run mcp:probe
+```
+
+## 2) New policy wizard flow
+
+If you only need a starter policy, keep `--profile-id engineering-spend` in `settld setup` and you are done.
+
+If you want to build an SLA policy config step by step:
+
+1. List templates:
+
+```bash
+npm run trust:wizard -- list --format text
+```
+
+2. Preview one template:
+
+```bash
+npm run trust:wizard -- show --template delivery_standard_v1 --format text
+```
+
+3. Render your policy config file:
+
+```bash
+npm run trust:wizard -- render --template delivery_standard_v1 --overrides-json '{"metrics":{"targetCompletionMinutes":60}}' --out ./policy.delivery.json --format json
+```
+
+4. Validate your overrides:
+
+```bash
+npm run trust:wizard -- validate --template delivery_standard_v1 --overrides-json '{"metrics":{"targetCompletionMinutes":60}}' --format json
+```
+
+## 3) Manual host config fallback
+
+If you skip `settld setup`, export env in your shell:
 
 ```bash
 export SETTLD_BASE_URL='http://127.0.0.1:3000'
@@ -19,16 +102,7 @@ export SETTLD_API_KEY='sk_live_xxx.yyy'
 export SETTLD_PAID_TOOLS_BASE_URL='http://127.0.0.1:8402'
 ```
 
-Sanity check the server before wiring any host:
-
-```bash
-npm run mcp:probe
-```
-
-## 1) Canonical MCP Server Definition
-
-Most hosts that support MCP stdio need a command, args, and env.
-Use this as your default server config:
+Default MCP stdio server definition:
 
 ```json
 {
@@ -44,100 +118,52 @@ Use this as your default server config:
 }
 ```
 
-If your host cannot spawn stdio commands, use HTTP bridge:
+If your host cannot run stdio commands, use HTTP bridge:
 
 ```bash
 MCP_HTTP_PORT=8787 npm run mcp:http
 ```
 
-Then point the host at:
+Then point the host to:
 
 - MCP endpoint: `http://127.0.0.1:8787/rpc`
 - Health endpoint: `http://127.0.0.1:8787/healthz`
 
-## 2) Claude
+## 4) OpenClaw skill package notes
 
-1. Open Claude MCP settings.
-2. Add a new MCP server using the canonical config above.
-3. Save and reconnect.
-4. Ask Claude to call:
-   - `settld.about`
-   - `settld.exa_search_paid` with `{"query":"dentist near me chicago","numResults":3}`
-
-Expected behavior:
-
-- First paid call triggers x402 challenge/authorize/retry automatically in the MCP wrapper.
-- Tool result includes Settld verification/settlement headers.
-
-## 3) Cursor
-
-1. Open Cursor MCP settings.
-2. Add an MCP server using the same canonical stdio definition.
-3. Reconnect tools.
-4. Run:
-   - `settld.about`
-   - `settld.weather_current_paid` with `{"city":"Chicago","unit":"f"}`
-
-Expected behavior:
-
-- Paid tool returns response body plus `x-settld-*` headers captured by the tool bridge.
-
-## 4) Codex
-
-1. Open Codex MCP/tooling configuration.
-2. Register Settld with the canonical stdio definition.
-3. Reload tool discovery.
-4. Run:
-   - `settld.about`
-   - `settld.exa_search_paid`
-
-Expected behavior:
-
-- Paid call resolves through the same x402 autopay flow.
-
-## 5) OpenClaw
-
-For OpenClaw, package Settld as a skill that declares MCP setup instructions.
-Reference skill payload:
+If you publish Settld for OpenClaw/ClawHub as a skill package, use:
 
 - `docs/integrations/openclaw/settld-mcp-skill/SKILL.md`
 - `docs/integrations/openclaw/settld-mcp-skill/mcp-server.example.json`
 - `docs/integrations/openclaw/CLAWHUB_PUBLISH_CHECKLIST.md`
 
-Minimum skill payload should include:
-
-- Name/description
-- MCP server command (`npx -y settld-mcp`)
-- Required env vars (`SETTLD_BASE_URL`, `SETTLD_TENANT_ID`, `SETTLD_API_KEY`, optional `SETTLD_PAID_TOOLS_BASE_URL`)
-- A smoke prompt using `settld.about`
-
-You can test locally first with:
+Local check:
 
 ```bash
 npm run mcp:probe -- --call settld.about '{}'
 ```
 
-## 6) 5-Minute Validation Checklist
+## 5) 5-minute validation checklist
 
-0. (CI/local gate) run hosted-style smoke once:
+0. Run hosted-style smoke once:
 
 ```bash
 npm run test:ci:mcp-host-smoke
 ```
 
 1. `npm run mcp:probe` passes locally.
-2. Host discovers Settld tools (`tools/list` includes `settld.*`).
+2. Host discovers `settld.*` tools.
 3. `settld.about` succeeds.
-4. One paid tool call succeeds (`settld.exa_search_paid` or `settld.weather_current_paid`).
-5. You can see a resulting artifact bundle from paid demo runs:
+4. A paid tool call succeeds (`settld.exa_search_paid` or `settld.weather_current_paid`).
+5. Artifact bundle exists from demo runs:
    - `artifacts/mcp-paid-exa/.../summary.json`
    - `artifacts/mcp-paid-weather/.../summary.json`
 
-## 7) Troubleshooting
+## 6) Troubleshooting
 
 - `SETTLD_API_KEY must be a non-empty string`
-  - API key not injected into MCP server env.
+  - API key is missing in host MCP env.
 - Host cannot run `npx`
-  - Install Node 20+ and ensure `npx` is on PATH, or run HTTP bridge mode.
-- Paid tool returns gateway/connectivity errors
-  - Confirm `SETTLD_PAID_TOOLS_BASE_URL` points to a running gateway.
+  - Install Node 20+ and ensure `npx` is in `PATH`, or use HTTP bridge mode.
+- Paid tool call fails with gateway/connectivity errors
+  - Check `SETTLD_PAID_TOOLS_BASE_URL` and confirm the gateway is running.

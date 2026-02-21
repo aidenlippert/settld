@@ -85,6 +85,19 @@ curl -s "http://127.0.0.1:3000/ops/tool-calls/replay-evaluate?agreementHash=<agr
 
 Expected: replay comparison fields indicate consistency/match.
 
+## 6) Profiles CLI (optional)
+
+Use the profiles commands to scaffold and test policy profiles used by Trust OS workflows:
+
+```bash
+npx settld profile list
+npx settld profile init engineering-spend --out ./profiles/engineering-spend.profile.json
+npx settld profile validate ./profiles/engineering-spend.profile.json --format json
+npx settld profile simulate ./profiles/engineering-spend.profile.json --format json
+```
+
+For full command examples and sample outputs, see `docs/QUICKSTART_PROFILES.md`.
+
 ## Troubleshooting
 
 ### Docker not found

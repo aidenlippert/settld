@@ -29,6 +29,7 @@ export const SETTLEMENT_KERNEL_VERIFICATION_CODE = Object.freeze({
   DECISION_RECORD_DECIDED_AT_INVALID: "decision_record_decided_at_invalid",
   DECISION_RECORD_POLICY_HASH_USED_MISSING: "decision_record_policy_hash_used_missing",
   DECISION_RECORD_POLICY_HASH_USED_INVALID: "decision_record_policy_hash_used_invalid",
+  DECISION_RECORD_PROFILE_HASH_USED_INVALID: "decision_record_profile_hash_used_invalid",
   DECISION_RECORD_POLICY_NORMALIZATION_VERSION_INVALID: "decision_record_policy_normalization_version_invalid",
   DECISION_RECORD_VERIFICATION_METHOD_HASH_USED_INVALID: "decision_record_verification_method_hash_used_invalid",
 
@@ -327,6 +328,7 @@ export function buildSettlementDecisionRecord({
   verificationStatus = null,
   policyNormalizationVersion = undefined,
   policyHashUsed,
+  profileHashUsed = undefined,
   verificationMethodHashUsed = undefined,
   policyRef,
   verifierRef,
@@ -361,6 +363,13 @@ export function buildSettlementDecisionRecord({
                 ? SETTLEMENT_POLICY_NORMALIZATION_VERSION_V1
                 : String(policyNormalizationVersion ?? "").trim(),
             policyHashUsed: normalizeHexHash(policyHashUsed, "policyHashUsed", { allowNull: false }),
+            ...(profileHashUsed === null || profileHashUsed === undefined
+              ? {}
+              : {
+                  profileHashUsed: normalizeHexHash(profileHashUsed, "profileHashUsed", {
+                    allowNull: false
+                  })
+                }),
             ...(verificationMethodHashUsed === null || verificationMethodHashUsed === undefined
               ? {}
               : {
@@ -514,6 +523,13 @@ export function verifySettlementKernelArtifacts({ settlement, runId = null } = {
         errors.push(SETTLEMENT_KERNEL_VERIFICATION_CODE.DECISION_RECORD_POLICY_HASH_USED_MISSING);
       } else if (!/^[0-9a-f]{64}$/.test(policyHashUsed)) {
         errors.push(SETTLEMENT_KERNEL_VERIFICATION_CODE.DECISION_RECORD_POLICY_HASH_USED_INVALID);
+      }
+      const profileHashUsedRaw = decisionRecord.profileHashUsed;
+      if (profileHashUsedRaw !== undefined) {
+        const profileHashUsed = typeof profileHashUsedRaw === "string" ? profileHashUsedRaw.trim().toLowerCase() : "";
+        if (!profileHashUsed || !/^[0-9a-f]{64}$/.test(profileHashUsed)) {
+          errors.push(SETTLEMENT_KERNEL_VERIFICATION_CODE.DECISION_RECORD_PROFILE_HASH_USED_INVALID);
+        }
       }
       const methodHashUsedRaw = decisionRecord.verificationMethodHashUsed;
       if (methodHashUsedRaw !== undefined) {

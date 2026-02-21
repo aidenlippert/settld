@@ -1,0 +1,9 @@
+{
+  "providerId": "openai",
+  "toolId": "llm.inference",
+  "amountUsdCents": 120000,
+  "monthToDateSpendUsdCents": 200000,
+  "approvalsProvided": 1,
+  "receiptSigned": true,
+  "toolManifestHashPresent": true
+}

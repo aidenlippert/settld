@@ -1,103 +1,133 @@
-# Settld Agentverse Build Plan (Adoption-First)
+# Trust OS v1 Execution Board (Completion + Adoption)
 
 ## Mandate
 
-Build the foundational primitive stack for autonomous agents while maximizing user adoption first.
+Ship Trust OS v1 as a production-grade, rail-agnostic trust kernel and convert that delivery into measurable adoption.
 
-Operating principle:
-- Free and easy to start.
-- Deterministic and safe by default.
-- Portable trust artifacts independent of Settld runtime.
+Operating principles:
+- Fail closed on policy, identity, and request-binding violations.
+- Keep all enforcement and evidence paths deterministic and replay-safe.
+- Treat adoption work (quickstart, blueprints, instrumentation) as release-critical, not post-release.
 
-## Success metrics (north star)
+## Release outcomes
 
-1. Time to first successful verified transaction: `< 10 minutes`.
-2. Weekly active builders (WAB): sustained growth week-over-week.
-3. Day-7 builder retention: target upward trend each sprint.
-4. Runtime safety intervention latency: within SLO target.
-5. Deterministic replay/verification drift incidents: `0` in release candidates.
+1. Mandatory policy runtime enforcement for all paid actions.
+2. Deterministic `ReceiptBundle.v1` export and strict offline verification.
+3. Deterministic dispute-to-verdict-to-reversal outcomes.
+4. Operator controls with signed audit history and emergency containment.
+5. One production-hardened adapter lane with conformance gate.
+6. Three vertical starter profiles with CLI simulation and docs.
+7. Adoption baseline: `<15m` first verified receipt, 3 runnable blueprints, and live funnel metrics.
+
+## Milestones
+
+- M1 (S1): Policy runtime + request binding foundation complete.
+- M2 (S2): Receipt export + dispute runtime complete.
+- M3 (S3): Operator controls + adapter hardening + profile/abuse-path coverage complete.
+- M4 (S4): Release gates cleared and adoption package launched.
+
+## Critical path dependencies
+
+`STLD-T2401 -> STLD-T2410 -> STLD-T2411 -> STLD-T2412 -> STLD-T2440 -> STLD-T2441 -> STLD-T2462`
+
+Supporting release chain:
+- `STLD-T2420 -> STLD-T2421`
+- `STLD-T2430 -> STLD-T2431 -> STLD-T2460`
+- `STLD-T2450 -> STLD-T2451 -> STLD-T2452 -> STLD-T2453`
+- `STLD-T2461 -> STLD-T2462`
+- `STLD-T2470 + STLD-T2471 -> STLD-T2472`
 
 ## Sprint cadence
 
 - Sprint length: 2 weeks.
-- Planning horizon: 4 active sprints (8 weeks), rolling update.
-- Release gate: every sprint close includes reliability + determinism checks.
+- Planning horizon: 4 active sprints (8 weeks).
+- Release gate cadence: conformance + determinism + security checked every sprint close.
 
 ## Sprint map
 
-### Sprint S1: Foundation enforcement + MCP production baseline
+### Sprint S1: Enforcement foundation
 
 Goals:
-- Enforce runtime identity/delegation/intent on privileged paths.
-- Productionize MCP server (move beyond spike posture).
+- Establish canonical policy runtime across all paid action paths.
+- Lock request-binding and evidence schema foundations.
 
 Tickets:
-- STLD-TA01, STLD-TA02, STLD-TA03, STLD-TA04
-- STLD-TC01, STLD-TC02
+- `STLD-T2401`, `STLD-T2402`, `STLD-T2403`, `STLD-T2404`
+- `STLD-T2410`, `STLD-T2411`
 
 Exit criteria:
-- Privileged execution fail-closed without valid identity/delegation/intent.
-- MCP quickstart works across Claude/Cursor/Codex/OpenClaw host guides.
+- Policy runtime is mandatory for paid actions and non-bypassable on MCP/bridge paths.
+- Request mutation/replay is blocked with stable reason codes.
+- Decision metrics + SLO dashboard are active.
 
-### Sprint S2: Runtime safety + activation funnel
+### Sprint S2: Receipts + dispute runtime
 
 Goals:
-- Add live anomaly detection and intervention controls.
-- Ship free-tier onboarding path to first success in under 10 minutes.
+- Deliver deterministic receipt bundle export and SDK retrieval helpers.
+- Stand up dispute case lifecycle and verdict application.
 
 Tickets:
-- STLD-TA05
-- STLD-TB01, STLD-TB02, STLD-TB03
-- STLD-TC03, STLD-TC04, STLD-TC05
-- STLD-TE01
+- `STLD-T2412`, `STLD-T2413`
+- `STLD-T2420`, `STLD-T2421`, `STLD-T2422`, `STLD-T2423`
 
 Exit criteria:
-- Active-run intervention control plane working with audit trail.
-- Activation funnel instrumented with measurable drop-off and retention.
+- `ReceiptBundle.v1` strict offline verification passes deterministically.
+- Dispute state machine and verdict application are idempotent and test-covered.
+- Dispute APIs are usable via API/SDK/MCP surfaces.
 
-### Sprint S3: Transparency trust network + compliance baseline
+### Sprint S3: Control plane + hardening
 
 Goals:
-- Introduce transparency/gossip consistency primitives.
-- Implement data governance and supply-chain trust baselines.
+- Ship operator inbox and emergency controls.
+- Harden one adapter lane and conformance CI gate.
+- Ship profile schema/CLI and security abuse-path regressions.
 
 Tickets:
-- STLD-TB04, STLD-TB05
-- STLD-TD01, STLD-TD02, STLD-TD03
-- STLD-TE02, STLD-TE03
+- `STLD-T2430`, `STLD-T2431`, `STLD-T2432`
+- `STLD-T2440`, `STLD-T2441`
+- `STLD-T2450`, `STLD-T2451`
+- `STLD-T2460`
 
 Exit criteria:
-- Inclusion proofs and consistency checks available.
-- Tenant-level residency/retention controls and SBOM-based release checks active.
+- Operators can review and intervene with signed, auditable actions.
+- Chosen adapter lane is production-ready and conformance-gated in CI.
+- Profile tooling and security regression suite are functioning in CI.
 
-### Sprint S4: Operational maturity + public trust posture
+### Sprint S4: Release gate + adoption launch
 
 Goals:
-- Complete trust anchor/key rotation and runtime SLO drills.
-- Publish roadmap/governance transparency for ecosystem scaling.
+- Complete profile packaging/docs and end-to-end deterministic release validation.
+- Launch adoption assets and instrumentation for first pilots.
 
 Tickets:
-- STLD-TD04
-- STLD-TE04, STLD-TE05
+- `STLD-T2452`, `STLD-T2453`
+- `STLD-T2461`, `STLD-T2462`
+- `STLD-T2470`, `STLD-T2471`, `STLD-T2472`
 
 Exit criteria:
-- Rotation drills and incident rehearsals pass with evidence.
-- Public roadmap/changelog is current and release-linked.
+- Trust OS v1 release gate checklist passes with proof artifacts.
+- New builder reaches first verified receipt in under 15 minutes via quickstart.
+- Three reference blueprints run end-to-end in CI.
+- Activation and pilot conversion dashboard reports daily.
 
-## Delivery rules
+## Ownership lanes
 
-1. No ticket closes without deterministic tests or objective success checks.
-2. New error/failure behavior requires stable code + docs update.
-3. Any security/governance control must include rollback and incident handling notes.
-4. Adoption work is first-class: docs, templates, and onboarding are release-critical.
+- Backend Platform/API: `STLD-E2401`, `STLD-E2402`, `STLD-E2403`
+- Frontend + Backend control plane: `STLD-E2404`
+- Integrations: `STLD-E2405`
+- Product/Protocol/CLI/Docs: `STLD-E2406`
+- QA/DevOps/Security: `STLD-E2407`
+- PM/DevEx/GTM adoption: `STLD-E2408`
 
-## What we explicitly defer
+## Execution rules
 
-1. Premature monetization complexity.
-2. Broad tokenomics experiments.
-3. Vertical-specific compliance deep packs beyond baseline controls.
+1. No ticket is done without deterministic test evidence or objective verification output.
+2. New fail paths require stable reason codes and docs before merge.
+3. Adoption tickets are release-candidate blockers for Trust OS v1, not stretch goals.
+4. Any emergency or governance control must include rollback and audit export paths.
 
-## Review cadence
+## Weekly review
 
-- Weekly execution review: blockers, risks, and metric deltas.
-- Sprint close review: shipped evidence, failed assumptions, and scope resets.
+- Review cadence: weekly execution review + sprint close release-readiness review.
+- Review inputs: dependency blockers, SLO deviations, security regressions, adoption funnel deltas.
+- Escalation trigger: any critical-path ticket delayed >3 working days or deterministic check drift >0.

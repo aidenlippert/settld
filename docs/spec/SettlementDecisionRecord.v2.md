@@ -21,6 +21,7 @@ Optional fields:
 
 - all optional fields from `SettlementDecisionRecord.v1`
 - `policyNormalizationVersion` (string; OPTIONAL; v2 emitters SHOULD include this to pin the normalization algorithm used to compute `policyHashUsed`)
+- `profileHashUsed` (sha256 hex, lowercase; OPTIONAL; emit when an authorization/policy profile fingerprint is available, for example `bindings.spendAuthorization.policyFingerprint`)
 - `verificationMethodHashUsed` (sha256 hex, lowercase; OPTIONAL; omit when absent)
 - `bindings` (object; OPTIONAL) - settlement receipt trail bindings for gateway-style flows:
   - `authorizationRef`
@@ -36,6 +37,7 @@ Optional fields:
 - `policyHashUsed` MUST be the hash of the normalized policy object actually evaluated.
 - If the evaluated policy is carried inline (for example, in an agreement payload), `policyHashUsed` MUST match the normalized inline policy payload.
 - If the policy is resolved from a policy registry, `policyHashUsed` MUST match the policy payload referenced by the registry entry.
+- `profileHashUsed`, when present, MUST be the hash of the concrete profile/fingerprint material used to authorize or constrain policy evaluation for this decision.
 - `verificationMethodHashUsed` SHOULD be set when verifier selection depends on an explicit verification method payload.
 
 ## Canonicalization and hashing

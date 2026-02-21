@@ -3,6 +3,7 @@
 - [Settld Documentation](README.md)
 - [Docs Home](gitbook/README.md)
 - [Quickstart](gitbook/quickstart.md)
+- [Quickstart: Profiles CLI](QUICKSTART_PROFILES.md)
 - [Core Primitives](gitbook/core-primitives.md)
 - [API Reference](gitbook/api-reference.md)
 - [Conformance](gitbook/conformance.md)
