@@ -129,6 +129,138 @@ const stripeMockServer = http.createServer((req, res) => {
   });
 });
 
+const circleWalletRows = [
+  {
+    id: "wid_circle_spend_test",
+    state: "LIVE",
+    walletSetId: "wset_circle_test",
+    custodyType: "DEVELOPER",
+    address: "0x0000000000000000000000000000000000000a11",
+    blockchain: "BASE-SEPOLIA",
+    accountType: "EOA",
+    updateDate: "2026-02-21T00:00:00Z",
+    createDate: "2026-02-21T00:00:00Z"
+  },
+  {
+    id: "wid_circle_escrow_test",
+    state: "LIVE",
+    walletSetId: "wset_circle_test",
+    custodyType: "DEVELOPER",
+    address: "0x0000000000000000000000000000000000000b22",
+    blockchain: "BASE-SEPOLIA",
+    accountType: "EOA",
+    updateDate: "2026-02-21T00:00:00Z",
+    createDate: "2026-02-21T00:00:00Z"
+  }
+];
+const circleBootstrapRequests = [];
+const circleMockServer = http.createServer((req, res) => {
+  const chunks = [];
+  req.on("data", (d) => chunks.push(d));
+  req.on("end", () => {
+    const raw = Buffer.concat(chunks).toString("utf8");
+    let json = null;
+    try {
+      json = raw ? JSON.parse(raw) : null;
+    } catch {
+      json = null;
+    }
+    const parsedUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    const pathname = parsedUrl.pathname;
+    const method = String(req.method ?? "GET").toUpperCase();
+    const auth = String(req.headers.authorization ?? "").trim();
+    circleBootstrapRequests.push({
+      method,
+      pathname,
+      auth,
+      body: json
+    });
+    if (auth !== "Bearer TEST_API_KEY:mock_circle") {
+      res.statusCode = 401;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ code: 401, message: "Invalid credentials." }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/v1/w3s/wallets") {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ data: { wallets: circleWalletRows } }));
+      return;
+    }
+    const walletMatch = /^\/v1\/w3s\/wallets\/([^/]+)$/.exec(pathname);
+    if (method === "GET" && walletMatch) {
+      const walletId = decodeURIComponent(walletMatch[1]);
+      const row = circleWalletRows.find((item) => item.id === walletId);
+      if (!row) {
+        res.statusCode = 404;
+        res.setHeader("content-type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ code: 404, message: "wallet not found" }));
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ data: { wallet: row } }));
+      return;
+    }
+    const balancesMatch = /^\/v1\/w3s\/wallets\/([^/]+)\/balances$/.exec(pathname);
+    if (method === "GET" && balancesMatch) {
+      const walletId = decodeURIComponent(balancesMatch[1]);
+      const row = circleWalletRows.find((item) => item.id === walletId);
+      if (!row) {
+        res.statusCode = 404;
+        res.setHeader("content-type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ code: 404, message: "wallet not found" }));
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({
+          data: {
+            tokenBalances: [
+              {
+                token: {
+                  id: "eth_base_sepolia_token",
+                  blockchain: row.blockchain,
+                  name: "Base Ethereum-Sepolia",
+                  symbol: "ETH-SEPOLIA",
+                  decimals: 18,
+                  isNative: true
+                },
+                amount: "0.1"
+              },
+              {
+                token: {
+                  id: "usdc_base_sepolia_token",
+                  blockchain: row.blockchain,
+                  tokenAddress: "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+                  standard: "ERC20",
+                  name: "USDC",
+                  symbol: "USDC",
+                  decimals: 6,
+                  isNative: false
+                },
+                amount: "100"
+              }
+            ]
+          }
+        })
+      );
+      return;
+    }
+    if (method === "POST" && pathname === "/v1/faucet/drips") {
+      res.statusCode = 204;
+      res.end("");
+      return;
+    }
+
+    res.statusCode = 404;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ code: 404, message: "not_found" }));
+  });
+});
+
 const settldOpsBootstrapRequests = [];
 const settldOpsBootstrapState = { nextErrorStatus: null, nextErrorBody: null };
 const settldOpsApiRequests = [];
@@ -631,6 +763,26 @@ async function postTenantRuntimeBootstrap({ tenantId, body = {}, headers = {} } 
   };
 }
 
+async function postTenantWalletBootstrap({ tenantId, body = {}, headers = {} } = {}) {
+  const buf = Buffer.from(JSON.stringify(body ?? {}), "utf8");
+  const mergedHeaders = {
+    "x-api-key": "test_key",
+    "content-type": "application/json",
+    "content-length": String(buf.length),
+    ...headers
+  };
+  const res = await runReq({
+    method: "POST",
+    url: `/v1/tenants/${encodeURIComponent(tenantId)}/onboarding/wallet-bootstrap`,
+    headers: mergedHeaders,
+    bodyChunks: [buf]
+  });
+  return {
+    statusCode: res.statusCode,
+    json: res._body().length ? JSON.parse(res._body().toString("utf8")) : null
+  };
+}
+
 async function postTenantRuntimeBootstrapSmokeTest({ tenantId, body = {}, headers = {} } = {}) {
   const buf = Buffer.from(JSON.stringify(body ?? {}), "utf8");
   const mergedHeaders = {
@@ -1033,18 +1185,21 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
   let relayPort = null;
   let alertPort = null;
   let settldOpsPort = null;
+  let circlePort = null;
   settldOpsBootstrapRequests.length = 0;
   settldOpsBootstrapState.nextErrorStatus = null;
   settldOpsBootstrapState.nextErrorBody = null;
   settldOpsApiRequests.length = 0;
   settldOpsFlowState.walletBalances.clear();
   settldOpsFlowState.runs.clear();
+  circleBootstrapRequests.length = 0;
   try {
     ({ port: oauthPort } = await listenOnEphemeralLoopback(oauthMockServer, { hosts: ["127.0.0.1"] }));
     ({ port: stripePort } = await listenOnEphemeralLoopback(stripeMockServer, { hosts: ["127.0.0.1"] }));
     ({ port: relayPort } = await listenOnEphemeralLoopback(defaultRelayServer, { hosts: ["127.0.0.1"] }));
     ({ port: alertPort } = await listenOnEphemeralLoopback(deadLetterAlertServer, { hosts: ["127.0.0.1"] }));
     ({ port: settldOpsPort } = await listenOnEphemeralLoopback(settldOpsMockServer, { hosts: ["127.0.0.1"] }));
+    ({ port: circlePort } = await listenOnEphemeralLoopback(circleMockServer, { hosts: ["127.0.0.1"] }));
   } catch (err) {
     const cause = err?.cause ?? err;
     if (cause?.code === "EPERM" || cause?.code === "EACCES") {
@@ -1059,6 +1214,7 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
         await closeIfListening(defaultRelayServer);
         await closeIfListening(deadLetterAlertServer);
         await closeIfListening(settldOpsMockServer);
+        await closeIfListening(circleMockServer);
       } catch {
         // ignore
       }
@@ -1128,7 +1284,12 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     MAGIC_LINK_PUBLIC_SIGNUP_ENABLED: "1",
     MAGIC_LINK_SETTLD_API_BASE_URL: `http://127.0.0.1:${settldOpsPort}`,
     MAGIC_LINK_SETTLD_OPS_TOKEN: "ops_token_magic_link",
-    MAGIC_LINK_SETTLD_PROTOCOL: "1.0"
+    MAGIC_LINK_SETTLD_PROTOCOL: "1.0",
+
+    CIRCLE_API_KEY: "TEST_API_KEY:mock_circle",
+    CIRCLE_BASE_URL: `http://127.0.0.1:${circlePort}`,
+    CIRCLE_BLOCKCHAIN: "BASE-SEPOLIA",
+    X402_CIRCLE_RESERVE_MODE: "sandbox"
   });
 
   await t.after(async () => {
@@ -1142,6 +1303,7 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     await closeIfListening(defaultRelayServer);
     await closeIfListening(deadLetterAlertServer);
     await closeIfListening(settldOpsMockServer);
+    await closeIfListening(circleMockServer);
     await fs.rm(dataDir, { recursive: true, force: true });
     dataDir = null;
     magicLinkHandler = null;
@@ -1261,6 +1423,68 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     const auditFp = path.join(dataDir, "audit", tenantId, `${monthKeyUtcNow()}.jsonl`);
     const auditRaw = await fs.readFile(auditFp, "utf8");
     assert.match(auditRaw, /TENANT_RUNTIME_BOOTSTRAP_ISSUED/);
+  });
+
+  await t.test("tenant onboarding wallet bootstrap: returns provider env and does not expose circle api key", async () => {
+    const tenantId = "tenant_wallet_bootstrap";
+    await createTenant({
+      tenantId,
+      name: "Wallet Bootstrap Tenant",
+      contactEmail: "ops+wallet-bootstrap@example.com",
+      billingEmail: "billing+wallet-bootstrap@example.com"
+    });
+
+    const out = await postTenantWalletBootstrap({
+      tenantId,
+      body: {
+        provider: "circle",
+        circle: {
+          mode: "sandbox"
+        }
+      }
+    });
+    assert.equal(out.statusCode, 201, JSON.stringify(out.json));
+    assert.equal(out.json?.ok, true);
+    assert.equal(out.json?.schemaVersion, "MagicLinkWalletBootstrap.v1");
+    assert.equal(out.json?.tenantId, tenantId);
+    assert.equal(out.json?.walletBootstrap?.provider, "circle");
+    assert.equal(out.json?.walletBootstrap?.mode, "sandbox");
+    assert.equal(out.json?.walletBootstrap?.baseUrl, `http://127.0.0.1:${circlePort}`);
+    assert.equal(out.json?.walletBootstrap?.blockchain, "BASE-SEPOLIA");
+    assert.equal(out.json?.walletBootstrap?.wallets?.spend?.walletId, "wid_circle_spend_test");
+    assert.equal(out.json?.walletBootstrap?.wallets?.escrow?.walletId, "wid_circle_escrow_test");
+    assert.equal(out.json?.walletBootstrap?.tokenIdUsdc, "usdc_base_sepolia_token");
+    assert.equal(out.json?.walletBootstrap?.faucetEnabled, true);
+    assert.equal(out.json?.walletBootstrap?.env?.CIRCLE_BASE_URL, `http://127.0.0.1:${circlePort}`);
+    assert.equal(out.json?.walletBootstrap?.env?.CIRCLE_TOKEN_ID_USDC, "usdc_base_sepolia_token");
+    assert.equal(out.json?.walletBootstrap?.env?.CIRCLE_API_KEY, undefined);
+    assert.equal(String(out.json?.walletBootstrap?.env?.CIRCLE_ENTITY_SECRET_HEX ?? "").length, 64);
+
+    assert.ok(circleBootstrapRequests.some((row) => row.method === "GET" && row.pathname === "/v1/w3s/wallets"));
+
+    const auditFp = path.join(dataDir, "audit", tenantId, `${monthKeyUtcNow()}.jsonl`);
+    const auditRaw = await fs.readFile(auditFp, "utf8");
+    assert.match(auditRaw, /TENANT_WALLET_BOOTSTRAP_ISSUED/);
+  });
+
+  await t.test("tenant onboarding wallet bootstrap: rejects unsupported provider", async () => {
+    const tenantId = "tenant_wallet_bootstrap_bad_provider";
+    await createTenant({
+      tenantId,
+      name: "Wallet Bootstrap Bad Provider Tenant",
+      contactEmail: "ops+wallet-bootstrap-bad-provider@example.com",
+      billingEmail: "billing+wallet-bootstrap-bad-provider@example.com"
+    });
+
+    const out = await postTenantWalletBootstrap({
+      tenantId,
+      body: {
+        provider: "unknown-provider"
+      }
+    });
+    assert.equal(out.statusCode, 400, JSON.stringify(out.json));
+    assert.equal(out.json?.ok, false);
+    assert.equal(out.json?.code, "UNSUPPORTED_WALLET_PROVIDER");
   });
 
   await t.test("tenant onboarding runtime bootstrap smoke-test: initialize + tools/list", async () => {

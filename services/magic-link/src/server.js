@@ -25,6 +25,7 @@ import {
   normalizeSettlementPolicy,
   normalizeVerificationMethod
 } from "../../../src/core/settlement-policy.js";
+import { bootstrapWalletProvider, supportedWalletBootstrapProviders } from "../../../src/core/wallet-provider-bootstrap.js";
 import { createRemoteSignerClient } from "../../../packages/artifact-produce/src/signer/remote-client.js";
 import { readToolCommitBestEffort as readServiceCommitBestEffort, readToolVersionBestEffort as readServiceVersionBestEffort } from "../../../src/core/tool-provenance.js";
 import {
@@ -4593,6 +4594,120 @@ async function handleTenantOnboardingMetrics(req, res, tenantId, url) {
     },
     onboardingEmailSequence,
     generatedAt: nowIso()
+  });
+}
+
+async function handleTenantWalletBootstrap(req, res, tenantId) {
+  const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
+  if (!auth.ok) return;
+
+  let json = null;
+  try {
+    json = await readJsonBody(req, { maxBytes: 150_000 });
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, code: err?.code ?? "INVALID_REQUEST", message: err?.message ?? "invalid request" });
+  }
+  if (json === null) json = {};
+  if (!isPlainObject(json)) return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "body must be an object" });
+
+  const provider = typeof json.provider === "string" && json.provider.trim()
+    ? json.provider.trim().toLowerCase()
+    : "circle";
+  const supportedProviders = supportedWalletBootstrapProviders();
+  if (!supportedProviders.includes(provider)) {
+    return sendJson(res, 400, {
+      ok: false,
+      code: "UNSUPPORTED_WALLET_PROVIDER",
+      message: `provider must be one of: ${supportedProviders.join(", ")}`
+    });
+  }
+
+  if (provider === "circle") {
+    const circleApiKey = String(process.env.CIRCLE_API_KEY ?? "").trim();
+    if (!circleApiKey) {
+      return sendJson(res, 503, {
+        ok: false,
+        code: "WALLET_PROVIDER_NOT_CONFIGURED",
+        message: "Circle wallet bootstrap is not configured on this control plane"
+      });
+    }
+    const circleInput = isPlainObject(json.circle) ? json.circle : json;
+    const circleMode = typeof circleInput.mode === "string" && circleInput.mode.trim() ? circleInput.mode.trim().toLowerCase() : "auto";
+    const circleBaseUrl = typeof circleInput.baseUrl === "string" && circleInput.baseUrl.trim()
+      ? circleInput.baseUrl.trim()
+      : typeof process.env.CIRCLE_BASE_URL === "string" && process.env.CIRCLE_BASE_URL.trim()
+        ? process.env.CIRCLE_BASE_URL.trim()
+        : null;
+    const circleBlockchain = typeof circleInput.blockchain === "string" && circleInput.blockchain.trim()
+      ? circleInput.blockchain.trim()
+      : typeof process.env.CIRCLE_BLOCKCHAIN === "string" && process.env.CIRCLE_BLOCKCHAIN.trim()
+        ? process.env.CIRCLE_BLOCKCHAIN.trim()
+        : null;
+    const spendWalletId = typeof circleInput.spendWalletId === "string" && circleInput.spendWalletId.trim() ? circleInput.spendWalletId.trim() : null;
+    const escrowWalletId = typeof circleInput.escrowWalletId === "string" && circleInput.escrowWalletId.trim() ? circleInput.escrowWalletId.trim() : null;
+    const tokenIdUsdc = typeof circleInput.tokenIdUsdc === "string" && circleInput.tokenIdUsdc.trim() ? circleInput.tokenIdUsdc.trim() : null;
+    const faucet = typeof circleInput.faucet === "boolean" ? circleInput.faucet : null;
+    const entitySecretHex = typeof circleInput.entitySecretHex === "string" && circleInput.entitySecretHex.trim()
+      ? circleInput.entitySecretHex.trim()
+      : null;
+
+    let walletBootstrap = null;
+    try {
+      walletBootstrap = await bootstrapWalletProvider({
+        provider,
+        apiKey: circleApiKey,
+        mode: circleMode,
+        baseUrl: circleBaseUrl,
+        blockchain: circleBlockchain,
+        spendWalletId,
+        escrowWalletId,
+        tokenIdUsdc,
+        faucet,
+        includeApiKey: false,
+        entitySecretHex,
+        fetchImpl: fetch
+      });
+    } catch (err) {
+      return sendJson(res, 502, {
+        ok: false,
+        code: "WALLET_BOOTSTRAP_FAILED",
+        message: err?.message ?? "wallet bootstrap failed"
+      });
+    }
+
+    try {
+      await appendAuditRecord({
+        dataDir,
+        tenantId,
+        record: {
+          at: nowIso(),
+          action: "TENANT_WALLET_BOOTSTRAP_ISSUED",
+          actor: { method: auth.principal?.method ?? null, email: auth.principal?.email ?? null, role: auth.principal?.role ?? null },
+          targetType: "tenant",
+          targetId: tenantId,
+          details: {
+            provider,
+            mode: walletBootstrap?.mode ?? null,
+            baseUrl: walletBootstrap?.baseUrl ?? null
+          }
+        }
+      });
+    } catch {
+      // ignore audit write failures for bootstrap convenience endpoint
+    }
+
+    return sendJson(res, 201, {
+      ok: true,
+      schemaVersion: "MagicLinkWalletBootstrap.v1",
+      tenantId,
+      walletBootstrap
+    });
+  }
+
+  return sendJson(res, 400, {
+    ok: false,
+    code: "UNSUPPORTED_WALLET_PROVIDER",
+    message: `provider must be one of: ${supportedProviders.join(", ")}`
   });
 }
 
@@ -14680,6 +14795,13 @@ export async function magicLinkHandler(req, res) {
     if (tenantOnboardingMetricsMatch) {
       const tenantId = tenantOnboardingMetricsMatch[1];
       if (method === "GET") return await handleTenantOnboardingMetrics(req, res, tenantId, url);
+      return sendText(res, 405, "method not allowed\n");
+    }
+
+    const tenantWalletBootstrapMatch = /^\/v1\/tenants\/([a-zA-Z0-9_-]{1,64})\/onboarding\/wallet-bootstrap$/.exec(pathname);
+    if (tenantWalletBootstrapMatch) {
+      const tenantId = tenantWalletBootstrapMatch[1];
+      if (method === "POST") return await handleTenantWalletBootstrap(req, res, tenantId);
       return sendText(res, 405, "method not allowed\n");
     }
 

@@ -15,7 +15,7 @@ For host-specific setup (Claude, Cursor, Codex, OpenClaw), see `docs/QUICKSTART_
 Run guided setup first:
 
 ```bash
-settld setup
+npx -y settld setup
 ```
 
 Then run a smoke probe:

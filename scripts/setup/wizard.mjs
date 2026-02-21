@@ -877,7 +877,8 @@ export async function runWizard({
   argv = process.argv.slice(2),
   stdin = process.stdin,
   stdout = process.stdout,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  extraEnv = null
 } = {}) {
   const args = parseArgs(argv);
   if (args.help) {
@@ -908,6 +909,15 @@ export async function runWizard({
       tenantId: config.tenantId,
       apiKey: config.apiKey
     });
+  }
+  if (extraEnv && typeof extraEnv === "object" && !Array.isArray(extraEnv)) {
+    for (const [key, value] of Object.entries(extraEnv)) {
+      if (typeof key !== "string") continue;
+      const normalizedKey = key.trim();
+      if (!normalizedKey) continue;
+      if (value === null || value === undefined) continue;
+      env[normalizedKey] = String(value);
+    }
   }
   let profileApplyResult = null;
   if (!config.skipProfileApply && (config.profileFile || config.profileId)) {

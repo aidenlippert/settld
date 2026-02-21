@@ -8,7 +8,11 @@ function usage() {
   // eslint-disable-next-line no-console
   console.error("usage:");
   console.error("  settld --version");
+  console.error("  settld onboard [--help]");
   console.error("  settld setup [--help]");
+  console.error("  settld setup legacy [--help]");
+  console.error("  settld setup circle [--help]");
+  console.error("  settld setup openclaw [--help]");
   console.error("  settld doctor [--help] [--report <path>]");
   console.error("  settld conformance test [--case <id>] [--bin settld-verify] [--node-bin <path/to/settld-verify.js>] [--keep-temp]");
   console.error("  settld conformance list");
@@ -41,6 +45,7 @@ function usage() {
   console.error("  settld init capability <name> [--out <dir>] [--force]");
   console.error("");
   console.error("onboarding:");
+  console.error("  settld onboard");
   console.error("  settld setup");
   console.error("  settld setup --help");
   console.error("  settld dev up");
@@ -116,7 +121,21 @@ function main() {
   }
 
   if (cmd === "setup") {
-    return runNodeScript("scripts/setup/wizard.mjs", argv.slice(1));
+    const setupSubcommand = String(argv[1] ?? "").trim();
+    if (setupSubcommand === "openclaw") {
+      return runNodeScript("scripts/setup/openclaw-onboard.mjs", argv.slice(2));
+    }
+    if (setupSubcommand === "circle") {
+      return runNodeScript("scripts/setup/circle-bootstrap.mjs", argv.slice(2));
+    }
+    if (setupSubcommand === "legacy") {
+      return runNodeScript("scripts/setup/wizard.mjs", argv.slice(2));
+    }
+    return runNodeScript("scripts/setup/onboard.mjs", argv.slice(1));
+  }
+
+  if (cmd === "onboard") {
+    return runNodeScript("scripts/setup/onboard.mjs", argv.slice(1));
   }
 
   if (cmd === "doctor") {

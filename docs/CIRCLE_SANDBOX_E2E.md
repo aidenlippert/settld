@@ -34,6 +34,18 @@ Set these for sandbox runs:
 - `CIRCLE_WALLET_ID_ESCROW`
 - `CIRCLE_TOKEN_ID_USDC`
 
+Fastest way to generate these from your Circle account:
+
+```bash
+settld setup circle --api-key 'TEST_API_KEY:...' --mode auto --out-env ./.tmp/circle.env
+```
+
+Then load them:
+
+```bash
+set -a; source ./.tmp/circle.env; set +a
+```
+
 If your environment uses a different naming convention, map these into the adapter config before running tests.
 
 ## Suggested test flow

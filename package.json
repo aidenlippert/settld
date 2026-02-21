@@ -45,6 +45,9 @@
     "dev:magic-link": "node services/magic-link/src/server.js",
     "dev:x402-gateway": "node services/x402-gateway/src/server.js",
     "quickstart:x402": "node scripts/quickstart/x402.mjs",
+    "setup:onboard": "node scripts/setup/onboard.mjs",
+    "setup:circle": "node scripts/setup/circle-bootstrap.mjs",
+    "setup:openclaw": "node scripts/setup/openclaw-onboard.mjs",
     "start:prod": "NODE_ENV=production node src/api/server.js",
     "start:maintenance": "NODE_ENV=production node src/api/maintenance.js",
     "start:receiver": "NODE_ENV=production node services/receiver/src/server.js",
@@ -126,6 +129,7 @@
     "audit:packet": "node scripts/audit/build-audit-packet.mjs"
   },
   "dependencies": {
+    "@circle-fin/developer-controlled-wallets": "^10.1.0",
     "pg": "^8.11.5",
     "snarkjs": "^0.7.6"
   },

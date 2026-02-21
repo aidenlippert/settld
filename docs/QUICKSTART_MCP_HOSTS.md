@@ -10,7 +10,82 @@ For deeper MCP flow details and artifact examples, see `docs/QUICKSTART_MCP.md`.
 - Settld API reachable (`http://127.0.0.1:3000` for local or your hosted API)
 - Tenant API key (`keyId.secret`)
 
+### Recommended: one command for all hosts
+
+Use the unified onboarding wizard:
+
+```bash
+settld setup
+```
+
+It guides:
+
+- host selection (`codex`/`claude`/`cursor`/`openclaw`)
+- wallet mode (`managed`/`byo`/`none`)
+- preflight checks (API health, tenant key probe, host config path check)
+- policy apply + smoke check
+
+If you need offline setup only, add `--no-preflight`.
+
+If you only want environment validation without writing host config:
+
+```bash
+settld setup --preflight-only --report-path ./.tmp/setup-preflight.json
+```
+
+### Optional: One-command Circle env bootstrap (wallet IDs + token ID + entity secret)
+
+If you are wiring Circle rails and do not want to manually hunt wallet/token/env values:
+
+```bash
+settld setup circle --api-key 'TEST_API_KEY:...' --mode auto --out-env ./.tmp/circle.env
+```
+
+What it does:
+
+- auto-detects Circle API host (`api-sandbox` vs `api`)
+- selects spend/escrow wallet IDs from your account
+- discovers USDC token ID from wallet balances
+- generates `CIRCLE_ENTITY_SECRET_HEX`
+- requests faucet topups in sandbox mode
+- prints shell exports and Railway-ready `KEY=VALUE` lines
+
 ## 1) One-command host setup (recommended)
+
+### Fastest OpenClaw end-to-end path (wallet + host wiring)
+
+If you want one command that does wallet bootstrap plus OpenClaw host setup:
+
+```bash
+settld setup openclaw \
+  --base-url https://api.settld.work \
+  --tenant-id tenant_default \
+  --settld-api-key 'sk_live_xxx.yyy' \
+  --profile-id engineering-spend \
+  --out-env ./.tmp/openclaw.env
+```
+
+By default (`--wallet-bootstrap auto`):
+
+- if `--circle-api-key` (or `CIRCLE_API_KEY`) is present, setup runs local Circle bootstrap.
+- otherwise it calls the hosted onboarding endpoint (`/onboarding/wallet-bootstrap`) so users do not need local Circle credentials.
+
+You can force either path:
+
+```bash
+# force local Circle bootstrap
+settld setup openclaw ... --wallet-bootstrap local --circle-api-key 'TEST_API_KEY:...'
+
+# force hosted wallet bootstrap
+settld setup openclaw ... --wallet-bootstrap remote
+```
+
+This orchestrates:
+
+- Circle wallet/token/env bootstrap
+- OpenClaw MCP host config write
+- Starter policy apply
+- MCP smoke check
 
 Each command below does all of this:
 
@@ -23,37 +98,37 @@ Each command below does all of this:
 ### Codex
 
 ```bash
-settld setup --yes --mode manual --host codex --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --non-interactive --host codex --base-url http://127.0.0.1:3000 --tenant-id tenant_default --settld-api-key sk_live_xxx.yyy --wallet-mode none --profile-id engineering-spend --smoke
 ```
 
 ### Claude
 
 ```bash
-settld setup --yes --mode manual --host claude --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --non-interactive --host claude --base-url http://127.0.0.1:3000 --tenant-id tenant_default --settld-api-key sk_live_xxx.yyy --wallet-mode none --profile-id engineering-spend --smoke
 ```
 
 ### Cursor
 
 ```bash
-settld setup --yes --mode manual --host cursor --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --non-interactive --host cursor --base-url http://127.0.0.1:3000 --tenant-id tenant_default --settld-api-key sk_live_xxx.yyy --wallet-mode none --profile-id engineering-spend --smoke
 ```
 
 ### OpenClaw
 
 ```bash
-settld setup --yes --mode manual --host openclaw --base-url http://127.0.0.1:3000 --tenant-id tenant_default --api-key sk_live_xxx.yyy --profile-id engineering-spend --smoke
+settld setup --non-interactive --host openclaw --base-url http://127.0.0.1:3000 --tenant-id tenant_default --settld-api-key sk_live_xxx.yyy --wallet-mode none --profile-id engineering-spend --smoke
 ```
 
-Hosted bootstrap mode (runtime key minted by onboarding endpoint):
+Managed wallet bootstrap mode (wallet env minted by onboarding endpoint):
 
 ```bash
-settld setup --yes --mode bootstrap --host codex --base-url https://api.settld.work --tenant-id tenant_default --bootstrap-api-key mlk_admin_xxx --bootstrap-key-id sk_runtime --bootstrap-scopes runs:read,runs:write --idempotency-key setup_codex_bootstrap_1
+settld setup --non-interactive --host codex --base-url https://api.settld.work --tenant-id tenant_default --settld-api-key sk_live_xxx.yyy --wallet-mode managed --wallet-bootstrap remote --profile-id engineering-spend --smoke
 ```
 
 Common setup flags:
 
 - `--skip-profile-apply`: host setup only, no policy apply
-- `--profile-file ./path/to/profile.json`: use your own profile file
+- `--wallet-mode none`: skip wallet rails entirely
 - `--dry-run`: preview file updates only (no writes)
 
 Sanity check anytime:

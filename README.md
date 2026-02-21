@@ -67,6 +67,31 @@ The core mental model in this repo:
 
 ## Quick start
 
+Agent host onboarding (Codex / Claude / Cursor / OpenClaw), with guided wallet + policy setup:
+
+```sh
+npx -y settld setup
+```
+
+Preflight-only check (no host config write), with JSON report:
+
+```sh
+npx -y settld setup --preflight-only --report-path ./.tmp/setup-preflight.json
+```
+
+If you prefer global install:
+
+```sh
+npm install -g settld
+settld setup
+```
+
+Legacy setup wizard (advanced / old flags):
+
+```sh
+settld setup legacy
+```
+
 Start the API:
 
 ```sh
