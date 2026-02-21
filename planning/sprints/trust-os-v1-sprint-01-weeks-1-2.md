@@ -15,8 +15,7 @@ Ship the first enforceability slice of Trust OS v1:
 
 ## Suggested assignees
 
-- `aidenlippert` (Tech Lead + Backend): policy runtime, execution binding, operator/emergency APIs.
-- `lippertkarson` (QA/DevOps): bypass regression, offline verify parity, baseline evidence gate.
+- `aidenlippert` (Tech Lead + Backend + QA/DevOps): policy runtime, execution binding, operator/emergency APIs, bypass regression, offline verify parity, baseline evidence gate.
 
 ## Committed tickets (Sprint 01)
 
