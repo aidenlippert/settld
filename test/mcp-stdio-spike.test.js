@@ -114,6 +114,11 @@ test("mcp spike: initialize -> tools/list -> tools/call (submit_evidence)", asyn
   assert.ok(names.includes("settld.submit_evidence"));
   assert.ok(names.includes("settld.settle_run"));
   assert.ok(names.includes("settld.open_dispute"));
+  assert.ok(names.includes("settld.dispute_add_evidence"));
+  assert.ok(names.includes("settld.dispute_escalate"));
+  assert.ok(names.includes("settld.dispute_close"));
+  assert.ok(names.includes("settld.arbitration_open"));
+  assert.ok(names.includes("settld.arbitration_issue_verdict"));
   assert.ok(names.includes("settld.x402_gate_create"));
   assert.ok(names.includes("settld.x402_gate_verify"));
   assert.ok(names.includes("settld.x402_gate_get"));
@@ -135,6 +140,187 @@ test("mcp spike: initialize -> tools/list -> tools/call (submit_evidence)", asyn
   // Sanity: we hit both endpoints.
   const urls = requests.map((r) => r.url);
   assert.deepEqual(urls, ["/agents/agt_1/runs/run_1/events", "/agents/agt_1/runs/run_1/events"]);
+});
+
+test("mcp spike: dispute and arbitration tools map to dispute APIs", async () => {
+  const requests = [];
+  const runId = "run_dispute_1";
+  const api = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      const bodyText = Buffer.concat(chunks).toString("utf8");
+      const parsedBody = bodyText ? JSON.parse(bodyText) : null;
+      requests.push({
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        body: parsedBody
+      });
+
+      if (req.method === "POST" && req.url === `/runs/${runId}/dispute/evidence`) {
+        assert.equal(req.headers["x-settld-protocol"], "1.0");
+        assert.ok(typeof req.headers["x-idempotency-key"] === "string" && req.headers["x-idempotency-key"].length > 0);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ settlement: { runId, disputeStatus: "open" }, disputeEvidence: { evidenceRef: parsedBody?.evidenceRef } }));
+        return;
+      }
+      if (req.method === "POST" && req.url === `/runs/${runId}/dispute/escalate`) {
+        assert.equal(req.headers["x-settld-protocol"], "1.0");
+        assert.ok(typeof req.headers["x-idempotency-key"] === "string" && req.headers["x-idempotency-key"].length > 0);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ settlement: { runId, disputeStatus: "open" }, disputeEscalation: { escalationLevel: parsedBody?.escalationLevel } }));
+        return;
+      }
+      if (req.method === "POST" && req.url === `/runs/${runId}/dispute/close`) {
+        assert.equal(req.headers["x-settld-protocol"], "1.0");
+        assert.ok(typeof req.headers["x-idempotency-key"] === "string" && req.headers["x-idempotency-key"].length > 0);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ settlement: { runId, disputeStatus: "closed" } }));
+        return;
+      }
+      if (req.method === "POST" && req.url === `/runs/${runId}/arbitration/open`) {
+        assert.equal(req.headers["x-settld-protocol"], "1.0");
+        assert.ok(typeof req.headers["x-idempotency-key"] === "string" && req.headers["x-idempotency-key"].length > 0);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ arbitrationCase: { caseId: "arb_case_1", runId, status: "under_review" } }));
+        return;
+      }
+      if (req.method === "POST" && req.url === `/runs/${runId}/arbitration/verdict`) {
+        assert.equal(req.headers["x-settld-protocol"], "1.0");
+        assert.ok(typeof req.headers["x-idempotency-key"] === "string" && req.headers["x-idempotency-key"].length > 0);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ arbitrationCase: { caseId: parsedBody?.caseId, runId, status: "verdict_issued" } }));
+        return;
+      }
+
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "not found" }));
+    });
+  });
+
+  const addr = await listen(api);
+  const baseUrl = `http://${addr.address}:${addr.port}`;
+
+  const child = spawn(process.execPath, ["scripts/mcp/settld-mcp-server.mjs"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      SETTLD_BASE_URL: baseUrl,
+      SETTLD_TENANT_ID: "tenant_default",
+      SETTLD_API_KEY: "sk_test_1.secret",
+      SETTLD_PROTOCOL: "1.0"
+    }
+  });
+
+  child.stdout.setEncoding("utf8");
+
+  const pending = new Map();
+  let buf = "";
+  child.stdout.on("data", (chunk) => {
+    buf += chunk;
+    for (;;) {
+      const idx = buf.indexOf("\n");
+      if (idx === -1) break;
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      if (msg && msg.id !== undefined && pending.has(msg.id)) {
+        const { resolve } = pending.get(msg.id);
+        pending.delete(msg.id);
+        resolve(msg);
+      }
+    }
+  });
+
+  const rpc = async (method, params = {}) => {
+    const id = String(Math.random()).slice(2);
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    return await new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      setTimeout(() => {
+        if (!pending.has(id)) return;
+        pending.delete(id);
+        reject(new Error(`timeout waiting for ${method}`));
+      }, 5000).unref?.();
+    });
+  };
+
+  const init = await rpc("initialize", {
+    protocolVersion: "2024-11-05",
+    clientInfo: { name: "node-test", version: "0" },
+    capabilities: {}
+  });
+  assert.equal(init.result?.serverInfo?.name, "settld-mcp-spike");
+
+  const evidence = await rpc("tools/call", {
+    name: "settld.dispute_add_evidence",
+    arguments: { runId, disputeId: "dsp_1", evidenceRef: "evidence://dispute/1.json", reason: "counterparty proof" }
+  });
+  assert.equal(evidence.result?.isError, false);
+  assert.equal(JSON.parse(evidence.result?.content?.[0]?.text ?? "{}")?.result?.disputeEvidence?.evidenceRef, "evidence://dispute/1.json");
+
+  const escalate = await rpc("tools/call", {
+    name: "settld.dispute_escalate",
+    arguments: { runId, disputeId: "dsp_1", escalationLevel: "l2_arbiter", reason: "needs review" }
+  });
+  assert.equal(escalate.result?.isError, false);
+  assert.equal(JSON.parse(escalate.result?.content?.[0]?.text ?? "{}")?.result?.disputeEscalation?.escalationLevel, "l2_arbiter");
+
+  const close = await rpc("tools/call", {
+    name: "settld.dispute_close",
+    arguments: { runId, disputeId: "dsp_1", resolution: { outcome: "rejected", summary: "closed by ops" } }
+  });
+  assert.equal(close.result?.isError, false);
+  assert.equal(JSON.parse(close.result?.content?.[0]?.text ?? "{}")?.result?.settlement?.disputeStatus, "closed");
+
+  const arbOpen = await rpc("tools/call", {
+    name: "settld.arbitration_open",
+    arguments: { runId, caseId: "arb_case_1", disputeId: "dsp_1", arbiterAgentId: "agt_arbiter_1", evidenceRefs: [] }
+  });
+  assert.equal(arbOpen.result?.isError, false);
+  assert.equal(JSON.parse(arbOpen.result?.content?.[0]?.text ?? "{}")?.result?.arbitrationCase?.status, "under_review");
+
+  const arbVerdict = await rpc("tools/call", {
+    name: "settld.arbitration_issue_verdict",
+    arguments: {
+      runId,
+      caseId: "arb_case_1",
+      arbitrationVerdict: {
+        schemaVersion: "ArbitrationVerdict.v1",
+        verdictId: "arb_vrd_1",
+        caseId: "arb_case_1",
+        runId,
+        disputeId: "dsp_1",
+        arbiterAgentId: "agt_arbiter_1",
+        outcome: "accepted",
+        releaseRatePct: 100,
+        rationale: "payee win",
+        evidenceRefs: [],
+        issuedAt: "2026-02-21T00:00:00.000Z",
+        signerKeyId: "agent_key_arbiter_1",
+        signature: "sig_base64",
+        verdictHash: "f".repeat(64)
+      }
+    }
+  });
+  assert.equal(arbVerdict.result?.isError, false);
+  assert.equal(JSON.parse(arbVerdict.result?.content?.[0]?.text ?? "{}")?.result?.arbitrationCase?.status, "verdict_issued");
+
+  child.kill("SIGTERM");
+  await Promise.race([onceEvent(child, "exit"), new Promise((r) => setTimeout(r, 100))]);
+  api.close();
+
+  const endpoints = requests.map((row) => `${row.method} ${row.url}`);
+  assert.deepEqual(endpoints, [
+    `POST /runs/${runId}/dispute/evidence`,
+    `POST /runs/${runId}/dispute/escalate`,
+    `POST /runs/${runId}/dispute/close`,
+    `POST /runs/${runId}/arbitration/open`,
+    `POST /runs/${runId}/arbitration/verdict`
+  ]);
 });
 
 test("mcp spike: x402 gate create -> verify -> get with idempotency", async () => {
