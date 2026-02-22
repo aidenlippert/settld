@@ -10,6 +10,7 @@ This checklist is the “no surprises” gate for shipping Settld as a product (
   - `kernel_v0_ship_gate`
   - `production_cutover_gate`
   - `offline_verification_parity_gate` (NOO-50)
+  - `onboarding_host_success_gate`
 - `CHANGELOG.md` is updated and accurate.
 - Protocol v1 freeze gate is satisfied (no accidental v1 schema/vector drift).
 - Minimum production topology is defined for the target environment:
@@ -59,6 +60,7 @@ Release-gate evidence should also include:
 - when signing is configured, packet includes `signature` with `schemaVersion=LaunchCutoverPacketSignature.v1`
 - `artifacts/gates/production-cutover-gate.json`
 - `artifacts/gates/offline-verification-parity-gate.json` (NOO-50)
+- `artifacts/gates/onboarding-host-success-gate.json`
 - `artifacts/gates/release-promotion-guard.json` (NOO-65)
 
 See `docs/spec/SUPPLY_CHAIN.md` for the release-channel threat model and verification posture.
@@ -167,7 +169,7 @@ Promotion guard order (fail-closed):
 
 1. NOO-50 parity gate report is generated on main (`artifacts/gates/offline-verification-parity-gate.json`).
 2. S13 go-live workflow report set is generated for the same release commit (`s13-go-live-gate.json` + `s13-launch-cutover-packet.json`).
-3. Release workflow binds all required gate artifacts (kernel, production cutover, NOO-50 parity, S13 go-live, S13 launch packet, hosted baseline evidence) into NOO-65.
+3. Release workflow binds all required gate artifacts (kernel, production cutover, NOO-50 parity, onboarding host success, S13 go-live, S13 launch packet, hosted baseline evidence) into NOO-65.
 4. Release workflow must emit `artifacts/gates/release-promotion-guard.json` with `verdict.ok=true` before artifact publish jobs execute.
 
 Related runbooks:

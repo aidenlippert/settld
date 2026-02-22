@@ -322,7 +322,7 @@ jobs:
             core.info(`tests.yml run: ${testsRun.id} (${testsRun.html_url})`);
             core.info(`go-live-gate.yml run: ${goLiveRun.id} (${goLiveRun.html_url})`);
 
-      - name: Download tests.yml artifacts (kernel/prod/parity gates)
+      - name: Download tests.yml artifacts (kernel/prod/parity/onboarding gates)
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
@@ -366,6 +366,7 @@ jobs:
           copy_required "/tmp/release-upstream/tests" "kernel-v0-ship-gate.json" "artifacts/gates/kernel-v0-ship-gate.json"
           copy_required "/tmp/release-upstream/tests" "production-cutover-gate.json" "artifacts/gates/production-cutover-gate.json"
           copy_required "/tmp/release-upstream/tests" "offline-verification-parity-gate.json" "artifacts/gates/offline-verification-parity-gate.json"
+          copy_required "/tmp/release-upstream/tests" "onboarding-host-success-gate.json" "artifacts/gates/onboarding-host-success-gate.json"
           copy_required "/tmp/release-upstream/go-live" "s13-go-live-gate.json" "artifacts/gates/s13-go-live-gate.json"
           copy_required "/tmp/release-upstream/go-live" "s13-launch-cutover-packet.json" "artifacts/gates/s13-launch-cutover-packet.json"
           copy_required "/tmp/release-upstream/release-gate" "hosted-baseline-release-gate.json" "artifacts/ops/hosted-baseline-release-gate.json"
@@ -379,6 +380,7 @@ jobs:
             --kernel-gate artifacts/gates/kernel-v0-ship-gate.json \
             --production-gate artifacts/gates/production-cutover-gate.json \
             --offline-parity-gate artifacts/gates/offline-verification-parity-gate.json \
+            --onboarding-host-success-gate artifacts/gates/onboarding-host-success-gate.json \
             --go-live-gate artifacts/gates/s13-go-live-gate.json \
             --launch-packet artifacts/gates/s13-launch-cutover-packet.json \
             --baseline-evidence artifacts/ops/hosted-baseline-release-gate.json \
@@ -394,6 +396,7 @@ jobs:
             artifacts/gates/kernel-v0-ship-gate.json
             artifacts/gates/production-cutover-gate.json
             artifacts/gates/offline-verification-parity-gate.json
+            artifacts/gates/onboarding-host-success-gate.json
             artifacts/gates/s13-go-live-gate.json
             artifacts/gates/s13-launch-cutover-packet.json
             artifacts/ops/hosted-baseline-release-gate.json

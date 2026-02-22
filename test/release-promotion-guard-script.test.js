@@ -26,6 +26,10 @@ async function writeRequiredArtifacts(root, { productionGateOk = true } = {}) {
     schemaVersion: "OfflineVerificationParityGateReport.v1",
     verdict: { ok: true, requiredChecks: 1, passedChecks: 1 }
   });
+  await writeJson(root, "artifacts/gates/onboarding-host-success-gate.json", {
+    schemaVersion: "OnboardingHostSuccessGateReport.v1",
+    verdict: { ok: true, requiredHosts: 4, passedHosts: 4 }
+  });
   await writeJson(root, "artifacts/gates/s13-go-live-gate.json", {
     schemaVersion: "GoLiveGateReport.v1",
     verdict: { ok: true, requiredChecks: 1, passedChecks: 1 }
@@ -52,6 +56,8 @@ test("release promotion guard parser: uses env defaults and explicit overrides",
       "artifacts/gates/override.json",
       "--offline-parity-gate",
       "artifacts/custom/offline-parity.json",
+      "--onboarding-host-success-gate",
+      "artifacts/custom/onboarding-host-success.json",
       "--promotion-ref",
       "abc123"
     ],
@@ -65,6 +71,7 @@ test("release promotion guard parser: uses env defaults and explicit overrides",
   assert.equal(args.reportPath, path.resolve(cwd, "artifacts/custom/release-promotion-guard.json"));
   assert.equal(args.kernelV0ShipGatePath, path.resolve(cwd, "artifacts/custom/kernel-gate.json"));
   assert.equal(args.offlineVerificationParityGatePath, path.resolve(cwd, "artifacts/custom/offline-parity.json"));
+  assert.equal(args.onboardingHostSuccessGatePath, path.resolve(cwd, "artifacts/custom/onboarding-host-success.json"));
   assert.equal(args.overridePath, path.resolve(cwd, "artifacts/gates/override.json"));
   assert.equal(args.promotionRef, "abc123");
   assert.equal(args.nowIso, "2026-02-21T18:00:00.000Z");
@@ -113,6 +120,7 @@ test("release promotion guard verdict aggregation: fails closed on missing requi
       { id: "kernel_v0_ship_gate", status: "passed" },
       { id: "production_cutover_gate", status: "passed" },
       { id: "offline_verification_parity_gate", status: "passed" },
+      { id: "onboarding_host_success_gate", status: "passed" },
       { id: "go_live_gate", status: "passed" },
       { id: "launch_cutover_packet", status: "passed" }
     ],
@@ -121,8 +129,8 @@ test("release promotion guard verdict aggregation: fails closed on missing requi
 
   assert.equal(verdict.ok, false);
   assert.equal(verdict.status, "fail");
-  assert.equal(verdict.requiredArtifacts, 6);
-  assert.equal(verdict.passedArtifacts, 5);
+  assert.equal(verdict.requiredArtifacts, 7);
+  assert.equal(verdict.passedArtifacts, 6);
   assert.equal(verdict.failedArtifacts, 1);
   assert.deepEqual(verdict.blockingArtifactIds, ["hosted_baseline_evidence"]);
 });

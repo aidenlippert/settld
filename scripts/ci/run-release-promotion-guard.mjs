@@ -12,6 +12,7 @@ const DEFAULT_REPORT_PATH = "artifacts/gates/release-promotion-guard.json";
 const DEFAULT_KERNEL_GATE_PATH = "artifacts/gates/kernel-v0-ship-gate.json";
 const DEFAULT_PRODUCTION_CUTOVER_GATE_PATH = "artifacts/gates/production-cutover-gate.json";
 const DEFAULT_OFFLINE_PARITY_GATE_PATH = "artifacts/gates/offline-verification-parity-gate.json";
+const DEFAULT_ONBOARDING_HOST_SUCCESS_GATE_PATH = "artifacts/gates/onboarding-host-success-gate.json";
 const DEFAULT_GO_LIVE_GATE_PATH = "artifacts/gates/s13-go-live-gate.json";
 const DEFAULT_LAUNCH_CUTOVER_PACKET_PATH = "artifacts/gates/s13-launch-cutover-packet.json";
 const DEFAULT_HOSTED_BASELINE_EVIDENCE_PATH = "artifacts/ops/hosted-baseline-evidence-production.json";
@@ -34,6 +35,12 @@ const REQUIRED_ARTIFACT_SPECS = [
     label: "Offline verification parity gate",
     expectedSchemaVersion: "OfflineVerificationParityGateReport.v1",
     pathKey: "offlineVerificationParityGatePath"
+  },
+  {
+    id: "onboarding_host_success_gate",
+    label: "Onboarding host success gate",
+    expectedSchemaVersion: "OnboardingHostSuccessGateReport.v1",
+    pathKey: "onboardingHostSuccessGatePath"
   },
   {
     id: "go_live_gate",
@@ -66,6 +73,7 @@ function usage() {
     "  --kernel-gate <file>               Kernel v0 ship gate report path",
     "  --production-gate <file>           Production cutover gate report path",
     "  --offline-parity-gate <file>       Offline verification parity gate report path",
+    "  --onboarding-host-success-gate <file> Onboarding host success gate report path",
     "  --go-live-gate <file>              Go-live gate report path",
     "  --launch-packet <file>             Launch cutover packet report path",
     "  --baseline-evidence <file>         Hosted baseline evidence report path",
@@ -80,6 +88,7 @@ function usage() {
     "  KERNEL_V0_SHIP_GATE_REPORT_PATH",
     "  PRODUCTION_CUTOVER_GATE_REPORT_PATH",
     "  OFFLINE_VERIFICATION_PARITY_GATE_REPORT_PATH",
+    "  ONBOARDING_HOST_SUCCESS_GATE_REPORT_PATH",
     "  GO_LIVE_GATE_REPORT_PATH",
     "  LAUNCH_CUTOVER_PACKET_PATH",
     "  HOSTED_BASELINE_EVIDENCE_PATH",
@@ -142,6 +151,10 @@ export function parseArgs(argv, env = process.env, cwd = process.cwd()) {
       cwd,
       normalizeOptionalString(env.OFFLINE_VERIFICATION_PARITY_GATE_REPORT_PATH) ?? DEFAULT_OFFLINE_PARITY_GATE_PATH
     ),
+    onboardingHostSuccessGatePath: path.resolve(
+      cwd,
+      normalizeOptionalString(env.ONBOARDING_HOST_SUCCESS_GATE_REPORT_PATH) ?? DEFAULT_ONBOARDING_HOST_SUCCESS_GATE_PATH
+    ),
     goLiveGatePath: path.resolve(cwd, normalizeOptionalString(env.GO_LIVE_GATE_REPORT_PATH) ?? DEFAULT_GO_LIVE_GATE_PATH),
     launchCutoverPacketPath: path.resolve(cwd, normalizeOptionalString(env.LAUNCH_CUTOVER_PACKET_PATH) ?? DEFAULT_LAUNCH_CUTOVER_PACKET_PATH),
     hostedBaselineEvidencePath: path.resolve(
@@ -186,6 +199,13 @@ export function parseArgs(argv, env = process.env, cwd = process.cwd()) {
       const value = normalizeOptionalString(argv[i + 1]);
       if (!value) throw new Error("--go-live-gate requires a file path");
       out.goLiveGatePath = path.resolve(cwd, value);
+      i += 1;
+      continue;
+    }
+    if (arg === "--onboarding-host-success-gate") {
+      const value = normalizeOptionalString(argv[i + 1]);
+      if (!value) throw new Error("--onboarding-host-success-gate requires a file path");
+      out.onboardingHostSuccessGatePath = path.resolve(cwd, value);
       i += 1;
       continue;
     }
