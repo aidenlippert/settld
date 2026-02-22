@@ -437,6 +437,18 @@ export function createApi({
     RESUME: "resume"
   });
   const EMERGENCY_ACTIONS = new Set(Object.values(EMERGENCY_ACTION));
+  const EMERGENCY_ROLE = Object.freeze({
+    ONCALL: "oncall",
+    OPS_ADMIN: "ops_admin",
+    INCIDENT_COMMANDER: "incident_commander"
+  });
+  const EMERGENCY_SENSITIVE_CONTROL_TYPES = new Set([EMERGENCY_CONTROL_TYPE.REVOKE, EMERGENCY_CONTROL_TYPE.KILL_SWITCH]);
+  const EMERGENCY_ALLOWED_ROLES_STANDARD = new Set([
+    EMERGENCY_ROLE.ONCALL,
+    EMERGENCY_ROLE.OPS_ADMIN,
+    EMERGENCY_ROLE.INCIDENT_COMMANDER
+  ]);
+  const EMERGENCY_ALLOWED_ROLES_SENSITIVE = new Set([EMERGENCY_ROLE.OPS_ADMIN, EMERGENCY_ROLE.INCIDENT_COMMANDER]);
 
   const opsTokensRaw = opsTokens ?? (typeof process !== "undefined" ? (process.env.PROXY_OPS_TOKENS ?? null) : null);
   const legacyOpsTokenRaw = opsToken ?? (typeof process !== "undefined" ? (process.env.PROXY_OPS_TOKEN ?? null) : null);
@@ -21507,6 +21519,23 @@ export function createApi({
     return out;
   }
 
+  function emergencyActionTouchesSensitiveControl({ action, resumeControlTypes = [] } = {}) {
+    const normalizedAction = normalizeEmergencyActionInput(action ?? null);
+    if (normalizedAction === EMERGENCY_ACTION.REVOKE || normalizedAction === EMERGENCY_ACTION.KILL_SWITCH) return true;
+    if (normalizedAction !== EMERGENCY_ACTION.RESUME) return false;
+    const normalizedResumeControlTypes = normalizeEmergencyResumeControlTypesInput(resumeControlTypes);
+    return normalizedResumeControlTypes.some((controlType) => EMERGENCY_SENSITIVE_CONTROL_TYPES.has(controlType));
+  }
+
+  function emergencyAllowedOperatorRolesForAction({ action, resumeControlTypes = [] } = {}) {
+    const sensitive = emergencyActionTouchesSensitiveControl({ action, resumeControlTypes });
+    return new Set(sensitive ? EMERGENCY_ALLOWED_ROLES_SENSITIVE : EMERGENCY_ALLOWED_ROLES_STANDARD);
+  }
+
+  function emergencyDualControlRequiredForAction({ action, resumeControlTypes = [] } = {}) {
+    return emergencyActionTouchesSensitiveControl({ action, resumeControlTypes });
+  }
+
   function emergencyBlockedCodeForControlType(controlType) {
     const normalized = normalizeEmergencyControlTypeInput(controlType, { allowNull: false });
     if (normalized === EMERGENCY_CONTROL_TYPE.KILL_SWITCH) return "EMERGENCY_KILL_SWITCH_ACTIVE";
@@ -21655,13 +21684,19 @@ export function createApi({
     return signerKey;
   }
 
-  async function verifyEmergencyOperatorActionInput({ tenantId, emergencyAction, operatorActionInput }) {
+  async function verifyEmergencyOperatorActionInput({
+    tenantId,
+    emergencyAction,
+    operatorActionInput,
+    allowedRoles = null,
+    actionLabel = "operatorAction"
+  }) {
     if (!operatorActionInput || typeof operatorActionInput !== "object" || Array.isArray(operatorActionInput)) {
       return {
         ok: false,
         statusCode: 400,
         code: "OPERATOR_ACTION_REQUIRED",
-        message: "operatorAction is required and must be an object"
+        message: `${actionLabel} is required and must be an object`
       };
     }
 
@@ -21673,7 +21708,7 @@ export function createApi({
         ok: false,
         statusCode: 400,
         code: "SCHEMA_INVALID",
-        message: "operatorAction must be canonicalizable JSON"
+        message: `${actionLabel} must be canonicalizable JSON`
       };
     }
 
@@ -21686,7 +21721,7 @@ export function createApi({
         ok: false,
         statusCode: 400,
         code: "OPERATOR_ACTION_SIGNER_KEY_REQUIRED",
-        message: "operatorAction.signature.keyId is required"
+        message: `${actionLabel}.signature.keyId is required`
       };
     }
 
@@ -21696,7 +21731,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNER_UNKNOWN",
-        message: "operatorAction signer key is not registered"
+        message: `${actionLabel} signer key is not registered`
       };
     }
 
@@ -21708,7 +21743,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNER_INVALID",
-        message: "operatorAction signer key status is invalid"
+        message: `${actionLabel} signer key status is invalid`
       };
     }
     if (signerStatus !== SIGNER_KEY_STATUS.ACTIVE) {
@@ -21716,7 +21751,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNER_REVOKED",
-        message: "operatorAction signer key is not active"
+        message: `${actionLabel} signer key is not active`
       };
     }
 
@@ -21728,7 +21763,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNER_INVALID",
-        message: "operatorAction signer key purpose is invalid"
+        message: `${actionLabel} signer key purpose is invalid`
       };
     }
     if (signerPurpose !== SIGNER_KEY_PURPOSE.OPERATOR) {
@@ -21736,7 +21771,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNER_PURPOSE_MISMATCH",
-        message: "operatorAction signer key purpose must be operator"
+        message: `${actionLabel} signer key purpose must be operator`
       };
     }
 
@@ -21746,7 +21781,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNER_UNKNOWN",
-        message: "operatorAction signer key has no public key"
+        message: `${actionLabel} signer key has no public key`
       };
     }
     if (store.publicKeyByKeyId instanceof Map) {
@@ -21765,7 +21800,7 @@ export function createApi({
         ok: false,
         statusCode: isSchemaCode ? 400 : 409,
         code: verification.code ?? "OPERATOR_ACTION_SIGNATURE_INVALID",
-        message: verification.error ?? "operatorAction verification failed"
+        message: verification.error ?? `${actionLabel} verification failed`
       };
     }
 
@@ -21778,7 +21813,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_SIGNED_ARTIFACT_INVALID",
-        message: "operatorAction signed artifact is invalid"
+        message: `${actionLabel} signed artifact is invalid`
       };
     }
 
@@ -21792,7 +21827,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_TENANT_REQUIRED",
-        message: "operatorAction.actor.tenantId is required"
+        message: `${actionLabel}.actor.tenantId is required`
       };
     }
     if (actionTenantId !== expectedTenantId) {
@@ -21800,7 +21835,7 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_TENANT_MISMATCH",
-        message: "operatorAction.actor.tenantId does not match request tenant"
+        message: `${actionLabel}.actor.tenantId does not match request tenant`
       };
     }
 
@@ -21813,13 +21848,71 @@ export function createApi({
         ok: false,
         statusCode: 409,
         code: "OPERATOR_ACTION_DECISION_MISMATCH",
-        message: `operatorAction.action must be ${expectedOperatorDecision} for emergency action ${String(normalizedEmergencyAction)}`
+        message: `${actionLabel}.action must be ${expectedOperatorDecision} for emergency action ${String(normalizedEmergencyAction)}`
+      };
+    }
+
+    const actorOperatorId =
+      typeof verification.action?.actor?.operatorId === "string" && verification.action.actor.operatorId.trim() !== ""
+        ? verification.action.actor.operatorId.trim()
+        : null;
+    if (!actorOperatorId) {
+      return {
+        ok: false,
+        statusCode: 409,
+        code: "OPERATOR_ACTION_ACTOR_REQUIRED",
+        message: `${actionLabel}.actor.operatorId is required`
+      };
+    }
+    const actorRole =
+      typeof verification.action?.actor?.role === "string" && verification.action.actor.role.trim() !== ""
+        ? verification.action.actor.role.trim().toLowerCase()
+        : null;
+    if (!actorRole) {
+      logger.warn("ops.emergency.operator_action_role_required", {
+        tenantId: expectedTenantId,
+        emergencyAction: normalizedEmergencyAction,
+        actionLabel,
+        signerKeyId,
+        actorOperatorId
+      });
+      return {
+        ok: false,
+        statusCode: 409,
+        code: "OPERATOR_ACTION_ROLE_REQUIRED",
+        message: `${actionLabel}.actor.role is required for emergency controls`
+      };
+    }
+    const roleSet =
+      allowedRoles instanceof Set
+        ? allowedRoles
+        : Array.isArray(allowedRoles)
+          ? new Set(allowedRoles.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean))
+          : null;
+    if (roleSet && roleSet.size > 0 && !roleSet.has(actorRole)) {
+      logger.warn("ops.emergency.operator_action_role_forbidden", {
+        tenantId: expectedTenantId,
+        emergencyAction: normalizedEmergencyAction,
+        actionLabel,
+        signerKeyId,
+        actorOperatorId,
+        actorRole,
+        allowedRoles: Array.from(roleSet.values())
+      });
+      return {
+        ok: false,
+        statusCode: 403,
+        code: "OPERATOR_ACTION_ROLE_FORBIDDEN",
+        message: `${actionLabel}.actor.role is not authorized for this emergency action`
       };
     }
 
     return {
       ok: true,
-      operatorAction: verifiedSignedAction
+      operatorAction: verifiedSignedAction,
+      signerKeyId,
+      actorOperatorId,
+      actorRole
     };
   }
 
@@ -23095,10 +23188,22 @@ export function createApi({
               body?.reason === null || body?.reason === undefined || String(body.reason).trim() === ""
                 ? null
                 : String(body.reason).trim().slice(0, 500);
+            const requestedEmergencyControlTypes =
+              action === EMERGENCY_ACTION.RESUME ? resumeControlTypes : controlType ? [controlType] : [];
+            const allowedOperatorRoles = emergencyAllowedOperatorRolesForAction({
+              action,
+              resumeControlTypes: requestedEmergencyControlTypes
+            });
+            const dualControlRequired = emergencyDualControlRequiredForAction({
+              action,
+              resumeControlTypes: requestedEmergencyControlTypes
+            });
             const operatorActionValidation = await verifyEmergencyOperatorActionInput({
               tenantId,
               emergencyAction: action,
-              operatorActionInput: body?.operatorAction ?? null
+              operatorActionInput: body?.operatorAction ?? null,
+              allowedRoles: allowedOperatorRoles,
+              actionLabel: "operatorAction"
             });
             if (!operatorActionValidation.ok) {
               return sendError(
@@ -23110,6 +23215,80 @@ export function createApi({
               );
             }
             const operatorAction = operatorActionValidation.operatorAction;
+            let secondOperatorAction = null;
+            if (dualControlRequired) {
+              const secondOperatorActionInput =
+                body?.secondOperatorAction && typeof body.secondOperatorAction === "object" && !Array.isArray(body.secondOperatorAction)
+                  ? body.secondOperatorAction
+                  : null;
+              if (!secondOperatorActionInput) {
+                logger.warn("ops.emergency.dual_control_required", {
+                  tenantId,
+                  action,
+                  scopeType,
+                  scopeId,
+                  requiredRoles: Array.from(allowedOperatorRoles.values()),
+                  primaryOperatorId: operatorActionValidation.actorOperatorId ?? null,
+                  primarySignerKeyId: operatorActionValidation.signerKeyId ?? null
+                });
+                return sendError(
+                  res,
+                  409,
+                  "secondOperatorAction is required for revoke/kill-switch class controls",
+                  null,
+                  { code: "DUAL_CONTROL_REQUIRED" }
+                );
+              }
+              const secondOperatorActionValidation = await verifyEmergencyOperatorActionInput({
+                tenantId,
+                emergencyAction: action,
+                operatorActionInput: secondOperatorActionInput,
+                allowedRoles: allowedOperatorRoles,
+                actionLabel: "secondOperatorAction"
+              });
+              if (!secondOperatorActionValidation.ok) {
+                return sendError(
+                  res,
+                  secondOperatorActionValidation.statusCode,
+                  secondOperatorActionValidation.message,
+                  null,
+                  { code: secondOperatorActionValidation.code }
+                );
+              }
+              if (secondOperatorActionValidation.actorOperatorId === operatorActionValidation.actorOperatorId) {
+                logger.warn("ops.emergency.dual_control_same_operator_blocked", {
+                  tenantId,
+                  action,
+                  scopeType,
+                  scopeId,
+                  operatorId: operatorActionValidation.actorOperatorId ?? null
+                });
+                return sendError(
+                  res,
+                  409,
+                  "secondOperatorAction.actor.operatorId must differ from operatorAction.actor.operatorId",
+                  null,
+                  { code: "DUAL_CONTROL_DISTINCT_OPERATOR_REQUIRED" }
+                );
+              }
+              if (secondOperatorActionValidation.signerKeyId === operatorActionValidation.signerKeyId) {
+                logger.warn("ops.emergency.dual_control_same_signer_blocked", {
+                  tenantId,
+                  action,
+                  scopeType,
+                  scopeId,
+                  signerKeyId: operatorActionValidation.signerKeyId ?? null
+                });
+                return sendError(
+                  res,
+                  409,
+                  "secondOperatorAction.signature.keyId must differ from operatorAction.signature.keyId",
+                  null,
+                  { code: "DUAL_CONTROL_DISTINCT_SIGNER_KEY_REQUIRED" }
+                );
+              }
+              secondOperatorAction = secondOperatorActionValidation.operatorAction;
+            }
             const effectiveAt =
               typeof body?.effectiveAt === "string" && body.effectiveAt.trim() !== ""
                 ? body.effectiveAt.trim()
@@ -23175,6 +23354,7 @@ export function createApi({
                 reasonCode,
                 reason,
                 operatorAction,
+                secondOperatorAction,
                 requestedBy: {
                   keyId: auth.ok ? (auth.keyId ?? null) : null,
                   principalId: principalId ?? null
@@ -23193,7 +23373,11 @@ export function createApi({
               event,
               scope: { type: scopeType, id: scopeId },
               controlType,
-              resumeControlTypes: action === EMERGENCY_ACTION.RESUME ? resumeControlTypes : []
+              resumeControlTypes: action === EMERGENCY_ACTION.RESUME ? resumeControlTypes : [],
+              dualControl: {
+                required: dualControlRequired,
+                satisfied: dualControlRequired ? true : null
+              }
             };
             const statusCode = action === EMERGENCY_ACTION.RESUME ? 200 : 201;
             const ops = [{ kind: "EMERGENCY_CONTROL_EVENT_APPEND", tenantId, event }];
@@ -23214,7 +23398,12 @@ export function createApi({
                   scopeId,
                   reasonCode,
                   reason,
-                  operatorAction
+                  operatorAction,
+                  secondOperatorAction,
+                  dualControl: {
+                    required: dualControlRequired,
+                    requiredRoles: Array.from(allowedOperatorRoles.values())
+                  }
                 }
               })
             });

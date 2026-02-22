@@ -12,6 +12,19 @@ It captures who acted, which case was affected, what action was taken, and why. 
 - hash-based tamper detection over a frozen action surface,
 - stable verification codes for schema/key/hash/signature failures.
 
+## Emergency RBAC + dual-control policy
+
+For `/ops/emergency/*` actions, `OperatorAction.v1` is evaluated against runtime authorization policy:
+
+- Role matrix:
+  - `pause|quarantine`: `oncall|ops_admin|incident_commander`
+  - `revoke|kill-switch`: `ops_admin|incident_commander`
+  - `resume`: follows the strictest targeted control class (`ops_admin|incident_commander` when resuming `revoke|kill-switch`)
+- Dual-control:
+  - `revoke|kill-switch` class actions require both `operatorAction` and `secondOperatorAction`.
+  - The two approvals must be from distinct `actor.operatorId` and distinct `signature.keyId`.
+  - Missing or non-distinct second approvals fail closed.
+
 ## Required fields
 
 - `schemaVersion` (const: `OperatorAction.v1`)

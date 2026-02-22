@@ -45,6 +45,7 @@ function buildSignedOperatorAction({
   justificationCode = "OPS_EMERGENCY_CONTROL",
   justification = "manual emergency control operation",
   operatorId = "op_noo57_oncall",
+  role = "oncall",
   tenantId = "tenant_default",
   caseIdPrefix = "emergency_control"
 } = {}) {
@@ -56,7 +57,7 @@ function buildSignedOperatorAction({
       action,
       justificationCode,
       justification,
-      actor: { operatorId, role: "oncall", tenantId },
+      actor: { operatorId, role, tenantId },
       actedAt: new Date().toISOString()
     },
     publicKeyPem: signer.publicKeyPem,
@@ -438,9 +439,113 @@ test("API e2e: emergency quarantine blocks paid execution immediately; resume un
   assert.equal(gateAfterResume.statusCode, 201, gateAfterResume.body);
 });
 
+test("API e2e: sensitive emergency controls enforce RBAC + dual-control distinctness", async () => {
+  const api = createEmergencyApi();
+  const primarySigner = await registerSignerKey(api, { purpose: "operator", description: "NOO-58 sensitive primary signer" });
+  const secondarySigner = await registerSignerKey(api, { purpose: "operator", description: "NOO-58 sensitive secondary signer" });
+
+  const roleForbidden = await request(api, {
+    method: "POST",
+    path: "/ops/emergency/revoke",
+    headers: OPS_WRITE_HEADERS,
+    body: {
+      reasonCode: "OPS_EMERGENCY_REVOKE",
+      reason: "role matrix check",
+      operatorAction: buildSignedOperatorAction({
+        signer: primarySigner,
+        operatorId: "op_noo58_role_forbidden_primary",
+        role: "oncall",
+        caseIdPrefix: "noo58_role_forbidden_primary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: secondarySigner,
+        operatorId: "op_noo58_role_forbidden_secondary",
+        role: "incident_commander",
+        caseIdPrefix: "noo58_role_forbidden_secondary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      })
+    }
+  });
+  assert.equal(roleForbidden.statusCode, 403, roleForbidden.body);
+  assert.equal(roleForbidden.json?.code, "OPERATOR_ACTION_ROLE_FORBIDDEN");
+
+  const missingSecond = await request(api, {
+    method: "POST",
+    path: "/ops/emergency/revoke",
+    headers: OPS_WRITE_HEADERS,
+    body: {
+      reasonCode: "OPS_EMERGENCY_REVOKE",
+      reason: "dual-control required check",
+      operatorAction: buildSignedOperatorAction({
+        signer: primarySigner,
+        operatorId: "op_noo58_missing_second_primary",
+        role: "ops_admin",
+        caseIdPrefix: "noo58_missing_second_primary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      })
+    }
+  });
+  assert.equal(missingSecond.statusCode, 409, missingSecond.body);
+  assert.equal(missingSecond.json?.code, "DUAL_CONTROL_REQUIRED");
+
+  const sameOperator = await request(api, {
+    method: "POST",
+    path: "/ops/emergency/revoke",
+    headers: OPS_WRITE_HEADERS,
+    body: {
+      reasonCode: "OPS_EMERGENCY_REVOKE",
+      reason: "distinct operator check",
+      operatorAction: buildSignedOperatorAction({
+        signer: primarySigner,
+        operatorId: "op_noo58_same_operator",
+        role: "ops_admin",
+        caseIdPrefix: "noo58_same_operator_primary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: secondarySigner,
+        operatorId: "op_noo58_same_operator",
+        role: "incident_commander",
+        caseIdPrefix: "noo58_same_operator_secondary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      })
+    }
+  });
+  assert.equal(sameOperator.statusCode, 409, sameOperator.body);
+  assert.equal(sameOperator.json?.code, "DUAL_CONTROL_DISTINCT_OPERATOR_REQUIRED");
+
+  const sameSigner = await request(api, {
+    method: "POST",
+    path: "/ops/emergency/revoke",
+    headers: OPS_WRITE_HEADERS,
+    body: {
+      reasonCode: "OPS_EMERGENCY_REVOKE",
+      reason: "distinct signer key check",
+      operatorAction: buildSignedOperatorAction({
+        signer: primarySigner,
+        operatorId: "op_noo58_same_signer_primary",
+        role: "ops_admin",
+        caseIdPrefix: "noo58_same_signer_primary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: primarySigner,
+        operatorId: "op_noo58_same_signer_secondary",
+        role: "incident_commander",
+        caseIdPrefix: "noo58_same_signer_secondary",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      })
+    }
+  });
+  assert.equal(sameSigner.statusCode, 409, sameSigner.body);
+  assert.equal(sameSigner.json?.code, "DUAL_CONTROL_DISTINCT_SIGNER_KEY_REQUIRED");
+});
+
 test("API e2e: emergency revoke blocks paid execution immediately; resume unblocks", async () => {
   const api = createEmergencyApi();
   const operatorSigner = await registerSignerKey(api, { purpose: "operator", description: "NOO-57 revoke signer" });
+  const secondarySigner = await registerSignerKey(api, { purpose: "operator", description: "NOO-58 revoke secondary signer" });
 
   const payerBefore = await registerAgent(api, { agentId: "agt_noo57_revoke_payer_before" });
   const payeeBefore = await registerAgent(api, { agentId: "agt_noo57_revoke_payee_before" });
@@ -462,7 +567,16 @@ test("API e2e: emergency revoke blocks paid execution immediately; resume unbloc
       reason: "manual incident response",
       operatorAction: buildSignedOperatorAction({
         signer: operatorSigner,
+        operatorId: "op_noo58_revoke_primary",
+        role: "ops_admin",
         caseIdPrefix: "revoke_enable_case",
+        justificationCode: "OPS_EMERGENCY_REVOKE"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: secondarySigner,
+        operatorId: "op_noo58_revoke_secondary",
+        role: "incident_commander",
+        caseIdPrefix: "revoke_enable_case_secondary",
         justificationCode: "OPS_EMERGENCY_REVOKE"
       })
     }
@@ -470,6 +584,8 @@ test("API e2e: emergency revoke blocks paid execution immediately; resume unbloc
   assertCreatedOrOk(revoke);
   assert.equal(revoke.json?.action, "revoke");
   assert.equal(revoke.json?.controlType, "revoke");
+  assert.equal(revoke.json?.dualControl?.required, true);
+  assert.equal(revoke.json?.dualControl?.satisfied, true);
 
   const blocked = await createX402Gate(api, {
     gateId: "gate_noo57_revoke_blocked",
@@ -490,8 +606,18 @@ test("API e2e: emergency revoke blocks paid execution immediately; resume unbloc
       reason: "manual recovery complete",
       operatorAction: buildSignedOperatorAction({
         signer: operatorSigner,
+        operatorId: "op_noo58_revoke_resume_primary",
+        role: "ops_admin",
         action: "OVERRIDE_ALLOW",
         caseIdPrefix: "revoke_resume_case",
+        justificationCode: "OPS_EMERGENCY_RESUME"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: secondarySigner,
+        operatorId: "op_noo58_revoke_resume_secondary",
+        role: "incident_commander",
+        action: "OVERRIDE_ALLOW",
+        caseIdPrefix: "revoke_resume_case_secondary",
         justificationCode: "OPS_EMERGENCY_RESUME"
       })
     }
@@ -514,6 +640,7 @@ test("API e2e: emergency revoke blocks paid execution immediately; resume unbloc
 test("API e2e: emergency kill-switch blocks authorize path immediately; resume unblocks", async () => {
   const api = createEmergencyApi();
   const operatorSigner = await registerSignerKey(api, { purpose: "operator", description: "NOO-57 kill-switch signer" });
+  const secondarySigner = await registerSignerKey(api, { purpose: "operator", description: "NOO-58 kill-switch secondary signer" });
 
   const payerBefore = await registerAgent(api, { agentId: "agt_noo57_kill_switch_payer_before" });
   const payeeBefore = await registerAgent(api, { agentId: "agt_noo57_kill_switch_payee_before" });
@@ -534,7 +661,16 @@ test("API e2e: emergency kill-switch blocks authorize path immediately; resume u
       reason: "manual incident response",
       operatorAction: buildSignedOperatorAction({
         signer: operatorSigner,
+        operatorId: "op_noo58_kill_primary",
+        role: "ops_admin",
         caseIdPrefix: "kill_switch_enable_case",
+        justificationCode: "OPS_EMERGENCY_KILL_SWITCH"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: secondarySigner,
+        operatorId: "op_noo58_kill_secondary",
+        role: "incident_commander",
+        caseIdPrefix: "kill_switch_enable_case_secondary",
         justificationCode: "OPS_EMERGENCY_KILL_SWITCH"
       })
     }
@@ -542,6 +678,8 @@ test("API e2e: emergency kill-switch blocks authorize path immediately; resume u
   assertCreatedOrOk(enableKillSwitch);
   assert.equal(enableKillSwitch.json?.action, "kill-switch");
   assert.equal(enableKillSwitch.json?.controlType, "kill-switch");
+  assert.equal(enableKillSwitch.json?.dualControl?.required, true);
+  assert.equal(enableKillSwitch.json?.dualControl?.satisfied, true);
 
   const blockedAuthorize = await authorizeX402Gate(api, {
     gateId: "gate_noo57_kill_switch_before",
@@ -560,8 +698,18 @@ test("API e2e: emergency kill-switch blocks authorize path immediately; resume u
       reason: "manual recovery complete",
       operatorAction: buildSignedOperatorAction({
         signer: operatorSigner,
+        operatorId: "op_noo58_kill_resume_primary",
+        role: "ops_admin",
         action: "OVERRIDE_ALLOW",
         caseIdPrefix: "kill_switch_resume_case",
+        justificationCode: "OPS_EMERGENCY_RESUME"
+      }),
+      secondOperatorAction: buildSignedOperatorAction({
+        signer: secondarySigner,
+        operatorId: "op_noo58_kill_resume_secondary",
+        role: "incident_commander",
+        action: "OVERRIDE_ALLOW",
+        caseIdPrefix: "kill_switch_resume_case_secondary",
         justificationCode: "OPS_EMERGENCY_RESUME"
       })
     }

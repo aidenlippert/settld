@@ -1548,6 +1548,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       reasonCode: { type: "string", nullable: true },
       reason: { type: "string", nullable: true },
       operatorAction: { type: "object", additionalProperties: true, nullable: true },
+      secondOperatorAction: { type: "object", additionalProperties: true, nullable: true },
       requestedBy: OpsEmergencyRequestedBy,
       requestId: { type: "string", nullable: true },
       createdAt: { type: "string", format: "date-time" },
@@ -1608,6 +1609,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       reasonCode: { type: "string", nullable: true },
       reason: { type: "string", nullable: true },
       operatorAction: { type: "object", additionalProperties: true },
+      secondOperatorAction: { type: "object", additionalProperties: true, nullable: true },
       effectiveAt: { type: "string", format: "date-time", nullable: true }
     }
   };
@@ -1626,6 +1628,26 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       reasonCode: { type: "string", nullable: true },
       reason: { type: "string", nullable: true },
       operatorAction: { type: "object", additionalProperties: true },
+      secondOperatorAction: { type: "object", additionalProperties: true, nullable: true },
+      effectiveAt: { type: "string", format: "date-time", nullable: true }
+    }
+  };
+
+  const OpsEmergencyRevokeRequest = {
+    type: "object",
+    additionalProperties: false,
+    required: ["operatorAction"],
+    properties: {
+      scope: OpsEmergencyScope,
+      scopeType: { type: "string", enum: ["tenant", "agent", "adapter"], nullable: true },
+      scopeId: { type: "string", nullable: true },
+      agentId: { type: "string", nullable: true },
+      adapterId: { type: "string", nullable: true },
+      providerId: { type: "string", nullable: true },
+      reasonCode: { type: "string", nullable: true },
+      reason: { type: "string", nullable: true },
+      operatorAction: { type: "object", additionalProperties: true },
+      secondOperatorAction: { type: "object", additionalProperties: true, nullable: true },
       effectiveAt: { type: "string", format: "date-time", nullable: true }
     }
   };
@@ -1644,6 +1666,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       reasonCode: { type: "string", nullable: true },
       reason: { type: "string", nullable: true },
       operatorAction: { type: "object", additionalProperties: true },
+      secondOperatorAction: { type: "object", additionalProperties: true, nullable: true },
       effectiveAt: { type: "string", format: "date-time", nullable: true }
     }
   };
@@ -1666,7 +1689,18 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       reasonCode: { type: "string", nullable: true },
       reason: { type: "string", nullable: true },
       operatorAction: { type: "object", additionalProperties: true },
+      secondOperatorAction: { type: "object", additionalProperties: true, nullable: true },
       effectiveAt: { type: "string", format: "date-time", nullable: true }
+    }
+  };
+
+  const OpsEmergencyDualControlStatus = {
+    type: "object",
+    additionalProperties: false,
+    required: ["required", "satisfied"],
+    properties: {
+      required: { type: "boolean" },
+      satisfied: { type: "boolean", nullable: true }
     }
   };
 
@@ -1683,6 +1717,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       scope: { ...OpsEmergencyScope, nullable: true },
       controlType: { ...OpsEmergencyControlType, nullable: true },
       resumeControlTypes: { type: "array", items: OpsEmergencyControlType },
+      dualControl: { ...OpsEmergencyDualControlStatus, nullable: true },
       control: { ...OpsEmergencyControlState, nullable: true }
     }
   };
@@ -3638,6 +3673,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
         DelegationEmergencyRevokeResponse,
         OpsEmergencyPauseRequest,
         OpsEmergencyQuarantineRequest,
+        OpsEmergencyRevokeRequest,
         OpsEmergencyKillSwitchRequest,
         OpsEmergencyResumeRequest,
         OpsEmergencyControlResponse,
@@ -6406,6 +6442,22 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
           "x-settld-scopes": ["ops_write"],
           requestBody: { required: false, content: { "application/json": { schema: OpsEmergencyQuarantineRequest } } },
+          responses: {
+            200: { description: "OK", content: { "application/json": { schema: OpsEmergencyControlResponse } } },
+            201: { description: "Created", content: { "application/json": { schema: OpsEmergencyControlResponse } } },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            403: { description: "Forbidden", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/ops/emergency/revoke": {
+        post: {
+          summary: "Emergency revoke delegated authority for paid execution paths",
+          parameters: [TenantHeader, ProtocolHeader, RequestIdHeader],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          "x-settld-scopes": ["ops_write"],
+          requestBody: { required: false, content: { "application/json": { schema: OpsEmergencyRevokeRequest } } },
           responses: {
             200: { description: "OK", content: { "application/json": { schema: OpsEmergencyControlResponse } } },
             201: { description: "Created", content: { "application/json": { schema: OpsEmergencyControlResponse } } },
