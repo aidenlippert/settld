@@ -17,7 +17,9 @@ Required inputs:
 
 - `SETTLD_BASE_URL` (local or hosted API URL)
 - `SETTLD_TENANT_ID`
-- `SETTLD_API_KEY` (`keyId.secret`)
+- one of:
+  - `SETTLD_API_KEY` (`keyId.secret`), or
+  - `SETTLD_BOOTSTRAP_API_KEY` (onboarding bootstrap key that mints `SETTLD_API_KEY` during setup)
 - Node.js 20+
 
 Recommended non-interactive pattern:
@@ -33,6 +35,20 @@ settld setup --non-interactive \
   --profile-id engineering-spend \
   --smoke \
   --out-env ./.tmp/settld-openclaw.env
+```
+
+If you want setup to generate the tenant API key for you:
+
+```bash
+settld setup --non-interactive \
+  --host openclaw \
+  --base-url https://api.settld.work \
+  --tenant-id tenant_default \
+  --bootstrap-api-key 'ml_admin_xxx' \
+  --wallet-mode managed \
+  --wallet-bootstrap remote \
+  --profile-id engineering-spend \
+  --smoke
 ```
 
 If you want validation only (no config writes):

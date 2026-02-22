@@ -53,6 +53,19 @@ npx -y settld@latest setup \
   --smoke
 ```
 
+If you do not have a tenant `sk_*` yet, let setup mint one:
+
+```bash
+npx -y settld@latest setup \
+  --non-interactive \
+  --host openclaw \
+  --base-url https://api.settld.work \
+  --tenant-id tenant_default \
+  --bootstrap-api-key 'ml_admin_xxx' \
+  --wallet-mode managed \
+  --wallet-bootstrap remote
+```
+
 ## 3) Verify OpenClaw + Settld are wired
 
 Run:

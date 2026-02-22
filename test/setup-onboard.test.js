@@ -184,6 +184,70 @@ test("onboard: managed wallet local uses provider bootstrap", async () => {
   assert.equal(bootstrapCalls[0].apiKey, "TEST_API_KEY:abc");
 });
 
+test("onboard: non-interactive can mint tenant API key via bootstrap key", async () => {
+  const bootstrapCalls = [];
+  const wizardCalls = [];
+  const out = await runOnboard({
+    argv: [
+      "--non-interactive",
+      "--host",
+      "openclaw",
+      "--wallet-mode",
+      "none",
+      "--no-preflight",
+      "--base-url",
+      "https://api.settld.work",
+      "--tenant-id",
+      "tenant_default",
+      "--bootstrap-api-key",
+      "ml_admin_bootstrap",
+      "--bootstrap-key-id",
+      "sk_generated",
+      "--bootstrap-scopes",
+      "tenant:runtime,mcp:invoke",
+      "--format",
+      "json"
+    ],
+    runtimeEnv: {},
+    requestRuntimeBootstrapMcpEnvImpl: async (input) => {
+      bootstrapCalls.push(input);
+      return {
+        SETTLD_BASE_URL: "https://api.settld.work",
+        SETTLD_TENANT_ID: "tenant_default",
+        SETTLD_API_KEY: "sk_bootstrap.generated",
+        SETTLD_PAID_TOOLS_BASE_URL: "https://paid.tools.settld.work"
+      };
+    },
+    runWizardImpl: async ({ argv, extraEnv }) => {
+      wizardCalls.push({ argv, extraEnv });
+      const keyIndex = argv.indexOf("--api-key");
+      const generatedApiKey = keyIndex >= 0 ? String(argv[keyIndex + 1] ?? "") : "";
+      return {
+        ok: true,
+        env: {
+          SETTLD_BASE_URL: "https://api.settld.work",
+          SETTLD_TENANT_ID: "tenant_default",
+          SETTLD_API_KEY: generatedApiKey,
+          ...extraEnv
+        }
+      };
+    },
+    stdout: { write() {} }
+  });
+
+  assert.equal(out.ok, true);
+  assert.equal(out.env.SETTLD_API_KEY, "sk_bootstrap.generated");
+  assert.equal(out.env.SETTLD_PAID_TOOLS_BASE_URL, "https://paid.tools.settld.work");
+  assert.equal(bootstrapCalls.length, 1);
+  assert.equal(bootstrapCalls[0].bootstrapApiKey, "ml_admin_bootstrap");
+  assert.deepEqual(bootstrapCalls[0].bootstrapScopes, ["tenant:runtime", "mcp:invoke"]);
+  assert.equal(bootstrapCalls[0].bootstrapKeyId, "sk_generated");
+  assert.equal(wizardCalls.length, 1);
+  const keyIndex = wizardCalls[0].argv.indexOf("--api-key");
+  assert.ok(keyIndex >= 0);
+  assert.equal(wizardCalls[0].argv[keyIndex + 1], "sk_bootstrap.generated");
+});
+
 test("onboard: non-interactive defaults host from detected installations", async () => {
   const wizardCalls = [];
   const wizardStub = async ({ argv }) => {

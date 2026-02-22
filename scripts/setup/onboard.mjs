@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { bootstrapWalletProvider } from "../../src/core/wallet-provider-bootstrap.js";
-import { loadHostConfigHelper, runWizard } from "./wizard.mjs";
+import { extractBootstrapMcpEnv, loadHostConfigHelper, runWizard } from "./wizard.mjs";
 import { SUPPORTED_HOSTS } from "./host-config.mjs";
 
 const WALLET_MODES = new Set(["managed", "byo", "none"]);
@@ -51,6 +51,10 @@ function usage() {
     "  --base-url <url>                Settld API base URL (or SETTLD_BASE_URL)",
     "  --tenant-id <id>                Settld tenant ID (or SETTLD_TENANT_ID)",
     "  --settld-api-key <key>          Settld tenant API key (or SETTLD_API_KEY)",
+    "  --bootstrap-api-key <key>       Onboarding bootstrap API key used to mint tenant API key",
+    "  --magic-link-api-key <key>      Alias for --bootstrap-api-key",
+    "  --bootstrap-key-id <id>         Optional API key ID hint for runtime bootstrap",
+    "  --bootstrap-scopes <csv>        Optional scopes for generated tenant API key",
     "  --wallet-mode <managed|byo|none> Wallet setup mode (default: managed)",
     "  --wallet-provider <name>        Wallet provider (circle; default: circle)",
     "  --wallet-bootstrap <auto|local|remote> Managed wallet setup path (default: auto)",
@@ -101,6 +105,9 @@ function parseArgs(argv) {
     baseUrl: null,
     tenantId: null,
     settldApiKey: null,
+    bootstrapApiKey: null,
+    bootstrapKeyId: null,
+    bootstrapScopes: null,
     walletMode: "managed",
     walletProvider: "circle",
     walletBootstrap: "auto",
@@ -183,6 +190,29 @@ function parseArgs(argv) {
     if (arg === "--settld-api-key" || arg.startsWith("--settld-api-key=")) {
       const parsed = readArgValue(argv, i, arg);
       out.settldApiKey = parsed.value;
+      i = parsed.nextIndex;
+      continue;
+    }
+    if (
+      arg === "--bootstrap-api-key" ||
+      arg === "--magic-link-api-key" ||
+      arg.startsWith("--bootstrap-api-key=") ||
+      arg.startsWith("--magic-link-api-key=")
+    ) {
+      const parsed = readArgValue(argv, i, arg);
+      out.bootstrapApiKey = parsed.value;
+      i = parsed.nextIndex;
+      continue;
+    }
+    if (arg === "--bootstrap-key-id" || arg.startsWith("--bootstrap-key-id=")) {
+      const parsed = readArgValue(argv, i, arg);
+      out.bootstrapKeyId = parsed.value;
+      i = parsed.nextIndex;
+      continue;
+    }
+    if (arg === "--bootstrap-scopes" || arg.startsWith("--bootstrap-scopes=")) {
+      const parsed = readArgValue(argv, i, arg);
+      out.bootstrapScopes = parsed.value;
       i = parsed.nextIndex;
       continue;
     }
@@ -824,6 +854,75 @@ function resolveByoWalletEnv({ walletProvider, walletEnvRows, runtimeEnv }) {
   return env;
 }
 
+function parseScopes(raw) {
+  if (!raw || !String(raw).trim()) return [];
+  const seen = new Set();
+  const out = [];
+  for (const part of String(raw).split(",")) {
+    const scope = String(part ?? "").trim();
+    if (!scope || seen.has(scope)) continue;
+    seen.add(scope);
+    out.push(scope);
+  }
+  return out;
+}
+
+async function requestRuntimeBootstrapMcpEnv({
+  baseUrl,
+  tenantId,
+  bootstrapApiKey,
+  bootstrapKeyId = null,
+  bootstrapScopes = [],
+  idempotencyKey = null,
+  fetchImpl = fetch
+} = {}) {
+  const normalizedBaseUrl = normalizeHttpUrl(baseUrl);
+  if (!normalizedBaseUrl) throw new Error(`invalid runtime bootstrap base URL: ${baseUrl}`);
+  const apiKey = mustString(bootstrapApiKey, "bootstrap API key");
+
+  const headers = {
+    "content-type": "application/json",
+    "x-api-key": apiKey
+  };
+  if (idempotencyKey) headers["x-idempotency-key"] = String(idempotencyKey);
+
+  const body = {
+    apiKey: {
+      create: true,
+      description: "settld setup runtime bootstrap"
+    }
+  };
+  if (bootstrapKeyId) body.apiKey.keyId = String(bootstrapKeyId);
+  if (Array.isArray(bootstrapScopes) && bootstrapScopes.length > 0) {
+    body.apiKey.scopes = bootstrapScopes;
+  }
+
+  const url = new URL(
+    `/v1/tenants/${encodeURIComponent(String(tenantId ?? ""))}/onboarding/runtime-bootstrap`,
+    normalizedBaseUrl
+  );
+  const res = await fetchImpl(url.toString(), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (!res.ok) {
+    const message =
+      json && typeof json === "object"
+        ? json?.message ?? json?.error ?? `HTTP ${res.status}`
+        : text || `HTTP ${res.status}`;
+    throw new Error(`runtime bootstrap request failed (${res.status}): ${String(message)}`);
+  }
+  return extractBootstrapMcpEnv(json);
+}
+
 async function requestRemoteWalletBootstrap({
   baseUrl,
   tenantId,
@@ -900,6 +999,11 @@ async function resolveRuntimeConfig({
     baseUrl: String(args.baseUrl ?? runtimeEnv.SETTLD_BASE_URL ?? "").trim(),
     tenantId: String(args.tenantId ?? runtimeEnv.SETTLD_TENANT_ID ?? "").trim(),
     settldApiKey: String(args.settldApiKey ?? runtimeEnv.SETTLD_API_KEY ?? "").trim(),
+    bootstrapApiKey: String(
+      args.bootstrapApiKey ?? runtimeEnv.SETTLD_BOOTSTRAP_API_KEY ?? runtimeEnv.MAGIC_LINK_API_KEY ?? ""
+    ).trim(),
+    bootstrapKeyId: String(args.bootstrapKeyId ?? runtimeEnv.SETTLD_BOOTSTRAP_KEY_ID ?? "").trim(),
+    bootstrapScopes: String(args.bootstrapScopes ?? runtimeEnv.SETTLD_BOOTSTRAP_SCOPES ?? "").trim(),
     walletProvider: args.walletProvider,
     walletBootstrap: args.walletBootstrap,
     circleApiKey: String(args.circleApiKey ?? runtimeEnv.CIRCLE_API_KEY ?? "").trim(),
@@ -919,7 +1023,9 @@ async function resolveRuntimeConfig({
     if (!SUPPORTED_HOSTS.includes(out.host)) throw new Error(`--host must be one of: ${SUPPORTED_HOSTS.join(", ")}`);
     if (!out.baseUrl) throw new Error("--base-url is required");
     if (!out.tenantId) throw new Error("--tenant-id is required");
-    if (!out.settldApiKey) throw new Error("--settld-api-key is required");
+    if (!out.settldApiKey && !out.bootstrapApiKey) {
+      throw new Error("--settld-api-key or --bootstrap-api-key is required");
+    }
     if (out.walletMode === "managed" && out.walletBootstrap === "local" && !out.circleApiKey) {
       throw new Error("--circle-api-key is required for --wallet-mode managed --wallet-bootstrap local");
     }
@@ -975,7 +1081,32 @@ async function resolveRuntimeConfig({
     if (!out.tenantId) {
       out.tenantId = await promptLine(rl, "Tenant ID", { defaultValue: "tenant_default" });
     }
-    if (!out.settldApiKey) out.settldApiKey = await promptSecretLine(rl, mutableOutput, stdout, "Settld API key");
+    if (!out.settldApiKey) {
+      const keyMode = await promptSelect(
+        rl,
+        stdin,
+        stdout,
+        "How should setup get your Settld API key?",
+        [
+          { value: "bootstrap", label: "Generate during setup", hint: "Use onboarding bootstrap API key" },
+          { value: "manual", label: "Paste existing key", hint: "Use an existing tenant API key" }
+        ],
+        { defaultValue: "bootstrap" }
+      );
+      if (keyMode === "bootstrap") {
+        if (!out.bootstrapApiKey) {
+          out.bootstrapApiKey = await promptSecretLine(rl, mutableOutput, stdout, "Onboarding bootstrap API key");
+        }
+        if (!out.bootstrapKeyId) {
+          out.bootstrapKeyId = await promptLine(rl, "Generated key ID (optional)", { required: false });
+        }
+        if (!out.bootstrapScopes) {
+          out.bootstrapScopes = await promptLine(rl, "Generated key scopes CSV (optional)", { required: false });
+        }
+      } else {
+        out.settldApiKey = await promptSecretLine(rl, mutableOutput, stdout, "Settld API key");
+      }
+    }
 
     if (out.walletMode === "managed") {
       out.walletBootstrap = await promptSelect(
@@ -1084,6 +1215,7 @@ export async function runOnboard({
   runWizardImpl = runWizard,
   loadHostConfigHelperImpl = loadHostConfigHelper,
   bootstrapWalletProviderImpl = bootstrapWalletProvider,
+  requestRuntimeBootstrapMcpEnvImpl = requestRuntimeBootstrapMcpEnv,
   requestRemoteWalletBootstrapImpl = requestRemoteWalletBootstrap,
   runPreflightChecksImpl = runPreflightChecks,
   detectInstalledHostsImpl = detectInstalledHosts
@@ -1110,7 +1242,27 @@ export async function runOnboard({
   const normalizedBaseUrl = normalizeHttpUrl(mustString(config.baseUrl, "SETTLD_BASE_URL / --base-url"));
   if (!normalizedBaseUrl) throw new Error(`invalid Settld base URL: ${config.baseUrl}`);
   const tenantId = mustString(config.tenantId, "SETTLD_TENANT_ID / --tenant-id");
-  const settldApiKey = mustString(config.settldApiKey, "SETTLD_API_KEY / --settld-api-key");
+  let settldApiKey = String(config.settldApiKey ?? "").trim();
+  let runtimeBootstrapEnv = null;
+  if (!settldApiKey) {
+    if (showSteps) stdout.write("Generating tenant runtime API key via onboarding bootstrap...\n");
+    runtimeBootstrapEnv = await requestRuntimeBootstrapMcpEnvImpl({
+      baseUrl: normalizedBaseUrl,
+      tenantId,
+      bootstrapApiKey: config.bootstrapApiKey,
+      bootstrapKeyId: config.bootstrapKeyId || null,
+      bootstrapScopes: parseScopes(config.bootstrapScopes),
+      fetchImpl
+    });
+    settldApiKey = mustString(runtimeBootstrapEnv?.SETTLD_API_KEY ?? "", "runtime bootstrap SETTLD_API_KEY");
+  }
+  const runtimeBootstrapOptionalEnv = {};
+  if (runtimeBootstrapEnv?.SETTLD_PAID_TOOLS_BASE_URL) {
+    runtimeBootstrapOptionalEnv.SETTLD_PAID_TOOLS_BASE_URL = String(runtimeBootstrapEnv.SETTLD_PAID_TOOLS_BASE_URL);
+  }
+  if (runtimeBootstrapEnv?.SETTLD_PAID_TOOLS_AGENT_PASSPORT) {
+    runtimeBootstrapOptionalEnv.SETTLD_PAID_TOOLS_AGENT_PASSPORT = String(runtimeBootstrapEnv.SETTLD_PAID_TOOLS_AGENT_PASSPORT);
+  }
 
   if (showSteps) printStep(stdout, step, totalSteps, "Resolve wallet configuration");
   let walletBootstrapMode = "none";
@@ -1198,13 +1350,19 @@ export async function runOnboard({
       preflight,
       hostInstallDetected: Array.isArray(config.installedHosts) && config.installedHosts.includes(config.host),
       installedHosts: config.installedHosts,
-      env: walletEnv,
+      env: {
+        SETTLD_BASE_URL: normalizedBaseUrl,
+        SETTLD_TENANT_ID: tenantId,
+        SETTLD_API_KEY: settldApiKey,
+        ...runtimeBootstrapOptionalEnv,
+        ...walletEnv
+      },
       outEnv: args.outEnv ?? null,
       reportPath: args.reportPath ?? null
     };
     if (args.outEnv) {
       await fs.mkdir(path.dirname(args.outEnv), { recursive: true });
-      await fs.writeFile(args.outEnv, toEnvFileText(walletEnv), "utf8");
+      await fs.writeFile(args.outEnv, toEnvFileText(payload.env), "utf8");
     }
     await writeJsonReport(args.reportPath, payload);
     if (args.format === "json") {
@@ -1251,11 +1409,15 @@ export async function runOnboard({
     argv: wizardArgv,
     fetchImpl,
     stdout,
-    extraEnv: walletEnv
+    extraEnv: {
+      ...runtimeBootstrapOptionalEnv,
+      ...walletEnv
+    }
   });
   step += 1;
 
   const mergedEnv = {
+    ...runtimeBootstrapOptionalEnv,
     ...(walletEnv ?? {}),
     ...(wizardResult?.env && typeof wizardResult.env === "object" ? wizardResult.env : {})
   };
