@@ -5,6 +5,9 @@ set -euo pipefail
 # - exit 0 => skip deployment
 # - exit 1 => continue with deployment
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
 if ! git rev-parse --verify HEAD^ >/dev/null 2>&1; then
   # No parent commit context available; build to stay safe.
   exit 1
