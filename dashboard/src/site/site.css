@@ -1,0 +1,555 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700;800&display=swap");
+
+.nova-site {
+  --ink-950: #042033;
+  --ink-900: #0a2f44;
+  --ink-700: #2f5468;
+  --ink-500: #4d7284;
+  --surface-0: #f0f9ff;
+  --surface-1: #ffffff;
+  --surface-2: #e4f4ff;
+  --line: #b7d8eb;
+  --line-strong: #8fbed8;
+  --brand-700: #0369a1;
+  --brand-600: #0284c7;
+  --brand-500: #0ea5e9;
+  --accent: #f97316;
+  --shadow-soft: 0 26px 70px rgba(6, 55, 83, 0.14);
+  --shadow-card: 0 16px 36px rgba(6, 55, 83, 0.11);
+  background: radial-gradient(1100px 500px at 90% -5%, rgba(14, 165, 233, 0.21), transparent 55%),
+    radial-gradient(900px 400px at -5% -5%, rgba(249, 115, 22, 0.15), transparent 50%),
+    var(--surface-0);
+  color: var(--ink-900);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  min-height: 100vh;
+  position: relative;
+  overflow: clip;
+}
+
+.nova-bg-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(3, 105, 161, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(3, 105, 161, 0.04) 1px, transparent 1px);
+  background-size: 30px 30px;
+  z-index: 0;
+}
+
+.nova-bg-orb {
+  position: fixed;
+  border-radius: 999px;
+  filter: blur(72px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.nova-bg-orb-a {
+  width: 24rem;
+  height: 24rem;
+  background: rgba(14, 165, 233, 0.22);
+  left: -8rem;
+  top: -8rem;
+}
+
+.nova-bg-orb-b {
+  width: 23rem;
+  height: 23rem;
+  background: rgba(249, 115, 22, 0.19);
+  right: -9rem;
+  top: 18rem;
+}
+
+.nova-nav-wrap,
+.nova-main,
+.nova-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.nova-nav-wrap {
+  padding: 1.15rem clamp(1rem, 3vw, 2.6rem);
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(10px);
+  background: rgba(240, 249, 255, 0.84);
+  border-bottom: 1px solid rgba(143, 190, 216, 0.35);
+}
+
+.nova-nav {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.nova-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.nova-brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(140deg, var(--brand-700), var(--brand-500));
+  color: #ffffff;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.96rem;
+  font-weight: 700;
+  box-shadow: 0 8px 22px rgba(2, 132, 199, 0.33);
+}
+
+.nova-brand-copy {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.nova-brand-name {
+  font-family: "Sora", "IBM Plex Sans", sans-serif;
+  font-size: 1.11rem;
+  letter-spacing: 0.01em;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.nova-brand-sub {
+  color: var(--ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.66rem;
+  margin-top: 0.15rem;
+}
+
+.nova-nav-links,
+.nova-nav-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.nova-nav-links a {
+  text-decoration: none;
+  color: var(--ink-700);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.42rem 0.64rem;
+  border-radius: 10px;
+}
+
+.nova-nav-links a:hover {
+  background: rgba(14, 165, 233, 0.11);
+  color: var(--brand-700);
+}
+
+.nova-btn {
+  text-decoration: none;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  font-size: 0.86rem;
+  font-weight: 700;
+  padding: 0.62rem 0.98rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.nova-btn:hover {
+  transform: translateY(-1px);
+}
+
+.nova-btn:focus-visible {
+  outline: 2px solid rgba(3, 105, 161, 0.42);
+  outline-offset: 2px;
+}
+
+.nova-btn-solid {
+  color: #ffffff;
+  background: linear-gradient(140deg, var(--brand-700), var(--brand-500));
+  box-shadow: 0 12px 28px rgba(2, 132, 199, 0.3);
+}
+
+.nova-btn-ghost {
+  color: var(--brand-700);
+  border-color: rgba(2, 132, 199, 0.28);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.nova-main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(1.2rem, 3vw, 2.4rem) clamp(1rem, 3vw, 2.6rem) 3.2rem;
+}
+
+.nova-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(228, 244, 255, 0.84));
+  box-shadow: var(--shadow-soft);
+  border-radius: 24px;
+  padding: clamp(1.4rem, 3.4vw, 2.2rem);
+}
+
+.nova-kicker {
+  margin: 0;
+  color: var(--brand-700);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.nova-hero h1 {
+  margin: 0.65rem 0 0;
+  font-family: "Sora", "IBM Plex Sans", sans-serif;
+  color: var(--ink-950);
+  line-height: 1.08;
+  font-size: clamp(1.85rem, 5.3vw, 3.25rem);
+  max-width: 16ch;
+}
+
+.nova-lead {
+  margin: 1rem 0 0;
+  color: var(--ink-700);
+  font-size: clamp(0.99rem, 1.9vw, 1.1rem);
+  max-width: 58ch;
+}
+
+.nova-hero-cta {
+  margin-top: 1.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.62rem;
+}
+
+.nova-hosts {
+  margin-top: 1.05rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.nova-hosts span {
+  border: 1px solid rgba(2, 132, 199, 0.26);
+  color: var(--brand-700);
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+  padding: 0.32rem 0.66rem;
+  font-size: 0.73rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.nova-proof-card {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 18px;
+  padding: 1rem;
+  box-shadow: var(--shadow-card);
+}
+
+.nova-proof-title {
+  margin: 0;
+  color: var(--ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.nova-proof-card ul {
+  margin: 0.9rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.58rem;
+}
+
+.nova-proof-card li {
+  color: var(--ink-900);
+  font-size: 0.9rem;
+  line-height: 1.38;
+}
+
+.nova-shell {
+  margin-top: 0.92rem;
+  border: 1px solid rgba(3, 105, 161, 0.2);
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.92), rgba(210, 235, 251, 0.8));
+  border-radius: 13px;
+  padding: 0.7rem 0.78rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.nova-shell span {
+  color: var(--ink-500);
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.nova-shell code {
+  color: var(--ink-950);
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-size: 0.83rem;
+  word-break: break-word;
+}
+
+.nova-section {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow-card);
+  padding: clamp(1rem, 2.6vw, 1.6rem);
+}
+
+.nova-section-head p {
+  margin: 0;
+  color: var(--brand-700);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.67rem;
+  font-weight: 700;
+}
+
+.nova-section-head h2 {
+  margin: 0.55rem 0 0;
+  font-family: "Sora", "IBM Plex Sans", sans-serif;
+  color: var(--ink-950);
+  font-size: clamp(1.2rem, 3vw, 1.72rem);
+  line-height: 1.2;
+}
+
+.nova-grid {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.nova-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.nova-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.nova-card,
+.nova-step {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(145deg, var(--surface-1), var(--surface-2));
+  padding: 0.92rem 0.94rem;
+}
+
+.nova-card h3,
+.nova-step h3 {
+  margin: 0;
+  color: var(--ink-950);
+  font-family: "Sora", "IBM Plex Sans", sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.nova-card p,
+.nova-step p {
+  margin: 0.52rem 0 0;
+  color: var(--ink-700);
+  font-size: 0.89rem;
+  line-height: 1.44;
+}
+
+.nova-step span {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(3, 105, 161, 0.23);
+  background: rgba(14, 165, 233, 0.12);
+  color: var(--brand-700);
+  font-size: 0.82rem;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.55rem;
+}
+
+.nova-card-mode {
+  border-top: 2px solid rgba(2, 132, 199, 0.38);
+}
+
+.nova-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.nova-list {
+  margin: 0.65rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.nova-list li {
+  color: var(--ink-700);
+  font-size: 0.9rem;
+}
+
+.nova-card pre {
+  margin: 0.65rem 0 0;
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: linear-gradient(145deg, #03161f, #082533);
+  color: #d6f0ff;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  overflow-x: auto;
+}
+
+.nova-card code {
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-size: 0.79rem;
+  line-height: 1.5;
+}
+
+.nova-resource-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.nova-resource-bar a {
+  text-decoration: none;
+  border: 1px solid rgba(2, 132, 199, 0.22);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--brand-700);
+  border-radius: 999px;
+  padding: 0.38rem 0.72rem;
+  font-size: 0.79rem;
+  font-weight: 700;
+}
+
+.nova-resource-bar a:hover {
+  background: rgba(14, 165, 233, 0.14);
+}
+
+.nova-cta {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-card);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(226, 243, 255, 0.82));
+  padding: clamp(1rem, 2.7vw, 1.7rem);
+}
+
+.nova-cta h2 {
+  margin: 0;
+  font-family: "Sora", "IBM Plex Sans", sans-serif;
+  color: var(--ink-950);
+  font-size: clamp(1.28rem, 3.2vw, 1.86rem);
+}
+
+.nova-cta p {
+  margin: 0.55rem 0 0;
+  color: var(--ink-700);
+  max-width: 64ch;
+}
+
+.nova-footer {
+  border-top: 1px solid rgba(143, 190, 216, 0.42);
+  margin-top: 1.9rem;
+  padding: 1.15rem clamp(1rem, 3vw, 2.6rem) 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--ink-700);
+  font-size: 0.82rem;
+}
+
+.nova-footer span:first-child {
+  color: var(--ink-950);
+  font-weight: 700;
+}
+
+.nova-reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: novaReveal 620ms ease forwards;
+}
+
+@keyframes novaReveal {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1080px) {
+  .nova-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .nova-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .nova-grid-4,
+  .nova-grid-3,
+  .nova-split {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .nova-nav-links {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .nova-nav-cta {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .nova-grid-4,
+  .nova-grid-3,
+  .nova-split {
+    grid-template-columns: 1fr;
+  }
+
+  .nova-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nova-reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .nova-btn {
+    transition: none;
+  }
+}
