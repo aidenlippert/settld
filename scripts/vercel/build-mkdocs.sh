@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ ! -x ".vercel-venv/bin/mkdocs" ]; then
-  echo "MkDocs venv not found; running install step first..."
+if ! python3 -m mkdocs --version >/dev/null 2>&1; then
+  echo "MkDocs not found; running install step first..."
   bash scripts/vercel/install-mkdocs.sh
 fi
 
-.vercel-venv/bin/mkdocs build --strict --config-file mkdocs.yml
+python3 -m mkdocs build --strict --config-file mkdocs.yml
