@@ -11,6 +11,8 @@ This checklist is the “no surprises” gate for shipping Settld as a product (
   - `production_cutover_gate`
   - `offline_verification_parity_gate` (NOO-50)
   - `onboarding_host_success_gate`
+- Public package smoke for OpenClaw onboarding is green:
+  - `npm run test:ci:public-openclaw-npx-smoke`
 - `CHANGELOG.md` is updated and accurate.
 - Protocol v1 freeze gate is satisfied (no accidental v1 schema/vector drift).
 - Minimum production topology is defined for the target environment:

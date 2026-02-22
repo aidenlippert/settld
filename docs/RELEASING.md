@@ -20,6 +20,7 @@ See `docs/RELEASE_CHECKLIST.md` for the definitive artifact completeness require
 5. Run packaging smoke test:
    - `node scripts/ci/npm-pack-smoke.mjs`
    - `node scripts/ci/cli-pack-smoke.mjs`
+   - `node scripts/ci/run-public-openclaw-npx-smoke.mjs`
    - `python3 -m build packages/api-sdk-python --sdist --wheel --outdir /tmp/settld-python-dist-smoke`
    - Optionally generate full release artifacts locally: `npm run release:artifacts`
 6. Create a tag and push it:

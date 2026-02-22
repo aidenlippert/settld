@@ -118,6 +118,7 @@
     "test:x402:circle:sandbox:smoke": "node scripts/ci/run-circle-sandbox-smoke.mjs",
     "test:ci:runtime-import-smoke": "node scripts/ci/runtime-import-smoke.mjs",
     "test:ci:secret-hygiene": "node scripts/ci/check-secret-hygiene.mjs",
+    "test:ci:public-openclaw-npx-smoke": "node scripts/ci/run-public-openclaw-npx-smoke.mjs",
     "test:cli:pack-smoke": "node scripts/ci/cli-pack-smoke.mjs",
     "ops:lighthouse:update": "node scripts/ci/update-lighthouse-tracker.mjs",
     "ops:tenant:bootstrap:conformance": "node scripts/ops/bootstrap-tenant-conformance.mjs",

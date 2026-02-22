@@ -4,6 +4,7 @@ Copy/paste adoption templates and guardrails:
 
 - `github-actions.md` — composite action usage and trust anchor wiring.
 - `github-actions-verify.yml` — pasteable workflow template.
+- `openclaw/PUBLIC_QUICKSTART.md` — public npm onboarding flow for OpenClaw (`npx settld@latest setup`).
 - `openclaw/settld-mcp-skill/SKILL.md` — OpenClaw skill payload for Settld MCP.
 - `openclaw/CLAWHUB_PUBLISH_CHECKLIST.md` — publish + validation checklist for ClawHub.
 
