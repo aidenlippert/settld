@@ -122,6 +122,7 @@
     "ops:tenant:bootstrap:conformance": "node scripts/ops/bootstrap-tenant-conformance.mjs",
     "ops:money-rails:reconcile:evidence": "node scripts/ops/money-rails-reconcile-evidence.mjs",
     "ops:money-rails:chargeback:evidence": "node scripts/ops/money-rails-chargeback-evidence.mjs",
+    "ops:dispute:finance:packet": "node scripts/ops/dispute-finance-reconciliation-packet.mjs",
     "ops:x402:pilot:weekly-report": "node scripts/ops/build-x402-pilot-reliability-report.mjs",
     "ops:x402:hitl:smoke": "node scripts/ops/run-x402-hitl-smoke.mjs",
     "ops:x402:receipt:sample-check": "node scripts/ops/check-x402-receipt-sample.mjs",

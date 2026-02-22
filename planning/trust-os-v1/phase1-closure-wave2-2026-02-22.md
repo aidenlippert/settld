@@ -32,6 +32,7 @@ Branch: `codex/phase1-snapshot-2026-02-22`
 - Total suites run in this wave: 46 tests.
 - Result: all passing, zero failures.
 
-## Remaining notable Phase 1 backlog item
+## Follow-up
 
-- `NOO-54` finance reconciliation packet for dispute adjustments: no dedicated dispute-adjustment reconciliation packet command was added in this wave.
+- `NOO-54` moved to wave 3 and closed with dedicated packet work:
+  - `planning/trust-os-v1/phase1-closure-wave3-2026-02-22.md`
