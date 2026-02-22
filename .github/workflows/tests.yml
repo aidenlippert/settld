@@ -215,6 +215,61 @@ jobs:
             artifacts/gates/onboarding-policy-slo-gate.json
           if-no-files-found: error
 
+  onboarding_host_success_gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Start Settld API (local gate mode)
+        run: |
+          set -euo pipefail
+          STORE=memory \
+          PROXY_OPS_TOKEN=ops_ci \
+          PROXY_AUTOTICK_INTERVAL_MS=200 \
+          PORT=3000 \
+          node src/api/server.js &
+          echo $! > /tmp/settld_onboarding_host_success_pid
+      - name: Wait for API readiness
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3000/healthz" >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not become ready" >&2
+          exit 1
+      - name: Run onboarding host success gate
+        run: |
+          set -euo pipefail
+          npm run -s test:ops:onboarding-host-success-gate -- \
+            --base-url http://127.0.0.1:3000 \
+            --tenant-id tenant_default \
+            --api-key sk_test \
+            --hosts codex,claude,cursor,openclaw \
+            --attempts 1 \
+            --min-success-rate-pct 100 \
+            --report artifacts/gates/onboarding-host-success-gate.json \
+            --metrics-dir artifacts/ops/onboarding-host-success
+      - name: Upload onboarding host success gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-host-success-gate-${{ github.run_id }}
+          path: |
+            artifacts/gates/onboarding-host-success-gate.json
+            artifacts/ops/onboarding-host-success/
+          if-no-files-found: error
+      - name: Stop API
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -f /tmp/settld_onboarding_host_success_pid ]]; then kill "$(cat /tmp/settld_onboarding_host_success_pid)" || true; fi
+
   kernel_v0_ship_gate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

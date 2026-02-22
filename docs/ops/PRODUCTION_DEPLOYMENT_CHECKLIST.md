@@ -9,6 +9,7 @@ Use this checklist to launch and verify a real hosted Settld environment.
    - `tests / production_cutover_gate`
    - `tests / offline_verification_parity_gate` (NOO-50)
    - `tests / onboarding_policy_slo_gate`
+   - `tests / onboarding_host_success_gate`
    - `tests / deploy_safety_smoke` (hosted baseline evidence path)
 2. Confirm release workflow is blocked unless NOO-50 and the kernel/cutover gates are green for the release commit.
 3. Confirm release workflow runs NOO-65 promotion guard and blocks publish lanes if `release-promotion-guard.json` verdict is not pass/override-pass.
@@ -86,6 +87,19 @@ This emits a machine-readable report at:
 
 4. Update `docs/ops/MCP_COMPATIBILITY_MATRIX.md` with pass/fail + date.
 
+5. Run clean-env onboarding host success gate:
+
+```bash
+npm run test:ops:onboarding-host-success-gate -- \
+  --base-url https://api.settld.work \
+  --tenant-id tenant_default \
+  --api-key "$SETTLD_API_KEY" \
+  --attempts 3 \
+  --min-success-rate-pct 90 \
+  --report artifacts/gates/onboarding-host-success-gate.json \
+  --metrics-dir artifacts/ops/onboarding-host-success
+```
+
 ## Phase 5: Paid call + receipt proof
 
 1. Run a paid demo flow:
@@ -104,15 +118,16 @@ Ship only when all are true:
 
 1. Kernel v0 ship gate, production cutover gate, and NOO-50 parity gate are green.
 2. Onboarding/policy SLO gate is green (`artifacts/gates/onboarding-policy-slo-gate.json`).
-3. Hosted baseline evidence is green.
-4. Go-live gate and launch cutover packet reports are present:
+3. Onboarding host success gate is green (`artifacts/gates/onboarding-host-success-gate.json`).
+4. Hosted baseline evidence is green.
+5. Go-live gate and launch cutover packet reports are present:
    - `artifacts/gates/s13-go-live-gate.json`
    - `artifacts/gates/s13-launch-cutover-packet.json`
    - generated from a successful `go-live-gate` workflow run for the release commit
-5. NOO-65 promotion guard passes with required artifact binding (`artifacts/gates/release-promotion-guard.json`).
-6. MCP compatibility matrix is green for supported hosts.
-7. Paid MCP run artifacts verify cleanly.
-8. Rollback runbook has been rehearsed.
+6. NOO-65 promotion guard passes with required artifact binding (`artifacts/gates/release-promotion-guard.json`).
+7. MCP compatibility matrix is green for supported hosts.
+8. Paid MCP run artifacts verify cleanly.
+9. Rollback runbook has been rehearsed.
 
 Run the live environment cutover gate before opening traffic:
 
