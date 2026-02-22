@@ -46,3 +46,4 @@ settld-debug-*.sha256
 
 # Local signing / ops keys
 keys/
+.vercel
