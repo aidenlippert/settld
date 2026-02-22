@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrapWalletProvider } from "../../src/core/wallet-provider-bootstrap.js";
 import { extractBootstrapMcpEnv, loadHostConfigHelper, runWizard } from "./wizard.mjs";
 import { SUPPORTED_HOSTS } from "./host-config.mjs";
+import { defaultSessionPath, readSavedSession } from "./session-store.mjs";
 
 const WALLET_MODES = new Set(["managed", "byo", "none"]);
 const WALLET_PROVIDERS = new Set(["circle"]);
@@ -37,6 +38,12 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 const SETTLD_BIN = path.join(REPO_ROOT, "bin", "settld.js");
 const PROFILE_FINGERPRINT_REGEX = /^[0-9a-f]{64}$/;
+const ANSI_RESET = "\u001b[0m";
+const ANSI_BOLD = "\u001b[1m";
+const ANSI_DIM = "\u001b[2m";
+const ANSI_CYAN = "\u001b[36m";
+const ANSI_GREEN = "\u001b[32m";
+const ANSI_MAGENTA = "\u001b[35m";
 
 function usage() {
   const text = [
@@ -53,6 +60,7 @@ function usage() {
     "  --settld-api-key <key>          Settld tenant API key (or SETTLD_API_KEY)",
     "  --bootstrap-api-key <key>       Onboarding bootstrap API key used to mint tenant API key",
     "  --magic-link-api-key <key>      Alias for --bootstrap-api-key",
+    "  --session-file <path>           Saved login session path (default: ~/.settld/session.json)",
     "  --bootstrap-key-id <id>         Optional API key ID hint for runtime bootstrap",
     "  --bootstrap-scopes <csv>        Optional scopes for generated tenant API key",
     "  --wallet-mode <managed|byo|none> Wallet setup mode (default: managed)",
@@ -106,6 +114,7 @@ function parseArgs(argv) {
     tenantId: null,
     settldApiKey: null,
     bootstrapApiKey: null,
+    sessionFile: defaultSessionPath(),
     bootstrapKeyId: null,
     bootstrapScopes: null,
     walletMode: "managed",
@@ -201,6 +210,12 @@ function parseArgs(argv) {
     ) {
       const parsed = readArgValue(argv, i, arg);
       out.bootstrapApiKey = parsed.value;
+      i = parsed.nextIndex;
+      continue;
+    }
+    if (arg === "--session-file" || arg.startsWith("--session-file=")) {
+      const parsed = readArgValue(argv, i, arg);
+      out.sessionFile = parsed.value;
       i = parsed.nextIndex;
       continue;
     }
@@ -302,6 +317,7 @@ function parseArgs(argv) {
   if (out.preflightOnly && out.preflight === false) {
     throw new Error("--preflight-only cannot be combined with --no-preflight");
   }
+  out.sessionFile = path.resolve(process.cwd(), String(out.sessionFile ?? "").trim() || defaultSessionPath());
   if (out.outEnv) out.outEnv = path.resolve(process.cwd(), out.outEnv);
   if (out.reportPath) out.reportPath = path.resolve(process.cwd(), out.reportPath);
   return out;
@@ -318,6 +334,19 @@ function normalizeHttpUrl(value) {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
   return parsed.toString().replace(/\/+$/, "");
+}
+
+function supportsColor(output = process.stdout, env = process.env) {
+  if (!output?.isTTY) return false;
+  if (String(env.NO_COLOR ?? "").trim()) return false;
+  if (String(env.FORCE_COLOR ?? "").trim() === "0") return false;
+  return true;
+}
+
+function tint(enabled, code, value) {
+  const text = String(value ?? "");
+  if (!enabled) return text;
+  return `${code}${text}${ANSI_RESET}`;
 }
 
 function commandExists(command, { platform = process.platform } = {}) {
@@ -612,7 +641,7 @@ async function promptSelect(
   stdout,
   label,
   options,
-  { defaultValue = null, hint = null } = {}
+  { defaultValue = null, hint = null, color = false } = {}
 ) {
   if (!Array.isArray(options) || options.length === 0) {
     throw new Error(`${label} requires at least one option`);
@@ -644,14 +673,14 @@ async function promptSelect(
 
   const render = () => {
     const lines = [];
-    lines.push(`${label} (arrow keys + Enter)`);
+    lines.push(tint(color, ANSI_CYAN, `${label} (arrow keys + Enter)`));
     for (let i = 0; i < normalizedOptions.length; i += 1) {
       const option = normalizedOptions[i];
-      const prefix = i === index ? ">" : " ";
+      const prefix = i === index ? tint(color, ANSI_GREEN, "●") : tint(color, ANSI_DIM, "○");
       const detail = option.hint ? ` - ${option.hint}` : "";
-      lines.push(`  ${prefix} ${option.label}${detail}`);
+      lines.push(`  ${prefix} ${i === index ? tint(color, ANSI_BOLD, option.label) : option.label}${tint(color, ANSI_DIM, detail)}`);
     }
-    if (hint) lines.push(`  ${hint}`);
+    if (hint) lines.push(`  ${tint(color, ANSI_DIM, hint)}`);
     if (renderedLines > 0) {
       stdout.write(`\u001b[${renderedLines}A`);
     }
@@ -678,7 +707,7 @@ async function promptSelect(
     const resolveWithSelection = () => {
       const selected = normalizedOptions[index];
       cleanup();
-      stdout.write(`\u001b[2K\r${label}: ${selected.label}\n`);
+      stdout.write(`\u001b[2K\r${tint(color, ANSI_CYAN, label)}: ${tint(color, ANSI_GREEN, selected.label)}\n`);
       resolve(selected.value);
     };
 
@@ -709,7 +738,14 @@ async function promptSelect(
   });
 }
 
-async function promptBooleanChoice(rl, stdin, stdout, label, defaultValue, { trueLabel = "Yes", falseLabel = "No", hint = null } = {}) {
+async function promptBooleanChoice(
+  rl,
+  stdin,
+  stdout,
+  label,
+  defaultValue,
+  { trueLabel = "Yes", falseLabel = "No", hint = null, color = false } = {}
+) {
   const selected = await promptSelect(
     rl,
     stdin,
@@ -719,7 +755,7 @@ async function promptBooleanChoice(rl, stdin, stdout, label, defaultValue, { tru
       { value: "yes", label: trueLabel },
       { value: "no", label: falseLabel }
     ],
-    { defaultValue: defaultValue ? "yes" : "no", hint }
+    { defaultValue: defaultValue ? "yes" : "no", hint, color }
   );
   return selected === "yes";
 }
@@ -871,6 +907,7 @@ async function requestRuntimeBootstrapMcpEnv({
   baseUrl,
   tenantId,
   bootstrapApiKey,
+  sessionCookie,
   bootstrapKeyId = null,
   bootstrapScopes = [],
   idempotencyKey = null,
@@ -878,12 +915,17 @@ async function requestRuntimeBootstrapMcpEnv({
 } = {}) {
   const normalizedBaseUrl = normalizeHttpUrl(baseUrl);
   if (!normalizedBaseUrl) throw new Error(`invalid runtime bootstrap base URL: ${baseUrl}`);
-  const apiKey = mustString(bootstrapApiKey, "bootstrap API key");
+  const apiKey = String(bootstrapApiKey ?? "").trim();
+  const cookie = String(sessionCookie ?? "").trim();
+  if (!apiKey && !cookie) {
+    throw new Error("runtime bootstrap requires bootstrap API key or saved login session");
+  }
 
   const headers = {
-    "content-type": "application/json",
-    "x-api-key": apiKey
+    "content-type": "application/json"
   };
+  if (apiKey) headers["x-api-key"] = apiKey;
+  if (cookie) headers.cookie = cookie;
   if (idempotencyKey) headers["x-idempotency-key"] = String(idempotencyKey);
 
   const body = {
@@ -988,6 +1030,8 @@ async function resolveRuntimeConfig({
   stdout = process.stdout,
   detectInstalledHostsImpl = detectInstalledHosts
 }) {
+  const sessionFile = String(args.sessionFile ?? runtimeEnv.SETTLD_SESSION_FILE ?? defaultSessionPath()).trim();
+  const savedSession = await readSavedSession({ sessionPath: sessionFile });
   const installedHosts = detectInstalledHostsImpl();
   const defaultHost = selectDefaultHost({
     explicitHost: args.host ? String(args.host).toLowerCase() : "",
@@ -1002,6 +1046,8 @@ async function resolveRuntimeConfig({
     bootstrapApiKey: String(
       args.bootstrapApiKey ?? runtimeEnv.SETTLD_BOOTSTRAP_API_KEY ?? runtimeEnv.MAGIC_LINK_API_KEY ?? ""
     ).trim(),
+    sessionFile,
+    sessionCookie: String(runtimeEnv.SETTLD_SESSION_COOKIE ?? "").trim(),
     bootstrapKeyId: String(args.bootstrapKeyId ?? runtimeEnv.SETTLD_BOOTSTRAP_KEY_ID ?? "").trim(),
     bootstrapScopes: String(args.bootstrapScopes ?? runtimeEnv.SETTLD_BOOTSTRAP_SCOPES ?? "").trim(),
     walletProvider: args.walletProvider,
@@ -1018,13 +1064,18 @@ async function resolveRuntimeConfig({
     dryRun: Boolean(args.dryRun),
     installedHosts
   };
+  if (savedSession) {
+    if (!out.baseUrl) out.baseUrl = String(savedSession.baseUrl ?? "").trim();
+    if (!out.tenantId) out.tenantId = String(savedSession.tenantId ?? "").trim();
+    if (!out.sessionCookie) out.sessionCookie = String(savedSession.cookie ?? "").trim();
+  }
 
   if (args.nonInteractive) {
     if (!SUPPORTED_HOSTS.includes(out.host)) throw new Error(`--host must be one of: ${SUPPORTED_HOSTS.join(", ")}`);
     if (!out.baseUrl) throw new Error("--base-url is required");
     if (!out.tenantId) throw new Error("--tenant-id is required");
-    if (!out.settldApiKey && !out.bootstrapApiKey) {
-      throw new Error("--settld-api-key or --bootstrap-api-key is required");
+    if (!out.settldApiKey && !out.bootstrapApiKey && !out.sessionCookie) {
+      throw new Error("--settld-api-key, --bootstrap-api-key, or saved login session is required");
     }
     if (out.walletMode === "managed" && out.walletBootstrap === "local" && !out.circleApiKey) {
       throw new Error("--circle-api-key is required for --wallet-mode managed --wallet-bootstrap local");
@@ -1035,15 +1086,22 @@ async function resolveRuntimeConfig({
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("interactive mode requires a TTY. Re-run with --non-interactive and explicit flags.");
   }
+  const color = supportsColor(stdout, runtimeEnv);
   const mutableOutput = createMutableOutput(stdout);
   const rl = createInterface({ input: stdin, output: mutableOutput });
   try {
-    stdout.write("Settld guided setup\n");
-    stdout.write("===================\n");
+    const title = tint(color, ANSI_BOLD, "Settld guided setup");
+    const subtitle = tint(color, ANSI_DIM, "Deterministic onboarding for trusted agent spend");
+    stdout.write(`${title}\n`);
+    stdout.write(`${tint(color, ANSI_MAGENTA, "===================")}\n`);
+    stdout.write(`${subtitle}\n`);
     if (installedHosts.length > 0) {
-      stdout.write(`Detected hosts: ${installedHosts.join(", ")}\n`);
+      stdout.write(`${tint(color, ANSI_CYAN, "Detected hosts")}: ${installedHosts.join(", ")}\n`);
     } else {
-      stdout.write("Detected hosts: none (will still write config files)\n");
+      stdout.write(`${tint(color, ANSI_CYAN, "Detected hosts")}: none (will still write config files)\n`);
+    }
+    if (savedSession?.tenantId) {
+      stdout.write(`${tint(color, ANSI_GREEN, "Saved login session")}: tenant ${savedSession.tenantId}\n`);
     }
     stdout.write("\n");
 
@@ -1058,7 +1116,7 @@ async function resolveRuntimeConfig({
       stdout,
       "Select host",
       hostOptions,
-      { defaultValue: hostPromptDefault, hint: "Up/Down arrows change selection" }
+      { defaultValue: hostPromptDefault, hint: "Up/Down arrows change selection", color }
     );
 
     if (!out.walletMode) out.walletMode = "managed";
@@ -1072,7 +1130,7 @@ async function resolveRuntimeConfig({
         { value: "byo", label: "byo", hint: "Use your existing wallet IDs and secrets" },
         { value: "none", label: "none", hint: "No payment rail wiring during setup" }
       ],
-      { defaultValue: out.walletMode }
+      { defaultValue: out.walletMode, color }
     );
 
     if (!out.baseUrl) {
@@ -1082,16 +1140,30 @@ async function resolveRuntimeConfig({
       out.tenantId = await promptLine(rl, "Tenant ID", { defaultValue: "tenant_default" });
     }
     if (!out.settldApiKey) {
+      const canUseSavedSession =
+        Boolean(out.sessionCookie) &&
+        (!savedSession ||
+          (normalizeHttpUrl(out.baseUrl) === normalizeHttpUrl(savedSession?.baseUrl) &&
+            String(out.tenantId ?? "").trim() === String(savedSession?.tenantId ?? "").trim()));
+      const keyOptions = [];
+      if (canUseSavedSession) {
+        keyOptions.push({
+          value: "session",
+          label: "Use saved login session",
+          hint: `Reuse ${out.sessionFile} to mint runtime key`
+        });
+      }
+      keyOptions.push(
+        { value: "bootstrap", label: "Generate during setup", hint: "Use onboarding bootstrap API key" },
+        { value: "manual", label: "Paste existing key", hint: "Use an existing tenant API key" }
+      );
       const keyMode = await promptSelect(
         rl,
         stdin,
         stdout,
         "How should setup get your Settld API key?",
-        [
-          { value: "bootstrap", label: "Generate during setup", hint: "Use onboarding bootstrap API key" },
-          { value: "manual", label: "Paste existing key", hint: "Use an existing tenant API key" }
-        ],
-        { defaultValue: "bootstrap" }
+        keyOptions,
+        { defaultValue: canUseSavedSession ? "session" : "bootstrap", color }
       );
       if (keyMode === "bootstrap") {
         if (!out.bootstrapApiKey) {
@@ -1103,8 +1175,10 @@ async function resolveRuntimeConfig({
         if (!out.bootstrapScopes) {
           out.bootstrapScopes = await promptLine(rl, "Generated key scopes CSV (optional)", { required: false });
         }
-      } else {
+      } else if (keyMode === "manual") {
         out.settldApiKey = await promptSecretLine(rl, mutableOutput, stdout, "Settld API key");
+      } else {
+        out.bootstrapApiKey = "";
       }
     }
 
@@ -1119,7 +1193,7 @@ async function resolveRuntimeConfig({
           { value: "local", label: "local", hint: "Always use local Circle API key flow" },
           { value: "remote", label: "remote", hint: "Always use tenant onboarding endpoint" }
         ],
-        { defaultValue: out.walletBootstrap || "auto" }
+        { defaultValue: out.walletBootstrap || "auto", color }
       );
       if (out.walletBootstrap === "local" && !out.circleApiKey) {
         out.circleApiKey = await promptSecretLine(rl, mutableOutput, stdout, "Circle API key");
@@ -1155,7 +1229,8 @@ async function resolveRuntimeConfig({
         out.preflight,
         {
           trueLabel: "Yes - validate API/auth/paths",
-          falseLabel: "No - skip preflight"
+          falseLabel: "No - skip preflight",
+          color
         }
       );
       out.smoke = await promptBooleanChoice(
@@ -1166,7 +1241,8 @@ async function resolveRuntimeConfig({
         out.smoke,
         {
           trueLabel: "Yes - run settld.about probe",
-          falseLabel: "No - skip smoke"
+          falseLabel: "No - skip smoke",
+          color
         }
       );
 
@@ -1178,7 +1254,8 @@ async function resolveRuntimeConfig({
         !out.skipProfileApply,
         {
           trueLabel: "Yes - apply profile now",
-          falseLabel: "No - skip profile apply"
+          falseLabel: "No - skip profile apply",
+          color
         }
       );
       out.skipProfileApply = !applyProfile;
@@ -1196,7 +1273,8 @@ async function resolveRuntimeConfig({
         out.dryRun,
         {
           trueLabel: "Yes - preview only",
-          falseLabel: "No - write config"
+          falseLabel: "No - write config",
+          color
         }
       );
     }
@@ -1245,11 +1323,12 @@ export async function runOnboard({
   let settldApiKey = String(config.settldApiKey ?? "").trim();
   let runtimeBootstrapEnv = null;
   if (!settldApiKey) {
-    if (showSteps) stdout.write("Generating tenant runtime API key via onboarding bootstrap...\n");
+    if (showSteps) stdout.write("Generating tenant runtime API key via onboarding bootstrap/session...\n");
     runtimeBootstrapEnv = await requestRuntimeBootstrapMcpEnvImpl({
       baseUrl: normalizedBaseUrl,
       tenantId,
       bootstrapApiKey: config.bootstrapApiKey,
+      sessionCookie: config.sessionCookie,
       bootstrapKeyId: config.bootstrapKeyId || null,
       bootstrapScopes: parseScopes(config.bootstrapScopes),
       fetchImpl

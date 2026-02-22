@@ -248,6 +248,80 @@ test("onboard: non-interactive can mint tenant API key via bootstrap key", async
   assert.equal(wizardCalls[0].argv[keyIndex + 1], "sk_bootstrap.generated");
 });
 
+test("onboard: non-interactive can mint tenant API key via saved login session", async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "settld-onboard-session-"));
+  const sessionFile = path.join(tmpDir, "session.json");
+  await fs.writeFile(
+    sessionFile,
+    `${JSON.stringify(
+      {
+        schemaVersion: "SettldCliSession.v1",
+        savedAt: "2026-02-22T00:00:00.000Z",
+        baseUrl: "https://api.settld.work",
+        tenantId: "tenant_session",
+        cookie: "ml_buyer_session=session_cookie_abc",
+        email: "founder@example.com"
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const bootstrapCalls = [];
+  const wizardCalls = [];
+  try {
+    const out = await runOnboard({
+      argv: [
+        "--non-interactive",
+        "--host",
+        "openclaw",
+        "--wallet-mode",
+        "none",
+        "--no-preflight",
+        "--session-file",
+        sessionFile,
+        "--format",
+        "json"
+      ],
+      runtimeEnv: {},
+      requestRuntimeBootstrapMcpEnvImpl: async (input) => {
+        bootstrapCalls.push(input);
+        return {
+          SETTLD_BASE_URL: "https://api.settld.work",
+          SETTLD_TENANT_ID: "tenant_session",
+          SETTLD_API_KEY: "sk_session.generated"
+        };
+      },
+      runWizardImpl: async ({ argv, extraEnv }) => {
+        wizardCalls.push({ argv, extraEnv });
+        const keyIndex = argv.indexOf("--api-key");
+        const generatedApiKey = keyIndex >= 0 ? String(argv[keyIndex + 1] ?? "") : "";
+        return {
+          ok: true,
+          env: {
+            SETTLD_BASE_URL: "https://api.settld.work",
+            SETTLD_TENANT_ID: "tenant_session",
+            SETTLD_API_KEY: generatedApiKey,
+            ...extraEnv
+          }
+        };
+      },
+      stdout: { write() {} }
+    });
+
+    assert.equal(out.ok, true);
+    assert.equal(out.settld.tenantId, "tenant_session");
+    assert.equal(out.env.SETTLD_API_KEY, "sk_session.generated");
+    assert.equal(bootstrapCalls.length, 1);
+    assert.equal(bootstrapCalls[0].bootstrapApiKey, "");
+    assert.equal(bootstrapCalls[0].sessionCookie, "ml_buyer_session=session_cookie_abc");
+    assert.equal(wizardCalls.length, 1);
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("onboard: non-interactive defaults host from detected installations", async () => {
   const wizardCalls = [];
   const wizardStub = async ({ argv }) => {

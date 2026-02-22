@@ -9,6 +9,7 @@ function usage() {
   console.error("usage:");
   console.error("  settld --version");
   console.error("  settld onboard [--help]");
+  console.error("  settld login [--help]");
   console.error("  settld setup [--help]");
   console.error("  settld setup legacy [--help]");
   console.error("  settld setup circle [--help]");
@@ -136,6 +137,10 @@ function main() {
 
   if (cmd === "onboard") {
     return runNodeScript("scripts/setup/onboard.mjs", argv.slice(1));
+  }
+
+  if (cmd === "login") {
+    return runNodeScript("scripts/setup/login.mjs", argv.slice(1));
   }
 
   if (cmd === "doctor") {
