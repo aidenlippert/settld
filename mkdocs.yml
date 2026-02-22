@@ -1,9 +1,6 @@
 site_name: Settld Docs
 site_description: Deterministic primitives for autonomous production systems
-site_url: https://settld.work
-repo_url: https://github.com/aidenlippert/settld
-repo_name: aidenlippert/settld
-edit_uri: edit/main/mkdocs/docs/
+site_url: https://docs.settld.work
 docs_dir: mkdocs/docs
 site_dir: mkdocs/site
 theme:
