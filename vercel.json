@@ -1,4 +1,5 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "bash scripts/vercel/install-mkdocs.sh",
   "buildCommand": "bash scripts/vercel/build-mkdocs.sh",
   "ignoreCommand": "bash scripts/vercel/ignore-mkdocs.sh",
