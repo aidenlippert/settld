@@ -32,7 +32,7 @@ jobs:
             --out-dir "artifacts/conformance/session-stream-v1/${{ inputs.runtime_id }}"
 
       - name: Upload session stream conformance publication artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: session-stream-conformance-cert-${{ inputs.runtime_id }}-${{ github.run_id }}
           path: artifacts/conformance/session-stream-v1/${{ inputs.runtime_id }}

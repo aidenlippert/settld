@@ -110,7 +110,7 @@ jobs:
 
       - name: Upload go-live artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-live-gate-${{ github.run_id }}
           path: |

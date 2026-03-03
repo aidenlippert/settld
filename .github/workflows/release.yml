@@ -274,7 +274,7 @@ jobs:
 
       - name: Upload billing smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: billing-smoke-${{ github.run_id }}
           path: |
@@ -284,7 +284,7 @@ jobs:
 
       - name: Upload release gate deploy-safety artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-deploy-safety-${{ github.run_id }}
           path: |
@@ -433,7 +433,7 @@ jobs:
 
       - name: Upload release promotion guard artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-promotion-guard-${{ github.run_id }}
           path: |
@@ -507,7 +507,7 @@ jobs:
           output-file: sbom.spdx.json
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-${{ steps.v.outputs.version }}
           path: sbom.spdx.json
@@ -586,7 +586,7 @@ jobs:
           exit 1
 
       - name: Upload chart artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helm-chart-${{ steps.v.outputs.version }}
           path: ${{ steps.package_chart.outputs.chart_tgz }}
@@ -654,7 +654,7 @@ jobs:
           (cd "$OUT" && ls -la && sha256sum *.tgz | tee npm-SHA256SUMS)
 
       - name: Upload npm artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-artifacts-${{ steps.v.outputs.version }}
           path: /tmp/npm-artifacts
@@ -853,7 +853,7 @@ jobs:
 
       - name: Upload npm postpublish smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-postpublish-smoke-${{ steps.v.outputs.version }}
           path: |
@@ -918,7 +918,7 @@ jobs:
           (cd "$OUT" && sha256sum nooterra_api_sdk_python-*.whl nooterra_api_sdk_python-*.tar.gz | tee python-SHA256SUMS)
 
       - name: Upload Python artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-artifacts-${{ steps.v.outputs.version }}
           path: .artifacts/python
@@ -1033,7 +1033,7 @@ jobs:
           (cd "$OUT" && sha256sum conformance-v1.tar.gz | tee conformance-v1-SHA256SUMS)
 
       - name: Upload conformance pack
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-pack-${{ steps.v.outputs.version }}
           path: /tmp/conformance-artifacts
@@ -1073,7 +1073,7 @@ jobs:
           (cd "$OUT" && sha256sum nooterra-audit-packet-v1.zip | tee nooterra-audit-packet-v1.zip.sha256)
 
       - name: Upload audit packet
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: audit-packet-${{ steps.v.outputs.version }}
           path: /tmp/audit-artifacts
@@ -1234,7 +1234,7 @@ jobs:
 
       - name: Upload release notes artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-notes-${{ steps.v.outputs.version }}
           path: |

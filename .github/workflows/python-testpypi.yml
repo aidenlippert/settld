@@ -47,7 +47,7 @@ jobs:
           (cd "$OUT" && sha256sum nooterra_api_sdk_python-*.whl nooterra_api_sdk_python-*.tar.gz | tee python-SHA256SUMS)
 
       - name: Upload Python artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-testpypi-artifacts-${{ steps.v.outputs.version }}
           path: .artifacts/python

@@ -32,7 +32,7 @@ jobs:
             --out-dir "artifacts/conformance/session-v1/${{ inputs.runtime_id }}"
 
       - name: Upload session conformance publication artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: session-conformance-cert-${{ inputs.runtime_id }}-${{ github.run_id }}
           path: artifacts/conformance/session-v1/${{ inputs.runtime_id }}

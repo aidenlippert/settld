@@ -59,7 +59,7 @@ jobs:
         run: npm run -s test:ci:branding-copy-hygiene
       - name: Upload branding/copy hygiene report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: branding-copy-hygiene-${{ github.run_id }}
           path: artifacts/ci/branding-copy-hygiene.json
@@ -234,7 +234,7 @@ jobs:
         run: npm run -s test:ci:mcp-host-smoke
       - name: Upload MCP host smoke report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcp-host-smoke-${{ github.run_id }}
           path: artifacts/ops/mcp-host-smoke.json
@@ -272,7 +272,7 @@ jobs:
             --report artifacts/gates/onboarding-policy-slo-gate.json
       - name: Upload onboarding policy SLO gate artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: onboarding-policy-slo-gate-${{ github.run_id }}
           path: |
@@ -324,7 +324,7 @@ jobs:
             --metrics-dir artifacts/ops/onboarding-host-success
       - name: Upload onboarding host success gate artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: onboarding-host-success-gate-${{ github.run_id }}
           path: |
@@ -352,7 +352,7 @@ jobs:
         run: node scripts/ci/run-kernel-v0-ship-gate.mjs
       - name: Upload ship gate artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-v0-ship-gate-${{ github.run_id }}
           path: artifacts/gates/kernel-v0-ship-gate.json
@@ -379,7 +379,7 @@ jobs:
             --json-out artifacts/gates/production-cutover-required-checks.json
       - name: Upload production cutover gate artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: production-cutover-gate-${{ github.run_id }}
           path: |
@@ -422,7 +422,7 @@ jobs:
             --candidate-command "python3 reference/verifier-py/nooterra-verify-py --strict --format json --job-proof test/fixtures/bundles/v1/jobproof/strict-pass --trusted-buyer-keys test/fixtures/bundles/v1/trust.json"
       - name: Upload offline verification parity gate artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: offline-verification-parity-gate-${{ github.run_id }}
           path: artifacts/gates/offline-verification-parity-gate.json
@@ -455,7 +455,7 @@ jobs:
         run: node --test test/release-workflow-contract.test.js
       - name: Upload release promotion materialization chain artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-promotion-materialization-chain-${{ github.run_id }}
           path: |
@@ -567,7 +567,7 @@ jobs:
             --out artifacts/gates/openclaw-operator-readiness-gate.json
       - name: Upload deploy safety artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deploy-safety-${{ github.run_id }}
           path: |
@@ -615,7 +615,7 @@ jobs:
           --report artifacts/gates/protocol-compatibility-drift-gate.json
       - name: Upload protocol compatibility matrix artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: protocol-compatibility-matrix-${{ github.run_id }}
           path: |
@@ -786,7 +786,7 @@ jobs:
           '
       - name: Upload conformance publication artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-publication-artifacts-${{ github.run_id }}
           path: |
