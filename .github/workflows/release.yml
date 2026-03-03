@@ -133,7 +133,7 @@ jobs:
       DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
       RESTORE_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -308,7 +308,7 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -459,7 +459,7 @@ jobs:
     env:
       IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version
         id: v
@@ -525,7 +525,7 @@ jobs:
     env:
       CHART_REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version
         id: v
@@ -596,7 +596,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version
         id: v
@@ -667,7 +667,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Gate npm publish on NPM_TOKEN
         id: npm_publish_guard
@@ -872,7 +872,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version
         id: v
@@ -1000,7 +1000,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version
         id: v
@@ -1043,7 +1043,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -1083,7 +1083,7 @@ jobs:
     timeout-minutes: 10
     needs: [docker_image, helm_chart, npm_packages, npm_publish, python_publish, conformance_pack, audit_packet]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20

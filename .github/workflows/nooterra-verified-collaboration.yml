@@ -49,7 +49,7 @@ jobs:
       DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
       NOOTERRA_CI_ALLOW_BOOTSTRAP_LOCAL: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20

@@ -30,7 +30,7 @@ jobs:
       CIRCLE_E2E_AMOUNT_CENTS: "100"
       CIRCLE_BATCH_E2E_AMOUNT_CENTS: "100"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
