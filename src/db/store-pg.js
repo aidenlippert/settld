@@ -212,6 +212,8 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.x402EscalationOverrideUsage.clear();
     if (!(store.x402ZkVerificationKeys instanceof Map)) store.x402ZkVerificationKeys = new Map();
     store.x402ZkVerificationKeys.clear();
+    if (!(store.x402WebhookEndpoints instanceof Map)) store.x402WebhookEndpoints = new Map();
+    store.x402WebhookEndpoints.clear();
     if (!(store.x402ReversalEvents instanceof Map)) store.x402ReversalEvents = new Map();
     store.x402ReversalEvents.clear();
     if (!(store.x402ReversalNonceUsage instanceof Map)) store.x402ReversalNonceUsage = new Map();
@@ -226,6 +228,12 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     store.governanceTemplates.clear();
     if (!(store.simulationHarnessRuns instanceof Map)) store.simulationHarnessRuns = new Map();
     store.simulationHarnessRuns.clear();
+    if (!(store.financeReconciliationTriages instanceof Map)) store.financeReconciliationTriages = new Map();
+    store.financeReconciliationTriages.clear();
+    if (!(store.marketplaceProviderPublications instanceof Map)) store.marketplaceProviderPublications = new Map();
+    store.marketplaceProviderPublications.clear();
+    if (!(store.marketplaceCapabilityListings instanceof Map)) store.marketplaceCapabilityListings = new Map();
+    store.marketplaceCapabilityListings.clear();
 
     const res = await pool.query("SELECT tenant_id, aggregate_type, aggregate_id, snapshot_json FROM snapshots");
     for (const row of res.rows) {
@@ -428,6 +436,13 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           verificationKeyId: snap?.verificationKeyId ?? String(id)
         });
       }
+      if (type === "x402_webhook_endpoint") {
+        store.x402WebhookEndpoints.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          endpointId: snap?.endpointId ?? String(id)
+        });
+      }
       if (type === "x402_reversal_event") {
         store.x402ReversalEvents.set(key, {
           ...snap,
@@ -468,6 +483,43 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           tenantId: snap?.tenantId ?? tenantId,
           adjustmentId: snap?.adjustmentId ?? String(id)
         });
+      }
+      if (type === "finance_reconciliation_triage") {
+        store.financeReconciliationTriages.set(key, {
+          ...snap,
+          tenantId: snap?.tenantId ?? tenantId,
+          triageKey: snap?.triageKey ?? String(id)
+        });
+      }
+      if (type === "marketplace_provider_publication") {
+        const providerRef =
+          typeof snap?.providerRef === "string" && snap.providerRef.trim() !== ""
+            ? snap.providerRef.trim()
+            : typeof id === "string" && id.trim() !== ""
+              ? String(id).trim()
+              : null;
+        if (providerRef) {
+          store.marketplaceProviderPublications.set(makeScopedKey({ tenantId, id: providerRef }), {
+            ...snap,
+            tenantId: snap?.tenantId ?? tenantId,
+            providerRef
+          });
+        }
+      }
+      if (type === "marketplace_capability_listing") {
+        const listingId =
+          typeof snap?.listingId === "string" && snap.listingId.trim() !== ""
+            ? snap.listingId.trim()
+            : typeof id === "string" && id.trim() !== ""
+              ? String(id).trim()
+              : null;
+        if (listingId) {
+          store.marketplaceCapabilityListings.set(makeScopedKey({ tenantId, id: listingId }), {
+            ...snap,
+            tenantId: snap?.tenantId ?? tenantId,
+            listingId
+          });
+        }
       }
       if (type === "governance_template") {
         const templateId =
@@ -649,6 +701,18 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
 
   function billableUsageEventMapKey({ tenantId, eventKey }) {
     return `${normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID)}\n${String(eventKey)}`;
+  }
+
+  function financeReconciliationTriageMapKey({ tenantId, triageKey }) {
+    return makeScopedKey({ tenantId: normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID), id: String(triageKey) });
+  }
+
+  function marketplaceProviderPublicationMapKey({ tenantId, providerRef }) {
+    return makeScopedKey({ tenantId: normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID), id: String(providerRef) });
+  }
+
+  function marketplaceCapabilityListingMapKey({ tenantId, listingId }) {
+    return makeScopedKey({ tenantId: normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID), id: String(listingId) });
   }
 
   function moneyRailOperationRowToRecord(row) {
@@ -2162,6 +2226,43 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     }
   }
 
+  async function persistX402WebhookEndpoint(client, { tenantId, endpointId, endpoint }) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!endpoint || typeof endpoint !== "object" || Array.isArray(endpoint)) {
+      throw new TypeError("endpoint is required");
+    }
+    const normalizedEndpointId =
+      endpointId && String(endpointId).trim() !== ""
+        ? String(endpointId).trim()
+        : endpoint.endpointId && String(endpoint.endpointId).trim() !== ""
+          ? String(endpoint.endpointId).trim()
+          : null;
+    if (!normalizedEndpointId) throw new TypeError("endpointId is required");
+    const updatedAt =
+      parseIsoOrNull(endpoint.updatedAt) ??
+      parseIsoOrNull(endpoint.createdAt) ??
+      parseIsoOrNull(endpoint.revokedAt) ??
+      parseIsoOrNull(endpoint.disabledAt) ??
+      new Date().toISOString();
+    const normalizedEndpoint = {
+      ...endpoint,
+      tenantId,
+      endpointId: normalizedEndpointId,
+      updatedAt
+    };
+
+    await client.query(
+      `
+        INSERT INTO snapshots (tenant_id, aggregate_type, aggregate_id, seq, at_chain_hash, snapshot_json, updated_at)
+        VALUES ($1, 'x402_webhook_endpoint', $2, 0, NULL, $3, $4)
+        ON CONFLICT (tenant_id, aggregate_type, aggregate_id) DO UPDATE SET
+          snapshot_json = EXCLUDED.snapshot_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [tenantId, normalizedEndpointId, JSON.stringify(normalizedEndpoint), updatedAt]
+    );
+  }
+
   async function persistX402ReversalEvent(client, { tenantId, gateId, eventId, event }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     if (!event || typeof event !== "object" || Array.isArray(event)) {
@@ -2896,6 +2997,7 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       "X402_ESCALATION_EVENT_APPEND",
       "X402_ESCALATION_OVERRIDE_USAGE_PUT",
       "X402_ZK_VERIFICATION_KEY_PUT",
+      "X402_WEBHOOK_ENDPOINT_UPSERT",
       "X402_REVERSAL_EVENT_APPEND",
       "X402_REVERSAL_NONCE_PUT",
       "X402_REVERSAL_COMMAND_PUT",
@@ -3856,6 +3958,14 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
             verificationKey: op.verificationKey
           });
         }
+        if (op.kind === "X402_WEBHOOK_ENDPOINT_UPSERT") {
+          const tenantId = normalizeTenantId(op.tenantId ?? op.endpoint?.tenantId ?? DEFAULT_TENANT_ID);
+          await persistX402WebhookEndpoint(client, {
+            tenantId,
+            endpointId: op.endpointId,
+            endpoint: op.endpoint
+          });
+        }
         if (op.kind === "X402_REVERSAL_EVENT_APPEND") {
           const tenantId = normalizeTenantId(op.tenantId ?? op.event?.tenantId ?? DEFAULT_TENANT_ID);
           await persistX402ReversalEvent(client, {
@@ -4064,6 +4174,80 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       ...usage,
       tenantId,
       overrideId
+    };
+  }
+
+  function x402WebhookEndpointSnapshotRowToRecord(row) {
+    const endpoint = row?.snapshot_json ?? null;
+    if (!endpoint || typeof endpoint !== "object" || Array.isArray(endpoint)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? endpoint?.tenantId ?? DEFAULT_TENANT_ID);
+    const endpointId =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== ""
+        ? String(row.aggregate_id).trim()
+        : typeof endpoint?.endpointId === "string" && endpoint.endpointId.trim() !== ""
+          ? endpoint.endpointId.trim()
+          : null;
+    if (!endpointId) return null;
+    return {
+      ...endpoint,
+      tenantId,
+      endpointId
+    };
+  }
+
+  function financeReconciliationTriageSnapshotRowToRecord(row) {
+    const triage = row?.snapshot_json ?? null;
+    if (!triage || typeof triage !== "object" || Array.isArray(triage)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? triage?.tenantId ?? DEFAULT_TENANT_ID);
+    const triageKey =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== ""
+        ? String(row.aggregate_id).trim()
+        : typeof triage?.triageKey === "string" && triage.triageKey.trim() !== ""
+          ? triage.triageKey.trim()
+          : null;
+    if (!triageKey) return null;
+    return {
+      ...triage,
+      tenantId,
+      triageKey
+    };
+  }
+
+  function marketplaceProviderPublicationSnapshotRowToRecord(row) {
+    const publication = row?.snapshot_json ?? null;
+    if (!publication || typeof publication !== "object" || Array.isArray(publication)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? publication?.tenantId ?? DEFAULT_TENANT_ID);
+    const providerRefFromAggregateId =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== "" ? String(row.aggregate_id).trim() : null;
+    const providerRefFromRecord =
+      typeof publication?.providerRef === "string" && publication.providerRef.trim() !== "" ? publication.providerRef.trim() : null;
+    const providerId =
+      typeof publication?.providerId === "string" && publication.providerId.trim() !== "" ? publication.providerId.trim() : null;
+    const providerRef = providerRefFromRecord ?? providerRefFromAggregateId ?? providerId;
+    if (!providerRef) return null;
+    return {
+      ...publication,
+      tenantId,
+      providerId: providerId ?? null,
+      providerRef
+    };
+  }
+
+  function marketplaceCapabilityListingSnapshotRowToRecord(row) {
+    const listing = row?.snapshot_json ?? null;
+    if (!listing || typeof listing !== "object" || Array.isArray(listing)) return null;
+    const tenantId = normalizeTenantId(row?.tenant_id ?? listing?.tenantId ?? DEFAULT_TENANT_ID);
+    const listingId =
+      row?.aggregate_id && String(row.aggregate_id).trim() !== ""
+        ? String(row.aggregate_id).trim()
+        : typeof listing?.listingId === "string" && listing.listingId.trim() !== ""
+          ? listing.listingId.trim()
+          : null;
+    if (!listingId) return null;
+    return {
+      ...listing,
+      tenantId,
+      listingId
     };
   }
 
@@ -4340,6 +4524,610 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       if (err?.code !== "42P01") throw err;
       return store.x402EscalationOverrideUsage.get(makeScopedKey({ tenantId, id: normalizedOverrideId })) ?? null;
     }
+  };
+
+  store.putX402WebhookEndpoint = async function putX402WebhookEndpoint({ tenantId = DEFAULT_TENANT_ID, endpoint, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!endpoint || typeof endpoint !== "object" || Array.isArray(endpoint)) throw new TypeError("endpoint is required");
+    const endpointId = typeof endpoint.endpointId === "string" ? endpoint.endpointId.trim() : "";
+    if (!endpointId) throw new TypeError("endpoint.endpointId is required");
+    const at = endpoint.updatedAt ?? endpoint.createdAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [{ kind: "X402_WEBHOOK_ENDPOINT_UPSERT", tenantId, endpointId, endpoint: { ...endpoint, tenantId, endpointId } }],
+      audit
+    });
+    return store.x402WebhookEndpoints.get(makeScopedKey({ tenantId, id: endpointId })) ?? null;
+  };
+
+  store.getX402WebhookEndpoint = async function getX402WebhookEndpoint({ tenantId = DEFAULT_TENANT_ID, endpointId } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(endpointId, "endpointId");
+    const normalizedEndpointId = String(endpointId).trim();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_webhook_endpoint' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, normalizedEndpointId]
+      );
+      return res.rows.length ? x402WebhookEndpointSnapshotRowToRecord(res.rows[0]) : null;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return store.x402WebhookEndpoints.get(makeScopedKey({ tenantId, id: normalizedEndpointId })) ?? null;
+    }
+  };
+
+  store.listX402WebhookEndpoints = async function listX402WebhookEndpoints({
+    tenantId = DEFAULT_TENANT_ID,
+    endpointId = null,
+    destinationId = null,
+    status = null,
+    event = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (endpointId !== null && (typeof endpointId !== "string" || endpointId.trim() === "")) {
+      throw new TypeError("endpointId must be null or a non-empty string");
+    }
+    if (destinationId !== null && (typeof destinationId !== "string" || destinationId.trim() === "")) {
+      throw new TypeError("destinationId must be null or a non-empty string");
+    }
+    if (status !== null && (typeof status !== "string" || status.trim() === "")) {
+      throw new TypeError("status must be null or a non-empty string");
+    }
+    if (event !== null && (typeof event !== "string" || event.trim() === "")) {
+      throw new TypeError("event must be null or a non-empty string");
+    }
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const endpointFilter = endpointId ? endpointId.trim() : null;
+    const destinationFilter = destinationId ? destinationId.trim() : null;
+    const statusFilter = status ? status.trim().toLowerCase() : null;
+    const eventFilter = event ? event.trim().toLowerCase() : null;
+
+    const applyFilters = (rows) => {
+      const out = [];
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (endpointFilter && String(row.endpointId ?? "") !== endpointFilter) continue;
+        if (destinationFilter && String(row.destinationId ?? "") !== destinationFilter) continue;
+        if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+        if (eventFilter) {
+          const events = Array.isArray(row.events) ? row.events.map((value) => String(value).trim().toLowerCase()) : [];
+          if (!events.includes(eventFilter)) continue;
+        }
+        out.push(row);
+      }
+      out.sort((left, right) => {
+        const leftAt = Number.isFinite(Date.parse(String(left?.updatedAt ?? ""))) ? Date.parse(String(left.updatedAt)) : Number.NaN;
+        const rightAt = Number.isFinite(Date.parse(String(right?.updatedAt ?? ""))) ? Date.parse(String(right.updatedAt)) : Number.NaN;
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        return String(left?.endpointId ?? "").localeCompare(String(right?.endpointId ?? ""));
+      });
+      return out;
+    };
+
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'x402_webhook_endpoint'
+          ORDER BY updated_at DESC, aggregate_id ASC
+        `,
+        [tenantId]
+      );
+      const rows = res.rows.map(x402WebhookEndpointSnapshotRowToRecord).filter(Boolean);
+      return applyFilters(rows).slice(safeOffset, safeOffset + safeLimit);
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      const rows = [];
+      for (const row of store.x402WebhookEndpoints.values()) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        rows.push(row);
+      }
+      return applyFilters(rows).slice(safeOffset, safeOffset + safeLimit);
+    }
+  };
+
+  store.getFinanceReconciliationTriage = async function getFinanceReconciliationTriage({
+    tenantId = DEFAULT_TENANT_ID,
+    triageKey
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(triageKey, "triageKey");
+    const normalizedTriageKey = String(triageKey).trim();
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'finance_reconciliation_triage' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, normalizedTriageKey]
+      );
+      return res.rows.length ? financeReconciliationTriageSnapshotRowToRecord(res.rows[0]) : null;
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return store.financeReconciliationTriages.get(financeReconciliationTriageMapKey({ tenantId, triageKey: normalizedTriageKey })) ?? null;
+    }
+  };
+
+  store.putFinanceReconciliationTriage = async function putFinanceReconciliationTriage({
+    tenantId = DEFAULT_TENANT_ID,
+    triage,
+    audit = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!triage || typeof triage !== "object" || Array.isArray(triage)) throw new TypeError("triage is required");
+    const triageKey = assertNonEmptyString(triage.triageKey ?? null, "triage.triageKey");
+    const sourceType = assertNonEmptyString(triage.sourceType ?? null, "triage.sourceType").toLowerCase();
+    const mismatchType = assertNonEmptyString(triage.mismatchType ?? null, "triage.mismatchType");
+    const mismatchKey = assertNonEmptyString(triage.mismatchKey ?? null, "triage.mismatchKey");
+    const period = assertNonEmptyString(triage.period ?? null, "triage.period");
+    const status = assertNonEmptyString(triage.status ?? null, "triage.status").toLowerCase();
+    if (!/^\d{4}-\d{2}$/.test(period)) throw new TypeError("triage.period must match YYYY-MM");
+
+    const existing = await store.getFinanceReconciliationTriage({ tenantId, triageKey });
+    const nowAt = new Date().toISOString();
+    const normalized = {
+      schemaVersion: triage.schemaVersion ?? "FinanceReconciliationTriage.v1",
+      tenantId,
+      triageKey,
+      sourceType,
+      period,
+      providerId:
+        triage.providerId === null || triage.providerId === undefined || String(triage.providerId).trim() === ""
+          ? null
+          : String(triage.providerId).trim(),
+      mismatchType,
+      mismatchKey,
+      mismatchCode:
+        triage.mismatchCode === null || triage.mismatchCode === undefined || String(triage.mismatchCode).trim() === ""
+          ? null
+          : String(triage.mismatchCode).trim(),
+      severity:
+        triage.severity === null || triage.severity === undefined || String(triage.severity).trim() === ""
+          ? null
+          : String(triage.severity).trim().toLowerCase(),
+      status,
+      ownerPrincipalId:
+        triage.ownerPrincipalId === null || triage.ownerPrincipalId === undefined || String(triage.ownerPrincipalId).trim() === ""
+          ? null
+          : String(triage.ownerPrincipalId).trim(),
+      notes:
+        triage.notes === null || triage.notes === undefined || String(triage.notes).trim() === ""
+          ? null
+          : String(triage.notes).trim(),
+      sourceReportHash:
+        triage.sourceReportHash === null || triage.sourceReportHash === undefined || String(triage.sourceReportHash).trim() === ""
+          ? null
+          : String(triage.sourceReportHash).trim(),
+      metadata:
+        triage.metadata && typeof triage.metadata === "object" && !Array.isArray(triage.metadata)
+          ? { ...triage.metadata }
+          : null,
+      actionLog: Array.isArray(triage.actionLog) ? triage.actionLog.slice(0, 50) : existing?.actionLog ?? [],
+      revision:
+        Number.isSafeInteger(triage.revision) && triage.revision > 0
+          ? Number(triage.revision)
+          : Number(existing?.revision ?? 0) + 1,
+      createdAt: parseIsoOrNull(triage.createdAt) ?? existing?.createdAt ?? nowAt,
+      updatedAt: parseIsoOrNull(triage.updatedAt) ?? nowAt,
+      resolvedAt: parseIsoOrNull(triage.resolvedAt) ?? null,
+      resolvedByPrincipalId:
+        triage.resolvedByPrincipalId === null || triage.resolvedByPrincipalId === undefined || String(triage.resolvedByPrincipalId).trim() === ""
+          ? null
+          : String(triage.resolvedByPrincipalId).trim()
+    };
+
+    try {
+      await withTx(async (client) => {
+        await persistSnapshotAggregate(client, {
+          tenantId,
+          aggregateType: "finance_reconciliation_triage",
+          aggregateId: triageKey,
+          snapshot: normalized,
+          updatedAt: normalized.updatedAt
+        });
+        if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+      });
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+    }
+
+    if (!(store.financeReconciliationTriages instanceof Map)) store.financeReconciliationTriages = new Map();
+    store.financeReconciliationTriages.set(financeReconciliationTriageMapKey({ tenantId, triageKey }), normalized);
+    return normalized;
+  };
+
+  store.listFinanceReconciliationTriages = async function listFinanceReconciliationTriages({
+    tenantId = DEFAULT_TENANT_ID,
+    period = null,
+    status = null,
+    sourceType = null,
+    providerId = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (period !== null && (typeof period !== "string" || !/^\d{4}-\d{2}$/.test(period.trim()))) {
+      throw new TypeError("period must match YYYY-MM");
+    }
+    if (status !== null) status = assertNonEmptyString(status, "status").toLowerCase();
+    if (sourceType !== null) sourceType = assertNonEmptyString(sourceType, "sourceType").toLowerCase();
+    if (providerId !== null) providerId = assertNonEmptyString(providerId, "providerId");
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+    const safeLimit = Math.min(1000, limit);
+    const safeOffset = offset;
+    const normalizedPeriod = period ? period.trim() : null;
+
+    const applyFilters = (rows) => {
+      const out = [];
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        if (normalizedPeriod !== null && String(row.period ?? "") !== normalizedPeriod) continue;
+        if (status !== null && String(row.status ?? "").toLowerCase() !== status) continue;
+        if (sourceType !== null && String(row.sourceType ?? "").toLowerCase() !== sourceType) continue;
+        if (providerId !== null && String(row.providerId ?? "") !== providerId) continue;
+        out.push(row);
+      }
+      out.sort((left, right) => {
+        const leftMs = Date.parse(String(left?.updatedAt ?? left?.createdAt ?? ""));
+        const rightMs = Date.parse(String(right?.updatedAt ?? right?.createdAt ?? ""));
+        if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && rightMs !== leftMs) return rightMs - leftMs;
+        return String(left?.triageKey ?? "").localeCompare(String(right?.triageKey ?? ""));
+      });
+      return out.slice(safeOffset, safeOffset + safeLimit);
+    };
+
+    try {
+      const res = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'finance_reconciliation_triage'
+          ORDER BY updated_at DESC, aggregate_id ASC
+        `,
+        [tenantId]
+      );
+      return applyFilters(res.rows.map(financeReconciliationTriageSnapshotRowToRecord).filter(Boolean));
+    } catch (err) {
+      if (err?.code !== "42P01") throw err;
+      return applyFilters(Array.from(store.financeReconciliationTriages.values()));
+    }
+  };
+
+  store.getMarketplaceProviderPublication = async function getMarketplaceProviderPublication({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId = null,
+    providerRef = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedProviderRef =
+      providerRef === null || providerRef === undefined || String(providerRef).trim() === "" ? null : String(providerRef).trim();
+    const normalizedProviderId =
+      providerId === null || providerId === undefined || String(providerId).trim() === "" ? null : String(providerId).trim();
+    if (normalizedProviderRef) {
+      const byRef = await pool.query(
+        `
+          SELECT tenant_id, aggregate_id, snapshot_json
+          FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'marketplace_provider_publication' AND aggregate_id = $2
+          LIMIT 1
+        `,
+        [tenantId, normalizedProviderRef]
+      );
+      if (byRef.rows.length) return marketplaceProviderPublicationSnapshotRowToRecord(byRef.rows[0]);
+    }
+    if (!normalizedProviderId) return null;
+    const byProviderId = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'marketplace_provider_publication'
+        ORDER BY updated_at DESC, aggregate_id ASC
+      `,
+      [tenantId]
+    );
+    const rows = byProviderId.rows.map(marketplaceProviderPublicationSnapshotRowToRecord).filter(Boolean);
+    for (const row of rows) {
+      if (String(row.providerId ?? "") === normalizedProviderId || String(row.providerRef ?? "") === normalizedProviderId) return row;
+    }
+    return null;
+  };
+
+  store.listMarketplaceProviderPublications = async function listMarketplaceProviderPublications({
+    tenantId = DEFAULT_TENANT_ID,
+    status = "certified",
+    providerId = null,
+    providerRef = null,
+    search = null,
+    toolId = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const statusFilter = status === null || status === undefined ? "certified" : String(status).trim().toLowerCase() || "certified";
+    const providerFilter =
+      providerId === null || providerId === undefined || String(providerId).trim() === "" ? null : String(providerId).trim();
+    const providerRefFilter =
+      providerRef === null || providerRef === undefined || String(providerRef).trim() === "" ? null : String(providerRef).trim();
+    const searchFilter = search === null || search === undefined || String(search).trim() === "" ? null : String(search).trim().toLowerCase();
+    const toolFilter = toolId === null || toolId === undefined || String(toolId).trim() === "" ? null : String(toolId).trim();
+
+    const applyFilters = (rows) => {
+      const out = [];
+      for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        const rowStatus = String(row.status ?? "draft").toLowerCase();
+        if (statusFilter !== "all" && rowStatus !== statusFilter) continue;
+        if (providerFilter && String(row.providerId ?? "") !== providerFilter && String(row.providerRef ?? "") !== providerFilter) continue;
+        if (providerRefFilter && String(row.providerRef ?? "") !== providerRefFilter) continue;
+        if (toolFilter) {
+          const tools = Array.isArray(row?.manifest?.tools) ? row.manifest.tools : [];
+          const hasTool = tools.some((tool) => String(tool?.toolId ?? "") === toolFilter);
+          if (!hasTool) continue;
+        }
+        if (searchFilter) {
+          const tools = Array.isArray(row?.manifest?.tools) ? row.manifest.tools : [];
+          const haystack = [
+            row.providerId,
+            row.providerRef,
+            row.description,
+            row.baseUrl,
+            row.status,
+            ...(Array.isArray(row.tags) ? row.tags : []),
+            ...tools.map((tool) => `${tool?.toolId ?? ""} ${tool?.mcpToolName ?? ""} ${tool?.description ?? ""}`)
+          ]
+            .map((value) => String(value ?? "").toLowerCase())
+            .join(" ");
+          if (!haystack.includes(searchFilter)) continue;
+        }
+        out.push(row);
+      }
+
+      out.sort((left, right) => {
+        const leftAt = Date.parse(String(left.updatedAt ?? left.publishedAt ?? ""));
+        const rightAt = Date.parse(String(right.updatedAt ?? right.publishedAt ?? ""));
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        const providerIdOrder = String(left.providerId ?? "").localeCompare(String(right.providerId ?? ""));
+        if (providerIdOrder !== 0) return providerIdOrder;
+        return String(left.providerRef ?? "").localeCompare(String(right.providerRef ?? ""));
+      });
+      return out;
+    };
+
+    const res = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'marketplace_provider_publication'
+        ORDER BY updated_at DESC, aggregate_id ASC
+      `,
+      [tenantId]
+    );
+    return applyFilters(res.rows.map(marketplaceProviderPublicationSnapshotRowToRecord).filter(Boolean));
+  };
+
+  store.getMarketplaceCapabilityListing = async function getMarketplaceCapabilityListing({
+    tenantId = DEFAULT_TENANT_ID,
+    listingId
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const normalizedListingId =
+      listingId === null || listingId === undefined || String(listingId).trim() === "" ? null : String(listingId).trim();
+    if (!normalizedListingId) return null;
+    const res = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'marketplace_capability_listing' AND aggregate_id = $2
+        LIMIT 1
+      `,
+      [tenantId, normalizedListingId]
+    );
+    return res.rows.length ? marketplaceCapabilityListingSnapshotRowToRecord(res.rows[0]) : null;
+  };
+
+  store.listMarketplaceCapabilityListings = async function listMarketplaceCapabilityListings({
+    tenantId = DEFAULT_TENANT_ID,
+    status = "all",
+    capability = null,
+    sellerAgentId = null,
+    search = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    const statusFilter = status === null || status === undefined ? "all" : String(status).trim().toLowerCase() || "all";
+    const capabilityFilter =
+      capability === null || capability === undefined || String(capability).trim() === "" ? null : String(capability).trim();
+    const sellerFilter =
+      sellerAgentId === null || sellerAgentId === undefined || String(sellerAgentId).trim() === "" ? null : String(sellerAgentId).trim();
+    const searchFilter = search === null || search === undefined || String(search).trim() === "" ? null : String(search).trim().toLowerCase();
+
+    const applyFilters = (rows) => {
+      const out = [];
+      for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+        const rowStatus = String(row.status ?? "active").toLowerCase();
+        if (statusFilter !== "all" && rowStatus !== statusFilter) continue;
+        if (capabilityFilter && String(row.capability ?? "") !== capabilityFilter) continue;
+        if (sellerFilter && String(row.sellerAgentId ?? "") !== sellerFilter) continue;
+        if (searchFilter) {
+          const haystack = [
+            row.listingId,
+            row.capability,
+            row.title,
+            row.description,
+            row.category,
+            ...(Array.isArray(row.tags) ? row.tags : [])
+          ]
+            .map((value) => String(value ?? "").toLowerCase())
+            .join(" ");
+          if (!haystack.includes(searchFilter)) continue;
+        }
+        out.push(row);
+      }
+      out.sort((left, right) => {
+        const leftAt = Date.parse(String(left.updatedAt ?? left.createdAt ?? ""));
+        const rightAt = Date.parse(String(right.updatedAt ?? right.createdAt ?? ""));
+        if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+        return String(left.listingId ?? "").localeCompare(String(right.listingId ?? ""));
+      });
+      return out;
+    };
+
+    const res = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'marketplace_capability_listing'
+        ORDER BY updated_at DESC, aggregate_id ASC
+      `,
+      [tenantId]
+    );
+    return applyFilters(res.rows.map(marketplaceCapabilityListingSnapshotRowToRecord).filter(Boolean));
+  };
+
+  store.putMarketplaceProviderPublication = async function putMarketplaceProviderPublication({
+    tenantId = DEFAULT_TENANT_ID,
+    publication,
+    audit = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!publication || typeof publication !== "object" || Array.isArray(publication)) {
+      throw new TypeError("publication is required");
+    }
+    const providerRefCandidate =
+      typeof publication.providerRef === "string" && publication.providerRef.trim() !== ""
+        ? publication.providerRef.trim()
+        : typeof publication.providerId === "string" && publication.providerId.trim() !== ""
+          ? publication.providerId.trim()
+          : null;
+    if (!providerRefCandidate) throw new TypeError("publication.providerRef is required");
+    const providerId =
+      typeof publication.providerId === "string" && publication.providerId.trim() !== "" ? publication.providerId.trim() : null;
+    const updatedAt =
+      parseIsoOrNull(publication.updatedAt) ??
+      parseIsoOrNull(publication.publishedAt) ??
+      parseIsoOrNull(publication.createdAt) ??
+      new Date().toISOString();
+    const normalizedPublication = {
+      ...publication,
+      tenantId,
+      providerRef: providerRefCandidate,
+      providerId,
+      updatedAt
+    };
+
+    await withTx(async (client) => {
+      await persistSnapshotAggregate(client, {
+        tenantId,
+        aggregateType: "marketplace_provider_publication",
+        aggregateId: providerRefCandidate,
+        snapshot: normalizedPublication,
+        updatedAt
+      });
+      if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+    });
+
+    if (!(store.marketplaceProviderPublications instanceof Map)) store.marketplaceProviderPublications = new Map();
+    store.marketplaceProviderPublications.set(
+      marketplaceProviderPublicationMapKey({ tenantId, providerRef: providerRefCandidate }),
+      normalizedPublication
+    );
+    return normalizedPublication;
+  };
+
+  store.putMarketplaceCapabilityListing = async function putMarketplaceCapabilityListing({
+    tenantId = DEFAULT_TENANT_ID,
+    listing,
+    audit = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    if (!listing || typeof listing !== "object" || Array.isArray(listing)) {
+      throw new TypeError("listing is required");
+    }
+    const listingId =
+      typeof listing.listingId === "string" && listing.listingId.trim() !== "" ? listing.listingId.trim() : null;
+    if (!listingId) throw new TypeError("listing.listingId is required");
+    const updatedAt = parseIsoOrNull(listing.updatedAt) ?? parseIsoOrNull(listing.createdAt) ?? new Date().toISOString();
+    const createdAt = parseIsoOrNull(listing.createdAt) ?? updatedAt;
+    const normalizedListing = {
+      ...listing,
+      tenantId,
+      listingId,
+      createdAt,
+      updatedAt
+    };
+
+    await withTx(async (client) => {
+      await persistSnapshotAggregate(client, {
+        tenantId,
+        aggregateType: "marketplace_capability_listing",
+        aggregateId: listingId,
+        snapshot: normalizedListing,
+        updatedAt
+      });
+      if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+    });
+
+    if (!(store.marketplaceCapabilityListings instanceof Map)) store.marketplaceCapabilityListings = new Map();
+    store.marketplaceCapabilityListings.set(marketplaceCapabilityListingMapKey({ tenantId, listingId }), normalizedListing);
+    return normalizedListing;
+  };
+
+  store.deleteMarketplaceCapabilityListing = async function deleteMarketplaceCapabilityListing({
+    tenantId = DEFAULT_TENANT_ID,
+    listingId,
+    audit = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
+    assertNonEmptyString(listingId, "listingId");
+    const normalizedListingId = String(listingId).trim();
+    const key = marketplaceCapabilityListingMapKey({ tenantId, listingId: normalizedListingId });
+    const existingInMap = store.marketplaceCapabilityListings instanceof Map ? (store.marketplaceCapabilityListings.get(key) ?? null) : null;
+
+    let existing = existingInMap;
+    const res = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'marketplace_capability_listing' AND aggregate_id = $2
+        LIMIT 1
+      `,
+      [tenantId, normalizedListingId]
+    );
+    if (res.rows.length) {
+      existing = marketplaceCapabilityListingSnapshotRowToRecord(res.rows[0]) ?? existing;
+    }
+    await withTx(async (client) => {
+      await client.query(
+        `
+          DELETE FROM snapshots
+          WHERE tenant_id = $1 AND aggregate_type = 'marketplace_capability_listing' AND aggregate_id = $2
+        `,
+        [tenantId, normalizedListingId]
+      );
+      if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+    });
+
+    if (store.marketplaceCapabilityListings instanceof Map) {
+      store.marketplaceCapabilityListings.delete(key);
+    }
+    return existing;
   };
 
   function agentCardSnapshotRowToRecord(row) {

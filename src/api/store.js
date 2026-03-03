@@ -403,6 +403,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     taskQuotes: new Map(), // `${tenantId}\n${quoteId}` -> TaskQuote.v1
     taskOffers: new Map(), // `${tenantId}\n${offerId}` -> TaskOffer.v1
     taskAcceptances: new Map(), // `${tenantId}\n${acceptanceId}` -> TaskAcceptance.v1
+    intentContracts: new Map(), // `${tenantId}\n${intentId}` -> IntentContract.v1
     capabilityAttestations: new Map(), // `${tenantId}\n${attestationId}` -> CapabilityAttestation.v1
     subAgentWorkOrders: new Map(), // `${tenantId}\n${workOrderId}` -> SubAgentWorkOrder.v1
     subAgentCompletionReceipts: new Map(), // `${tenantId}\n${receiptId}` -> SubAgentCompletionReceipt.v1
@@ -432,6 +433,7 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     marketplaceRfqs: new Map(), // `${tenantId}\n${rfqId}` -> MarketplaceRfq.v1
     marketplaceRfqBids: new Map(), // `${tenantId}\n${rfqId}` -> MarketplaceBid.v1[]
     marketplaceProviderPublications: new Map(), // `${tenantId}\n${providerRef}` -> MarketplaceProviderPublication.v1
+    marketplaceCapabilityListings: new Map(), // `${tenantId}\n${listingId}` -> MarketplaceCapabilityListing.v1
     tenantSettlementPolicies: new Map(), // `${tenantId}\n${policyId}\n${policyVersion}` -> TenantSettlementPolicy.v1
     tenantSettlementPolicyRollouts: new Map(), // `${tenantId}\nrollout` -> TenantSettlementPolicyRollout.v1
 	    contracts: new Map(), // `${tenantId}\n${contractId}` -> contract
@@ -2209,6 +2211,72 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return out.slice(offset, offset + safeLimit);
   };
 
+  store.getIntentContract = async function getIntentContract({ tenantId = DEFAULT_TENANT_ID, intentId } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (typeof intentId !== "string" || intentId.trim() === "") throw new TypeError("intentId is required");
+    return store.intentContracts.get(makeScopedKey({ tenantId, id: String(intentId) })) ?? null;
+  };
+
+  store.putIntentContract = async function putIntentContract({ tenantId = DEFAULT_TENANT_ID, intentContract, audit = null } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!intentContract || typeof intentContract !== "object" || Array.isArray(intentContract)) {
+      throw new TypeError("intentContract is required");
+    }
+    const intentId = intentContract.intentId ?? null;
+    if (typeof intentId !== "string" || intentId.trim() === "") throw new TypeError("intentContract.intentId is required");
+    const at = intentContract.updatedAt ?? intentContract.proposedAt ?? new Date().toISOString();
+    await store.commitTx({
+      at,
+      ops: [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId, intentContract: { ...intentContract, tenantId, intentId } }],
+      audit
+    });
+    return store.intentContracts.get(makeScopedKey({ tenantId, id: String(intentId) })) ?? null;
+  };
+
+  store.listIntentContracts = async function listIntentContracts({
+    tenantId = DEFAULT_TENANT_ID,
+    intentId = null,
+    proposerAgentId = null,
+    counterpartyAgentId = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (intentId !== null && (typeof intentId !== "string" || intentId.trim() === "")) {
+      throw new TypeError("intentId must be null or a non-empty string");
+    }
+    if (proposerAgentId !== null && (typeof proposerAgentId !== "string" || proposerAgentId.trim() === "")) {
+      throw new TypeError("proposerAgentId must be null or a non-empty string");
+    }
+    if (counterpartyAgentId !== null && (typeof counterpartyAgentId !== "string" || counterpartyAgentId.trim() === "")) {
+      throw new TypeError("counterpartyAgentId must be null or a non-empty string");
+    }
+    if (status !== null && (typeof status !== "string" || status.trim() === "")) {
+      throw new TypeError("status must be null or a non-empty string");
+    }
+    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
+
+    const intentIdFilter = intentId ? String(intentId).trim() : null;
+    const proposerFilter = proposerAgentId ? String(proposerAgentId).trim() : null;
+    const counterpartyFilter = counterpartyAgentId ? String(counterpartyAgentId).trim() : null;
+    const statusFilter = status ? String(status).trim().toLowerCase() : null;
+    const safeLimit = Math.min(1000, limit);
+    const out = [];
+    for (const row of store.intentContracts.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (intentIdFilter && String(row.intentId ?? "") !== intentIdFilter) continue;
+      if (proposerFilter && String(row.proposerAgentId ?? "") !== proposerFilter) continue;
+      if (counterpartyFilter && String(row.counterpartyAgentId ?? "") !== counterpartyFilter) continue;
+      if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      out.push(row);
+    }
+    out.sort((left, right) => String(left.intentId ?? "").localeCompare(String(right.intentId ?? "")));
+    return out.slice(offset, offset + safeLimit);
+  };
+
   store.getSubAgentWorkOrder = async function getSubAgentWorkOrder({ tenantId = DEFAULT_TENANT_ID, workOrderId } = {}) {
     tenantId = normalizeTenantId(tenantId);
     if (typeof workOrderId !== "string" || workOrderId.trim() === "") throw new TypeError("workOrderId is required");
@@ -3407,6 +3475,14 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
     return `${normalizeTenantId(tenantId)}\n${assertNonEmptyString(triageKey, "triageKey")}`;
   }
 
+  function marketplaceProviderPublicationStoreKey({ tenantId, providerRef }) {
+    return `${normalizeTenantId(tenantId)}\n${assertNonEmptyString(providerRef, "providerRef")}`;
+  }
+
+  function marketplaceCapabilityListingStoreKey({ tenantId, listingId }) {
+    return `${normalizeTenantId(tenantId)}\n${assertNonEmptyString(listingId, "listingId")}`;
+  }
+
   store.getMoneyRailOperation = async function getMoneyRailOperation({ tenantId = DEFAULT_TENANT_ID, providerId, operationId } = {}) {
     const key = moneyRailOperationStoreKey({ tenantId, providerId, operationId });
     return store.moneyRailOperations.get(key) ?? null;
@@ -3747,6 +3823,173 @@ export function createStore({ persistenceDir = null, serverSignerKeypair = null 
       return String(left?.triageKey ?? "").localeCompare(String(right?.triageKey ?? ""));
     });
     return out.slice(offset, offset + Math.min(1000, limit));
+  };
+
+  store.getMarketplaceProviderPublication = async function getMarketplaceProviderPublication({
+    tenantId = DEFAULT_TENANT_ID,
+    providerId = null,
+    providerRef = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!(store.marketplaceProviderPublications instanceof Map)) return null;
+    const normalizedProviderRef =
+      providerRef === null || providerRef === undefined || String(providerRef).trim() === "" ? null : String(providerRef).trim();
+    if (normalizedProviderRef) {
+      const byRef = store.marketplaceProviderPublications.get(
+        marketplaceProviderPublicationStoreKey({ tenantId, providerRef: normalizedProviderRef })
+      );
+      if (byRef) return byRef;
+    }
+
+    const normalizedProviderId =
+      providerId === null || providerId === undefined || String(providerId).trim() === "" ? null : String(providerId).trim();
+    if (!normalizedProviderId) return null;
+
+    const byScopedId = store.marketplaceProviderPublications.get(
+      marketplaceProviderPublicationStoreKey({ tenantId, providerRef: normalizedProviderId })
+    );
+    if (byScopedId) return byScopedId;
+
+    let found = null;
+    for (const row of store.marketplaceProviderPublications.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (String(row.providerId ?? "").trim() !== normalizedProviderId) continue;
+      if (!found) {
+        found = row;
+        continue;
+      }
+      const foundAt = Date.parse(String(found.updatedAt ?? found.publishedAt ?? ""));
+      const rowAt = Date.parse(String(row.updatedAt ?? row.publishedAt ?? ""));
+      if (Number.isFinite(rowAt) && (!Number.isFinite(foundAt) || rowAt > foundAt)) {
+        found = row;
+      }
+    }
+    return found;
+  };
+
+  store.listMarketplaceProviderPublications = async function listMarketplaceProviderPublications({
+    tenantId = DEFAULT_TENANT_ID,
+    status = "certified",
+    providerId = null,
+    providerRef = null,
+    search = null,
+    toolId = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!(store.marketplaceProviderPublications instanceof Map)) return [];
+
+    const statusFilter = status === null || status === undefined ? "certified" : String(status).trim().toLowerCase() || "certified";
+    const providerFilter =
+      providerId === null || providerId === undefined || String(providerId).trim() === "" ? null : String(providerId).trim();
+    const providerRefFilter =
+      providerRef === null || providerRef === undefined || String(providerRef).trim() === "" ? null : String(providerRef).trim();
+    const searchFilter = search === null || search === undefined || String(search).trim() === "" ? null : String(search).trim().toLowerCase();
+    const toolFilter = toolId === null || toolId === undefined || String(toolId).trim() === "" ? null : String(toolId).trim();
+
+    const out = [];
+    for (const row of store.marketplaceProviderPublications.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      const rowStatus = String(row.status ?? "draft").toLowerCase();
+      if (statusFilter !== "all" && rowStatus !== statusFilter) continue;
+      if (providerFilter && String(row.providerId ?? "") !== providerFilter && String(row.providerRef ?? "") !== providerFilter) continue;
+      if (providerRefFilter && String(row.providerRef ?? "") !== providerRefFilter) continue;
+      if (toolFilter) {
+        const tools = Array.isArray(row?.manifest?.tools) ? row.manifest.tools : [];
+        const hasTool = tools.some((tool) => String(tool?.toolId ?? "") === toolFilter);
+        if (!hasTool) continue;
+      }
+      if (searchFilter) {
+        const tools = Array.isArray(row?.manifest?.tools) ? row.manifest.tools : [];
+        const haystack = [
+          row.providerId,
+          row.providerRef,
+          row.description,
+          row.baseUrl,
+          row.status,
+          ...(Array.isArray(row.tags) ? row.tags : []),
+          ...tools.map((tool) => `${tool?.toolId ?? ""} ${tool?.mcpToolName ?? ""} ${tool?.description ?? ""}`)
+        ]
+          .map((value) => String(value ?? "").toLowerCase())
+          .join(" ");
+        if (!haystack.includes(searchFilter)) continue;
+      }
+      out.push(row);
+    }
+
+    out.sort((left, right) => {
+      const leftAt = Date.parse(String(left.updatedAt ?? left.publishedAt ?? ""));
+      const rightAt = Date.parse(String(right.updatedAt ?? right.publishedAt ?? ""));
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+      const providerIdOrder = String(left.providerId ?? "").localeCompare(String(right.providerId ?? ""));
+      if (providerIdOrder !== 0) return providerIdOrder;
+      return String(left.providerRef ?? "").localeCompare(String(right.providerRef ?? ""));
+    });
+    return out;
+  };
+
+  store.getMarketplaceCapabilityListing = async function getMarketplaceCapabilityListing({
+    tenantId = DEFAULT_TENANT_ID,
+    listingId
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!(store.marketplaceCapabilityListings instanceof Map)) return null;
+    const normalizedListingId =
+      listingId === null || listingId === undefined || String(listingId).trim() === "" ? null : String(listingId).trim();
+    if (!normalizedListingId) return null;
+    return store.marketplaceCapabilityListings.get(
+      marketplaceCapabilityListingStoreKey({ tenantId, listingId: normalizedListingId })
+    ) ?? null;
+  };
+
+  store.listMarketplaceCapabilityListings = async function listMarketplaceCapabilityListings({
+    tenantId = DEFAULT_TENANT_ID,
+    status = "all",
+    capability = null,
+    sellerAgentId = null,
+    search = null
+  } = {}) {
+    tenantId = normalizeTenantId(tenantId);
+    if (!(store.marketplaceCapabilityListings instanceof Map)) return [];
+
+    const statusFilter = status === null || status === undefined ? "all" : String(status).trim().toLowerCase() || "all";
+    const capabilityFilter =
+      capability === null || capability === undefined || String(capability).trim() === "" ? null : String(capability).trim();
+    const sellerFilter =
+      sellerAgentId === null || sellerAgentId === undefined || String(sellerAgentId).trim() === "" ? null : String(sellerAgentId).trim();
+    const searchFilter = search === null || search === undefined || String(search).trim() === "" ? null : String(search).trim().toLowerCase();
+
+    const out = [];
+    for (const row of store.marketplaceCapabilityListings.values()) {
+      if (!row || typeof row !== "object") continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      const rowStatus = String(row.status ?? "active").toLowerCase();
+      if (statusFilter !== "all" && rowStatus !== statusFilter) continue;
+      if (capabilityFilter && String(row.capability ?? "") !== capabilityFilter) continue;
+      if (sellerFilter && String(row.sellerAgentId ?? "") !== sellerFilter) continue;
+      if (searchFilter) {
+        const haystack = [
+          row.listingId,
+          row.capability,
+          row.title,
+          row.description,
+          row.category,
+          ...(Array.isArray(row.tags) ? row.tags : [])
+        ]
+          .map((value) => String(value ?? "").toLowerCase())
+          .join(" ");
+        if (!haystack.includes(searchFilter)) continue;
+      }
+      out.push(row);
+    }
+    out.sort((left, right) => {
+      const leftAt = Date.parse(String(left.updatedAt ?? left.createdAt ?? ""));
+      const rightAt = Date.parse(String(right.updatedAt ?? right.createdAt ?? ""));
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && rightAt !== leftAt) return rightAt - leftAt;
+      return String(left.listingId ?? "").localeCompare(String(right.listingId ?? ""));
+    });
+    return out;
   };
 
   store.refreshFromDb = async function refreshFromDb() {

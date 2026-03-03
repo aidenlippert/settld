@@ -89,8 +89,13 @@ function instrumentClient(client) {
 export async function createPgPool({ databaseUrl, schema = "public" } = {}) {
   assertNonEmptyString(databaseUrl, "databaseUrl");
   assertNonEmptyString(schema, "schema");
+  const searchPath = schema === "public" ? `${quoteIdent(schema)}` : `${quoteIdent(schema)},public`;
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    // Configure search_path at session startup to avoid async query overlap on connect.
+    options: `-c search_path=${searchPath}`
+  });
 
   if (schema !== "public") {
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -115,15 +120,10 @@ export async function createPgPool({ databaseUrl, schema = "public" } = {}) {
   }
 
   pool.on("connect", (client) => {
-    const searchPath = schema === "public" ? `${quoteIdent(schema)}` : `${quoteIdent(schema)}, public`;
     try {
       instrumentClient(client);
     } catch {}
-    client.query(`SET search_path TO ${searchPath}`).catch(() => {});
   });
-
-  const searchPath = schema === "public" ? `${quoteIdent(schema)}` : `${quoteIdent(schema)}, public`;
-  await pool.query(`SET search_path TO ${searchPath}`);
 
   // Also instrument pool.query() for non-transactional calls.
   try {
