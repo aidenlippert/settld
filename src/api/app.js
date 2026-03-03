@@ -157,6 +157,13 @@ import {
   validateSubAgentWorkOrderV1
 } from "../core/subagent-work-order.js";
 import {
+  INTENT_CONTRACT_STATUS,
+  buildIntentContractV1,
+  counterIntentContractV1,
+  acceptIntentContractV1,
+  validateIntentContractV1
+} from "../core/intent-contract.js";
+import {
   buildStateCheckpointV1,
   validateStateCheckpointV1
 } from "../core/state-checkpoint.js";
@@ -490,6 +497,7 @@ export function createApi({
   x402RequireExecutionIntent = null,
   x402RequireAuthorityGrant = null,
   workOrderRequireAcceptanceBinding = null,
+  workOrderRequireIntentBinding = null,
   x402PromptRiskForceMode = null,
   x402PromptRiskForceModeByPrincipal = null,
   x402SessionTaintEscalateAmountCents = null,
@@ -520,6 +528,26 @@ export function createApi({
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
 
   const protocolPolicy = resolveProtocolPolicy(protocol ?? {});
+
+  const requiredPgMarketplaceStoreMethods = Object.freeze([
+    "getMarketplaceProviderPublication",
+    "listMarketplaceProviderPublications",
+    "putMarketplaceProviderPublication",
+    "getMarketplaceCapabilityListing",
+    "listMarketplaceCapabilityListings",
+    "putMarketplaceCapabilityListing",
+    "deleteMarketplaceCapabilityListing"
+  ]);
+  if (store?.kind === "pg") {
+    const missingPgMarketplaceStoreMethods = requiredPgMarketplaceStoreMethods.filter(
+      (methodName) => typeof store?.[methodName] !== "function"
+    );
+    if (missingPgMarketplaceStoreMethods.length > 0) {
+      throw new TypeError(
+        `pg store missing required marketplace methods: ${missingPgMarketplaceStoreMethods.join(", ")}`
+      );
+    }
+  }
 
   function decodePathPart(value) {
     // `url.pathname` preserves percent-encoding (ex: ":" becomes "%3A"). Our ops routes
@@ -3121,6 +3149,12 @@ export function createApi({
     const raw =
       workOrderRequireAcceptanceBinding ??
       (typeof process !== "undefined" ? process.env.WORK_ORDER_REQUIRE_ACCEPTANCE_BINDING : null);
+    return parseBooleanLike(raw, false);
+  })();
+  const workOrderRequireIntentBindingValue = (() => {
+    const raw =
+      workOrderRequireIntentBinding ??
+      (typeof process !== "undefined" ? process.env.WORK_ORDER_REQUIRE_INTENT_BINDING : null);
     return parseBooleanLike(raw, false);
   })();
   const x402QuoteTtlSecondsValue = (() => {
@@ -19013,20 +19047,28 @@ export function createApi({
     };
   }
 
-  function getMarketplaceCapabilityListing({ tenantId, listingId } = {}) {
+  async function getMarketplaceCapabilityListing({ tenantId, listingId } = {}) {
+    if (typeof store.getMarketplaceCapabilityListing === "function") {
+      return store.getMarketplaceCapabilityListing({ tenantId, listingId });
+    }
+    if (store?.kind === "pg") return null;
     if (!(store.marketplaceCapabilityListings instanceof Map)) return null;
     const id = String(listingId ?? "").trim();
     if (!id) return null;
     return store.marketplaceCapabilityListings.get(capabilityListingStoreKey(tenantId, id)) ?? null;
   }
 
-  function listMarketplaceCapabilityListings({
+  async function listMarketplaceCapabilityListings({
     tenantId,
     status = "all",
     capability = null,
     sellerAgentId = null,
     search = null
   } = {}) {
+    if (typeof store.listMarketplaceCapabilityListings === "function") {
+      return store.listMarketplaceCapabilityListings({ tenantId, status, capability, sellerAgentId, search });
+    }
+    if (store?.kind === "pg") return [];
     const t = normalizeTenant(tenantId);
     const statusFilter = parseMarketplaceCapabilityListingStatus(status, { allowAll: true, defaultStatus: "all" });
     const capabilityFilter = capability && String(capability).trim() !== "" ? String(capability).trim() : null;
@@ -19066,7 +19108,11 @@ export function createApi({
     return rows;
   }
 
-  function getMarketplaceProviderPublication({ tenantId, providerId = null, providerRef = null } = {}) {
+  async function getMarketplaceProviderPublication({ tenantId, providerId = null, providerRef = null } = {}) {
+    if (typeof store.getMarketplaceProviderPublication === "function") {
+      return store.getMarketplaceProviderPublication({ tenantId, providerId, providerRef });
+    }
+    if (store?.kind === "pg") return null;
     if (!(store.marketplaceProviderPublications instanceof Map)) return null;
     const t = normalizeTenant(tenantId);
     const ref = String(providerRef ?? "").trim();
@@ -19098,7 +19144,7 @@ export function createApi({
     return found;
   }
 
-  function listMarketplaceProviderPublications({
+  async function listMarketplaceProviderPublications({
     tenantId,
     status = "certified",
     providerId = null,
@@ -19106,6 +19152,10 @@ export function createApi({
     search = null,
     toolId = null
   } = {}) {
+    if (typeof store.listMarketplaceProviderPublications === "function") {
+      return store.listMarketplaceProviderPublications({ tenantId, status, providerId, providerRef, search, toolId });
+    }
+    if (store?.kind === "pg") return [];
     if (!(store.marketplaceProviderPublications instanceof Map)) return [];
     const t = normalizeTenant(tenantId);
     const statusFilter = parseMarketplaceProviderPublicationStatus(status, { allowAll: true, defaultStatus: "certified" });
@@ -19201,7 +19251,7 @@ export function createApi({
     };
   }
 
-  function listMarketplaceToolListings({
+  async function listMarketplaceToolListings({
     tenantId,
     status = "certified",
     providerId = null,
@@ -19210,7 +19260,7 @@ export function createApi({
     search = null,
     tags = null
   } = {}) {
-    const rows = listMarketplaceProviderPublications({ tenantId, status, providerId, providerRef, toolId: null, search: null });
+    const rows = await listMarketplaceProviderPublications({ tenantId, status, providerId, providerRef, toolId: null, search: null });
     const toolFilter = toolId && String(toolId).trim() !== "" ? String(toolId).trim() : null;
     const searchFilter = search && String(search).trim() !== "" ? String(search).trim().toLowerCase() : null;
     const requiredTags =
@@ -20500,6 +20550,183 @@ export function createApi({
     if (typeof store.getSubAgentWorkOrder === "function") return store.getSubAgentWorkOrder({ tenantId, workOrderId });
     if (store.subAgentWorkOrders instanceof Map) return store.subAgentWorkOrders.get(makeScopedKey({ tenantId, id: String(workOrderId) })) ?? null;
     throw new TypeError("sub-agent work orders not supported for this store");
+  }
+
+  async function getIntentContractRecord({ tenantId, intentId }) {
+    if (typeof store.getIntentContract === "function") return store.getIntentContract({ tenantId, intentId });
+    if (store.intentContracts instanceof Map) return store.intentContracts.get(makeScopedKey({ tenantId, id: String(intentId) })) ?? null;
+    throw new TypeError("intent contracts not supported for this store");
+  }
+
+  async function listIntentContractRecords({
+    tenantId,
+    intentId = null,
+    proposerAgentId = null,
+    counterpartyAgentId = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    if (typeof store.listIntentContracts === "function") {
+      return store.listIntentContracts({ tenantId, intentId, proposerAgentId, counterpartyAgentId, status, limit, offset });
+    }
+    if (!(store.intentContracts instanceof Map)) throw new TypeError("intent contracts not supported for this store");
+    const intentFilter = typeof intentId === "string" && intentId.trim() !== "" ? intentId.trim() : null;
+    const proposerFilter =
+      typeof proposerAgentId === "string" && proposerAgentId.trim() !== "" ? proposerAgentId.trim() : null;
+    const counterpartyFilter =
+      typeof counterpartyAgentId === "string" && counterpartyAgentId.trim() !== "" ? counterpartyAgentId.trim() : null;
+    const statusFilter = typeof status === "string" && status.trim() !== "" ? status.trim().toLowerCase() : null;
+    const safeLimit = Math.min(1000, Number.isSafeInteger(limit) && limit > 0 ? limit : 200);
+    const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+    const rows = [];
+    for (const row of store.intentContracts.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (intentFilter && String(row.intentId ?? "") !== intentFilter) continue;
+      if (proposerFilter && String(row.proposerAgentId ?? "") !== proposerFilter) continue;
+      if (counterpartyFilter && String(row.counterpartyAgentId ?? "") !== counterpartyFilter) continue;
+      if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      rows.push(row);
+    }
+    rows.sort((left, right) => String(left.intentId ?? "").localeCompare(String(right.intentId ?? "")));
+    return rows.slice(safeOffset, safeOffset + safeLimit);
+  }
+
+  function normalizeWorkOrderIntentBindingInput(rawValue, { fieldName = "intentBinding", allowNull = true } = {}) {
+    if (rawValue === null || rawValue === undefined) {
+      if (allowNull) return null;
+      throw new TypeError(`${fieldName} is required`);
+    }
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+      throw new TypeError(`${fieldName} must be an object`);
+    }
+    const intentId =
+      typeof rawValue.intentId === "string" && rawValue.intentId.trim() !== ""
+        ? rawValue.intentId.trim()
+        : null;
+    if (!intentId) throw new TypeError(`${fieldName}.intentId is required`);
+    const intentHash =
+      typeof rawValue.intentHash === "string" && rawValue.intentHash.trim() !== ""
+        ? normalizeSha256HashInput(rawValue.intentHash.trim(), `${fieldName}.intentHash`, { allowNull: false })
+        : null;
+    const boundAt =
+      typeof rawValue.boundAt === "string" && rawValue.boundAt.trim() !== ""
+        ? parseAsOfDateTime(rawValue.boundAt.trim(), { fieldName: `${fieldName}.boundAt` })
+        : null;
+    return {
+      schemaVersion: "IntentBinding.v1",
+      intentId,
+      intentHash,
+      boundAt
+    };
+  }
+
+  async function resolveAcceptedIntentBindingForWorkOrder({
+    tenantId,
+    intentBindingInput = null,
+    principalAgentId = null,
+    subAgentId = null,
+    boundAt = nowIso(),
+    requireBinding = false,
+    fieldName = "intentBinding"
+  } = {}) {
+    const normalizedIntentBindingInput = normalizeWorkOrderIntentBindingInput(intentBindingInput, { fieldName, allowNull: true });
+    if (!normalizedIntentBindingInput) {
+      if (!requireBinding) {
+        return {
+          intentBinding: null,
+          intentContract: null
+        };
+      }
+      const err = new Error("accepted intent binding is required");
+      err.statusCode = 409;
+      err.code = "WORK_ORDER_INTENT_BINDING_REQUIRED";
+      throw err;
+    }
+
+    const intentContract = await getIntentContractRecord({
+      tenantId,
+      intentId: normalizedIntentBindingInput.intentId
+    });
+    if (!intentContract) {
+      const err = new Error("intent contract not found");
+      err.statusCode = 404;
+      err.code = "NOT_FOUND";
+      throw err;
+    }
+    try {
+      validateIntentContractV1(intentContract);
+    } catch (validationError) {
+      const err = new Error(`intent contract invalid: ${validationError?.message ?? "invalid intent contract"}`);
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_INVALID";
+      throw err;
+    }
+
+    const intentStatus = String(intentContract?.status ?? "").trim().toLowerCase();
+    if (intentStatus !== INTENT_CONTRACT_STATUS.ACCEPTED) {
+      const err = new Error("intent contract must be accepted before work-order binding");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_NOT_ACCEPTED";
+      throw err;
+    }
+    if (normalizeTenantId(intentContract?.tenantId ?? DEFAULT_TENANT_ID) !== normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID)) {
+      const err = new Error("intent contract tenant mismatch");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_TENANT_MISMATCH";
+      throw err;
+    }
+
+    const intentParticipants = new Set([
+      String(intentContract?.proposerAgentId ?? "").trim(),
+      String(intentContract?.counterpartyAgentId ?? "").trim()
+    ]);
+    const workOrderParticipants = new Set([String(principalAgentId ?? "").trim(), String(subAgentId ?? "").trim()]);
+    if (
+      !intentParticipants.has(String(principalAgentId ?? "").trim()) ||
+      !intentParticipants.has(String(subAgentId ?? "").trim()) ||
+      intentParticipants.size !== workOrderParticipants.size
+    ) {
+      const err = new Error("intent contract participants must match work order participants");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_PARTICIPANT_MISMATCH";
+      throw err;
+    }
+
+    const contractIntentHash = normalizeSha256HashInput(intentContract?.intentHash, "intentContract.intentHash", { allowNull: false });
+    if (normalizedIntentBindingInput.intentHash && normalizedIntentBindingInput.intentHash !== contractIntentHash) {
+      const err = new Error("intentHash does not match accepted intent contract");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_HASH_MISMATCH";
+      throw err;
+    }
+
+    return {
+      intentContract,
+      intentBinding: normalizeForCanonicalJson(
+        {
+          schemaVersion: "IntentBinding.v1",
+          intentId: normalizedIntentBindingInput.intentId,
+          intentHash: contractIntentHash,
+          boundAt: normalizedIntentBindingInput.boundAt ?? parseAsOfDateTime(boundAt, { fieldName: "boundAt" })
+        },
+        { path: "$.intentBinding" }
+      )
+    };
+  }
+
+  function parseIntentContractStatus(rawValue, { allowNull = true, fieldName = "status" } = {}) {
+    if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+      if (allowNull) return null;
+      throw new TypeError(`${fieldName} is required`);
+    }
+    const value = String(rawValue).trim().toLowerCase();
+    const allowed = new Set(Object.values(INTENT_CONTRACT_STATUS));
+    if (!allowed.has(value)) {
+      throw new TypeError(`${fieldName} must be one of ${Array.from(allowed.values()).join("|")}`);
+    }
+    return value;
   }
 
   async function getTaskQuoteRecord({ tenantId, quoteId }) {
@@ -33111,10 +33338,17 @@ export function createApi({
     if (m === "POST" && p === "/sessions") return "/sessions";
     if (m === "GET" && p === "/sessions") return "/sessions";
     if (/^\/sessions\/[^/]+$/.test(p)) return "/sessions/:sessionId";
+    if (/^\/sessions\/[^/]+\/events\/checkpoint\/requeue$/.test(p)) return "/sessions/:sessionId/events/checkpoint/requeue";
+    if (/^\/sessions\/[^/]+\/events\/checkpoint$/.test(p)) return "/sessions/:sessionId/events/checkpoint";
     if (/^\/sessions\/[^/]+\/events\/stream$/.test(p)) return "/sessions/:sessionId/events/stream";
     if (/^\/sessions\/[^/]+\/events$/.test(p)) return "/sessions/:sessionId/events";
     if (/^\/sessions\/[^/]+\/replay-pack$/.test(p)) return "/sessions/:sessionId/replay-pack";
     if (/^\/sessions\/[^/]+\/transcript$/.test(p)) return "/sessions/:sessionId/transcript";
+    if (m === "GET" && p === "/intents") return "/intents";
+    if (m === "POST" && p === "/intents/propose") return "/intents/propose";
+    if (/^\/intents\/[^/]+\/counter$/.test(p)) return "/intents/:intentId/counter";
+    if (/^\/intents\/[^/]+\/accept$/.test(p)) return "/intents/:intentId/accept";
+    if (/^\/intents\/[^/]+$/.test(p)) return "/intents/:intentId";
     if (/^\/agent-cards\/[^/]+\/abuse-reports\/[^/]+\/status$/.test(p)) return "/agent-cards/:agentId/abuse-reports/:reportId/status";
     if (/^\/agent-cards\/[^/]+\/abuse-reports$/.test(p)) return "/agent-cards/:agentId/abuse-reports";
     if (/^\/public\/agents\/[^/]+\/reputation-summary$/.test(p)) return "/public/agents/:agentId/reputation-summary";
@@ -33977,12 +34211,8 @@ export function createApi({
           path === "/ops/policy/workspace"
         ) {
           const queryTenantId = url.searchParams.get("tenantId");
-          const queryOpsToken = url.searchParams.get("opsToken");
           if (!req.headers?.["x-proxy-tenant-id"] && typeof queryTenantId === "string" && queryTenantId.trim() !== "") {
             req.headers["x-proxy-tenant-id"] = queryTenantId.trim();
-          }
-          if (!req.headers?.["x-proxy-ops-token"] && typeof queryOpsToken === "string" && queryOpsToken.trim() !== "") {
-            req.headers["x-proxy-ops-token"] = queryOpsToken.trim();
           }
         }
         try {
@@ -37068,7 +37298,7 @@ export function createApi({
             requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE) ||
             requireScope(auth.scopes, OPS_SCOPES.OPS_READ);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialStatus = typeof url.searchParams.get("status") === "string" ? url.searchParams.get("status") : "under_review";
           const initialPriority = typeof url.searchParams.get("priority") === "string" ? url.searchParams.get("priority") : "";
           const initialRunId = typeof url.searchParams.get("runId") === "string" ? url.searchParams.get("runId") : "";
@@ -37300,7 +37530,7 @@ export function createApi({
         if (parts[1] === "marketplace" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialRfqStatus = typeof url.searchParams.get("rfqStatus") === "string" ? url.searchParams.get("rfqStatus") : "open";
           const initialCapability = typeof url.searchParams.get("capability") === "string" ? url.searchParams.get("capability") : "";
           const html = [
@@ -37483,7 +37713,7 @@ export function createApi({
         if (parts[1] === "kernel" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialRunId = typeof url.searchParams.get("runId") === "string" ? url.searchParams.get("runId") : "";
           const initialAgreementHash = typeof url.searchParams.get("agreementHash") === "string" ? url.searchParams.get("agreementHash") : "";
           const initialAgreementId = typeof url.searchParams.get("agreementId") === "string" ? url.searchParams.get("agreementId") : "";
@@ -37622,7 +37852,7 @@ export function createApi({
         if (parts[1] === "finance" && parts[2] === "reconciliation" && parts[3] === "workspace" && parts.length === 4 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialPeriod = normalizeBillingPeriodInput(url.searchParams.get("period"), { defaultToNow: true });
           const initialProviderId = normalizeNonEmptyStringOrNull(url.searchParams.get("providerId")) ?? "stub_default";
           const html = [
@@ -38161,7 +38391,7 @@ export function createApi({
         if (parts[1] === "policy" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialPolicyId = typeof url.searchParams.get("policyId") === "string" ? url.searchParams.get("policyId") : "";
           const initialRunId = typeof url.searchParams.get("runId") === "string" ? url.searchParams.get("runId") : "";
           const html = [
@@ -47637,7 +47867,7 @@ export function createApi({
 
       const marketplaceParts = path.split("/").filter(Boolean);
       if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "providers") {
-        if (!(store.marketplaceProviderPublications instanceof Map)) store.marketplaceProviderPublications = new Map();
+        if (store.kind !== "pg" && !(store.marketplaceProviderPublications instanceof Map)) store.marketplaceProviderPublications = new Map();
 
         if (req.method === "POST" && marketplaceParts.length === 4 && marketplaceParts[2] === "conformance" && marketplaceParts[3] === "run") {
           const body = await readJsonBody(req);
@@ -47702,6 +47932,13 @@ export function createApi({
         }
 
         if (req.method === "POST" && marketplaceParts.length === 3 && marketplaceParts[2] === "publish") {
+          if (store.kind === "pg" && typeof store.getMarketplaceProviderPublication !== "function") {
+            return sendError(res, 501, "marketplace provider publication read is not supported for this store");
+          }
+          if (store.kind === "pg" && typeof store.putMarketplaceProviderPublication !== "function") {
+            return sendError(res, 501, "marketplace provider publication persistence is not supported for this store");
+          }
+
           const body = await readJsonBody(req);
           let idemStoreKey = null;
           let idemRequestHash = null;
@@ -47852,7 +48089,7 @@ export function createApi({
             return sendError(res, 400, "invalid providerRef", { message: err?.message });
           }
 
-          const existing = getMarketplaceProviderPublication({ tenantId, providerRef });
+          const existing = await getMarketplaceProviderPublication({ tenantId, providerRef });
 
           let report = null;
           if (runConformance) {
@@ -47922,7 +48159,13 @@ export function createApi({
             certifiedAt: status === "certified" ? nowAt : null,
             updatedAt: nowAt
           };
-          store.marketplaceProviderPublications.set(providerPublicationStoreKey(tenantId, providerRef), publication);
+          if (typeof store.putMarketplaceProviderPublication === "function") {
+            await store.putMarketplaceProviderPublication({ tenantId, publication });
+          } else if (store.kind === "pg") {
+            return sendError(res, 501, "marketplace provider publication persistence is not supported for this store");
+          } else {
+            store.marketplaceProviderPublications.set(providerPublicationStoreKey(tenantId, providerRef), publication);
+          }
           const statusCode = existing ? 200 : 201;
           const responseBody = { publication };
           if (idemStoreKey) {
@@ -47932,6 +48175,9 @@ export function createApi({
         }
 
         if (req.method === "GET" && marketplaceParts.length === 2) {
+          if (store.kind === "pg" && typeof store.listMarketplaceProviderPublications !== "function") {
+            return sendError(res, 501, "marketplace provider publication listing is not supported for this store");
+          }
           let status = "certified";
           try {
             status = parseMarketplaceProviderPublicationStatus(url.searchParams.get("status"), {
@@ -47951,7 +48197,7 @@ export function createApi({
             defaultLimit: 50,
             maxLimit: 200
           });
-          const rows = listMarketplaceProviderPublications({ tenantId, status, providerId, providerRef, search, toolId });
+          const rows = await listMarketplaceProviderPublications({ tenantId, status, providerId, providerRef, search, toolId });
           const publications = rows.slice(offset, offset + limit).map((row) => ({
             schemaVersion: row.schemaVersion,
             publicationId: row.publicationId,
@@ -47982,26 +48228,32 @@ export function createApi({
         }
 
         if (req.method === "GET" && marketplaceParts.length === 4 && marketplaceParts[3] === "badge") {
+          if (store.kind === "pg" && typeof store.getMarketplaceProviderPublication !== "function") {
+            return sendError(res, 501, "marketplace provider publication read is not supported for this store");
+          }
           let providerRefOrId = null;
           try {
             providerRefOrId = parseMarketplaceProviderId(marketplaceParts[2], { fieldPath: "providerId" });
           } catch (err) {
             return sendError(res, 400, "invalid providerId", { message: err?.message });
           }
-          const publication = getMarketplaceProviderPublication({ tenantId, providerRef: providerRefOrId, providerId: providerRefOrId });
+          const publication = await getMarketplaceProviderPublication({ tenantId, providerRef: providerRefOrId, providerId: providerRefOrId });
           if (!publication) return sendError(res, 404, "provider publication not found");
           const badge = buildMarketplaceProviderCertificationBadge(publication);
           return sendJson(res, 200, { badge });
         }
 
         if (req.method === "GET" && marketplaceParts.length === 3) {
+          if (store.kind === "pg" && typeof store.getMarketplaceProviderPublication !== "function") {
+            return sendError(res, 501, "marketplace provider publication read is not supported for this store");
+          }
           let providerRefOrId = null;
           try {
             providerRefOrId = parseMarketplaceProviderId(marketplaceParts[2], { fieldPath: "providerId" });
           } catch (err) {
             return sendError(res, 400, "invalid providerId", { message: err?.message });
           }
-          const publication = getMarketplaceProviderPublication({ tenantId, providerRef: providerRefOrId, providerId: providerRefOrId });
+          const publication = await getMarketplaceProviderPublication({ tenantId, providerRef: providerRefOrId, providerId: providerRefOrId });
           if (!publication) return sendError(res, 404, "provider publication not found");
           return sendJson(res, 200, { publication, certificationBadge: buildMarketplaceProviderCertificationBadge(publication) });
         }
@@ -48011,6 +48263,9 @@ export function createApi({
 
       if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "tools") {
         if (req.method === "GET" && marketplaceParts.length === 2) {
+          if (store.kind === "pg" && typeof store.listMarketplaceProviderPublications !== "function") {
+            return sendError(res, 501, "marketplace provider publication listing is not supported for this store");
+          }
           let status = "certified";
           try {
             status = parseMarketplaceProviderPublicationStatus(url.searchParams.get("status"), {
@@ -48032,7 +48287,7 @@ export function createApi({
             maxLimit: 200
           });
 
-          const rows = listMarketplaceToolListings({ tenantId, status, providerId, providerRef, toolId, search, tags });
+          const rows = await listMarketplaceToolListings({ tenantId, status, providerId, providerRef, toolId, search, tags });
           const tools = rows.slice(offset, offset + limit);
           return sendJson(res, 200, { tools, total: rows.length, limit, offset });
         }
@@ -48040,9 +48295,16 @@ export function createApi({
       }
 
       if (marketplaceParts[0] === "marketplace" && marketplaceParts[1] === "capability-listings") {
-        if (!(store.marketplaceCapabilityListings instanceof Map)) store.marketplaceCapabilityListings = new Map();
+        if (store.kind !== "pg" && !(store.marketplaceCapabilityListings instanceof Map)) store.marketplaceCapabilityListings = new Map();
 
         if (req.method === "POST" && (marketplaceParts.length === 2 || marketplaceParts.length === 3)) {
+          if (store.kind === "pg" && typeof store.getMarketplaceCapabilityListing !== "function") {
+            return sendError(res, 501, "marketplace capability listing read is not supported for this store");
+          }
+          if (store.kind === "pg" && typeof store.putMarketplaceCapabilityListing !== "function") {
+            return sendError(res, 501, "marketplace capability listing persistence is not supported for this store");
+          }
+
           const body = await readJsonBody(req);
           let idemStoreKey = null;
           let idemRequestHash = null;
@@ -48086,7 +48348,7 @@ export function createApi({
             return sendError(res, 409, "listingId in path/body must match");
           }
 
-          const existingListing = getMarketplaceCapabilityListing({ tenantId, listingId: requestedListingId });
+          const existingListing = await getMarketplaceCapabilityListing({ tenantId, listingId: requestedListingId });
           if (pathListingId && !existingListing) return sendError(res, 404, "capability listing not found");
 
           let capability = null;
@@ -48213,7 +48475,13 @@ export function createApi({
             createdAt: existingListing?.createdAt ?? nowAt,
             updatedAt: nowAt
           };
-          store.marketplaceCapabilityListings.set(capabilityListingStoreKey(tenantId, requestedListingId), listing);
+          if (typeof store.putMarketplaceCapabilityListing === "function") {
+            await store.putMarketplaceCapabilityListing({ tenantId, listing });
+          } else if (store.kind === "pg") {
+            return sendError(res, 501, "marketplace capability listing persistence is not supported for this store");
+          } else {
+            store.marketplaceCapabilityListings.set(capabilityListingStoreKey(tenantId, requestedListingId), listing);
+          }
           const statusCode = existingListing ? 200 : 201;
           const responseBody = { listing };
           if (idemStoreKey) {
@@ -48223,6 +48491,9 @@ export function createApi({
         }
 
         if (req.method === "GET" && marketplaceParts.length === 2) {
+          if (store.kind === "pg" && typeof store.listMarketplaceCapabilityListings !== "function") {
+            return sendError(res, 501, "marketplace capability listing list is not supported for this store");
+          }
           let status = "all";
           try {
             status = parseMarketplaceCapabilityListingStatus(url.searchParams.get("status"), {
@@ -48241,23 +48512,33 @@ export function createApi({
             defaultLimit: 50,
             maxLimit: 200
           });
-          const rows = listMarketplaceCapabilityListings({ tenantId, status, capability, sellerAgentId, search });
+          const rows = await listMarketplaceCapabilityListings({ tenantId, status, capability, sellerAgentId, search });
           return sendJson(res, 200, { listings: rows.slice(offset, offset + limit), total: rows.length, limit, offset });
         }
 
         if (req.method === "GET" && marketplaceParts.length === 3) {
+          if (store.kind === "pg" && typeof store.getMarketplaceCapabilityListing !== "function") {
+            return sendError(res, 501, "marketplace capability listing read is not supported for this store");
+          }
           let listingId = null;
           try {
             listingId = parseMarketplaceCapabilityListingId(marketplaceParts[2], { fieldPath: "listingId" });
           } catch (err) {
             return sendError(res, 400, "invalid listing id", { message: err?.message });
           }
-          const listing = getMarketplaceCapabilityListing({ tenantId, listingId });
+          const listing = await getMarketplaceCapabilityListing({ tenantId, listingId });
           if (!listing) return sendError(res, 404, "capability listing not found");
           return sendJson(res, 200, { listing });
         }
 
         if (req.method === "DELETE" && marketplaceParts.length === 3) {
+          if (store.kind === "pg" && typeof store.getMarketplaceCapabilityListing !== "function") {
+            return sendError(res, 501, "marketplace capability listing read is not supported for this store");
+          }
+          if (store.kind === "pg" && typeof store.deleteMarketplaceCapabilityListing !== "function") {
+            return sendError(res, 501, "marketplace capability listing deletion is not supported for this store");
+          }
+
           let idemStoreKey = null;
           let idemRequestHash = null;
           const body = {};
@@ -48282,9 +48563,15 @@ export function createApi({
           } catch (err) {
             return sendError(res, 400, "invalid listing id", { message: err?.message });
           }
-          const listing = getMarketplaceCapabilityListing({ tenantId, listingId });
+          const listing = await getMarketplaceCapabilityListing({ tenantId, listingId });
           if (!listing) return sendError(res, 404, "capability listing not found");
-          store.marketplaceCapabilityListings.delete(capabilityListingStoreKey(tenantId, listingId));
+          if (typeof store.deleteMarketplaceCapabilityListing === "function") {
+            await store.deleteMarketplaceCapabilityListing({ tenantId, listingId });
+          } else if (store.kind === "pg") {
+            return sendError(res, 501, "marketplace capability listing deletion is not supported for this store");
+          } else {
+            store.marketplaceCapabilityListings.delete(capabilityListingStoreKey(tenantId, listingId));
+          }
           const responseBody = { ok: true, deleted: true, listingId, listing };
           if (idemStoreKey) {
             await commitTx([{ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } }]);
@@ -60989,6 +61276,376 @@ export function createApi({
         }
       }
 
+      if (req.method === "GET" && path === "/intents") {
+        let statusFilter = null;
+        try {
+          statusFilter = parseIntentContractStatus(url.searchParams.get("status"), {
+            allowNull: true,
+            fieldName: "status"
+          });
+        } catch (err) {
+          return sendError(res, 400, "invalid intent query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+        }
+        const intentId =
+          typeof url.searchParams.get("intentId") === "string" && url.searchParams.get("intentId").trim() !== ""
+            ? url.searchParams.get("intentId").trim()
+            : null;
+        const proposerAgentId =
+          typeof url.searchParams.get("proposerAgentId") === "string" && url.searchParams.get("proposerAgentId").trim() !== ""
+            ? url.searchParams.get("proposerAgentId").trim()
+            : null;
+        const counterpartyAgentId =
+          typeof url.searchParams.get("counterpartyAgentId") === "string" && url.searchParams.get("counterpartyAgentId").trim() !== ""
+            ? url.searchParams.get("counterpartyAgentId").trim()
+            : null;
+        const limitRaw = url.searchParams.get("limit");
+        const offsetRaw = url.searchParams.get("offset");
+        const limit = limitRaw ? Number(limitRaw) : 200;
+        const offset = offsetRaw ? Number(offsetRaw) : 0;
+        const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(1000, limit) : 200;
+        const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+
+        let intents = [];
+        try {
+          intents = await listIntentContractRecords({
+            tenantId,
+            intentId,
+            proposerAgentId,
+            counterpartyAgentId,
+            status: statusFilter,
+            limit: safeLimit,
+            offset: safeOffset
+          });
+        } catch (err) {
+          return sendError(res, 501, "intent contracts not supported for this store", { message: err?.message });
+        }
+        return sendJson(res, 200, { ok: true, intents, limit: safeLimit, offset: safeOffset });
+      }
+
+      if (req.method === "POST" && path === "/intents/propose") {
+        if (typeof store.getIntentContract !== "function" && !(store.intentContracts instanceof Map)) {
+          return sendError(res, 501, "intent contracts not supported for this store");
+        }
+        if (!requireProtocolHeaderForWrite(req, res)) return;
+        const body = await readJsonBody(req);
+        let idemStoreKey = null;
+        let idemRequestHash = null;
+        try {
+          ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+        } catch (err) {
+          return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+        }
+        if (idemStoreKey) {
+          const existing = store.idempotency.get(idemStoreKey);
+          if (existing) {
+            if (existing.requestHash !== idemRequestHash) {
+              return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+            }
+            return sendJson(res, existing.statusCode, existing.body);
+          }
+        }
+
+        const nowAt = nowIso();
+        const intentId =
+          typeof body?.intentId === "string" && body.intentId.trim() !== "" ? body.intentId.trim() : createId("intent");
+        const proposerAgentId =
+          typeof body?.proposerAgentId === "string" && body.proposerAgentId.trim() !== "" ? body.proposerAgentId.trim() : null;
+        const counterpartyAgentId =
+          typeof body?.counterpartyAgentId === "string" && body.counterpartyAgentId.trim() !== "" ? body.counterpartyAgentId.trim() : null;
+        if (!proposerAgentId || !counterpartyAgentId) {
+          return sendError(res, 400, "proposerAgentId and counterpartyAgentId are required", null, { code: "SCHEMA_INVALID" });
+        }
+        if (body?.objective === null || body?.objective === undefined) {
+          return sendError(res, 400, "objective is required", null, { code: "SCHEMA_INVALID" });
+        }
+        if (!body?.budgetEnvelope || typeof body.budgetEnvelope !== "object" || Array.isArray(body.budgetEnvelope)) {
+          return sendError(res, 400, "budgetEnvelope is required", null, { code: "SCHEMA_INVALID" });
+        }
+        const existingIntent = await getIntentContractRecord({ tenantId, intentId });
+        if (existingIntent) return sendError(res, 409, "intent contract already exists", null, { code: "CONFLICT" });
+
+        const proposerIdentity = await getAgentIdentityRecord({ tenantId, agentId: proposerAgentId });
+        if (!proposerIdentity) return sendError(res, 404, "proposer agent identity not found", null, { code: "NOT_FOUND" });
+        const counterpartyIdentity = await getAgentIdentityRecord({ tenantId, agentId: counterpartyAgentId });
+        if (!counterpartyIdentity) return sendError(res, 404, "counterparty agent identity not found", null, { code: "NOT_FOUND" });
+
+        let intentContract = null;
+        try {
+          const proposedAt =
+            typeof body?.proposedAt === "string" && body.proposedAt.trim() !== ""
+              ? parseAsOfDateTime(body.proposedAt.trim(), { fieldName: "proposedAt" })
+              : nowAt;
+          intentContract = buildIntentContractV1({
+            intentId,
+            tenantId,
+            proposerAgentId,
+            counterpartyAgentId,
+            objective: body.objective,
+            constraints:
+              body?.constraints && typeof body.constraints === "object" && !Array.isArray(body.constraints) ? body.constraints : null,
+            budgetEnvelope: body.budgetEnvelope,
+            requiredApprovals: Array.isArray(body?.requiredApprovals) ? body.requiredApprovals : [],
+            successCriteria:
+              body?.successCriteria && typeof body.successCriteria === "object" && !Array.isArray(body.successCriteria)
+                ? body.successCriteria
+                : {},
+            terminationPolicy:
+              body?.terminationPolicy && typeof body.terminationPolicy === "object" && !Array.isArray(body.terminationPolicy)
+                ? body.terminationPolicy
+                : {},
+            proposedAt,
+            updatedAt: proposedAt,
+            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null
+          });
+          validateIntentContractV1(intentContract);
+        } catch (err) {
+          return sendError(res, 400, "invalid intent contract", { message: err?.message }, { code: "SCHEMA_INVALID" });
+        }
+
+        const responseBody = { ok: true, intentContract };
+        const ops = [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId, intentContract }];
+        if (idemStoreKey) {
+          ops.push({
+            kind: "IDEMPOTENCY_PUT",
+            key: idemStoreKey,
+            value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody }
+          });
+        }
+        await commitTx(ops);
+        return sendJson(res, 201, responseBody);
+      }
+
+      {
+        const parts = path.split("/").filter(Boolean);
+
+        if (parts[0] === "intents" && parts[1] && parts.length === 2 && req.method === "GET") {
+          const intentId = decodePathPart(parts[1]);
+          let intentContract = null;
+          try {
+            intentContract = await getIntentContractRecord({ tenantId, intentId });
+          } catch (err) {
+            return sendError(res, 501, "intent contracts not supported for this store", { message: err?.message });
+          }
+          if (!intentContract) return sendError(res, 404, "intent contract not found", null, { code: "NOT_FOUND" });
+          return sendJson(res, 200, { ok: true, intentContract });
+        }
+
+        if (parts[0] === "intents" && parts[1] && parts[2] === "counter" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+          const sourceIntentId = decodePathPart(parts[1]);
+          const sourceIntent = await getIntentContractRecord({ tenantId, intentId: sourceIntentId });
+          if (!sourceIntent) return sendError(res, 404, "source intent contract not found", null, { code: "NOT_FOUND" });
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const proposerAgentId =
+            typeof body?.proposerAgentId === "string" && body.proposerAgentId.trim() !== ""
+              ? body.proposerAgentId.trim()
+              : null;
+          if (!proposerAgentId) return sendError(res, 400, "proposerAgentId is required", null, { code: "SCHEMA_INVALID" });
+          const newIntentId =
+            typeof body?.intentId === "string" && body.intentId.trim() !== "" ? body.intentId.trim() : createId("intent");
+          const existingIntent = await getIntentContractRecord({ tenantId, intentId: newIntentId });
+          if (existingIntent) return sendError(res, 409, "intent contract already exists", null, { code: "CONFLICT" });
+          const expectedParentIntentHash =
+            typeof body?.parentIntentHash === "string" && body.parentIntentHash.trim() !== ""
+              ? normalizeSha256HashInput(body.parentIntentHash.trim(), "parentIntentHash", { allowNull: false })
+              : null;
+          const sourceIntentHash = normalizeSha256HashInput(sourceIntent?.intentHash, "sourceIntent.intentHash", { allowNull: false });
+          if (expectedParentIntentHash && expectedParentIntentHash !== sourceIntentHash) {
+            return sendError(
+              res,
+              409,
+              "intent contract parent hash mismatch",
+              { expectedParentIntentHash: sourceIntentHash, providedParentIntentHash: expectedParentIntentHash },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+
+          let counterIntent = null;
+          try {
+            const proposedAt =
+              typeof body?.proposedAt === "string" && body.proposedAt.trim() !== ""
+                ? parseAsOfDateTime(body.proposedAt.trim(), { fieldName: "proposedAt" })
+                : nowIso();
+            counterIntent = counterIntentContractV1({
+              sourceIntent,
+              intentId: newIntentId,
+              proposerAgentId,
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "objective") ? { objective: body.objective } : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "constraints")
+                ? {
+                    constraints:
+                      body?.constraints && typeof body.constraints === "object" && !Array.isArray(body.constraints)
+                        ? body.constraints
+                        : null
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "budgetEnvelope")
+                ? {
+                    budgetEnvelope:
+                      body?.budgetEnvelope && typeof body.budgetEnvelope === "object" && !Array.isArray(body.budgetEnvelope)
+                        ? body.budgetEnvelope
+                        : null
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "requiredApprovals")
+                ? { requiredApprovals: Array.isArray(body?.requiredApprovals) ? body.requiredApprovals : [] }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "successCriteria")
+                ? {
+                    successCriteria:
+                      body?.successCriteria && typeof body.successCriteria === "object" && !Array.isArray(body.successCriteria)
+                        ? body.successCriteria
+                        : null
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "terminationPolicy")
+                ? {
+                    terminationPolicy:
+                      body?.terminationPolicy && typeof body.terminationPolicy === "object" && !Array.isArray(body.terminationPolicy)
+                        ? body.terminationPolicy
+                        : null
+                  }
+                : {}),
+              proposedAt,
+              metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null
+            });
+            validateIntentContractV1(counterIntent);
+          } catch (err) {
+            return sendError(res, 400, "invalid intent counter proposal", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const responseBody = { ok: true, intentContract: counterIntent };
+          const ops = [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId: newIntentId, intentContract: counterIntent }];
+          if (idemStoreKey) {
+            ops.push({
+              kind: "IDEMPOTENCY_PUT",
+              key: idemStoreKey,
+              value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody }
+            });
+          }
+          await commitTx(ops);
+          return sendJson(res, 201, responseBody);
+        }
+
+        if (parts[0] === "intents" && parts[1] && parts[2] === "accept" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+          const intentId = decodePathPart(parts[1]);
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const existingIntent = await getIntentContractRecord({ tenantId, intentId });
+          if (!existingIntent) return sendError(res, 404, "intent contract not found", null, { code: "NOT_FOUND" });
+          const acceptedByAgentId =
+            typeof body?.acceptedByAgentId === "string" && body.acceptedByAgentId.trim() !== ""
+              ? body.acceptedByAgentId.trim()
+              : null;
+          if (!acceptedByAgentId) return sendError(res, 400, "acceptedByAgentId is required", null, { code: "SCHEMA_INVALID" });
+          const acceptedAt =
+            typeof body?.acceptedAt === "string" && body.acceptedAt.trim() !== ""
+              ? parseAsOfDateTime(body.acceptedAt.trim(), { fieldName: "acceptedAt" })
+              : nowIso();
+          const expectedIntentHash =
+            typeof body?.intentHash === "string" && body.intentHash.trim() !== ""
+              ? normalizeSha256HashInput(body.intentHash.trim(), "intentHash", { allowNull: false })
+              : null;
+          const existingIntentHash = normalizeSha256HashInput(existingIntent?.intentHash, "intentContract.intentHash", { allowNull: false });
+          if (expectedIntentHash && expectedIntentHash !== existingIntentHash) {
+            return sendError(
+              res,
+              409,
+              "intent contract hash mismatch",
+              { expectedIntentHash: existingIntentHash, providedIntentHash: expectedIntentHash },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+
+          const existingStatus = String(existingIntent?.status ?? "").trim().toLowerCase();
+          if (existingStatus === INTENT_CONTRACT_STATUS.ACCEPTED) {
+            const existingAcceptedBy = String(existingIntent?.acceptedByAgentId ?? "").trim();
+            const existingAcceptedAt = String(existingIntent?.acceptedAt ?? "").trim();
+            if (existingAcceptedBy !== acceptedByAgentId || existingAcceptedAt !== acceptedAt) {
+              return sendError(
+                res,
+                409,
+                "intent contract already accepted with different acceptance fields",
+                {
+                  acceptedByAgentId: existingAcceptedBy || null,
+                  acceptedAt: existingAcceptedAt || null
+                },
+                { code: "INTENT_CONTRACT_ALREADY_ACCEPTED" }
+              );
+            }
+            const responseBody = { ok: true, intentContract: existingIntent };
+            if (idemStoreKey) {
+              await commitTx([
+                {
+                  kind: "IDEMPOTENCY_PUT",
+                  key: idemStoreKey,
+                  value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody }
+                }
+              ]);
+            }
+            return sendJson(res, 200, responseBody);
+          }
+
+          let acceptedIntent = null;
+          try {
+            acceptedIntent = acceptIntentContractV1({
+              intentContract: existingIntent,
+              acceptedByAgentId,
+              acceptedAt
+            });
+            validateIntentContractV1(acceptedIntent);
+          } catch (err) {
+            return sendError(res, 409, "intent contract accept blocked", { message: err?.message }, { code: "INTENT_CONTRACT_ACCEPT_BLOCKED" });
+          }
+
+          const responseBody = { ok: true, intentContract: acceptedIntent };
+          const ops = [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId, intentContract: acceptedIntent }];
+          if (idemStoreKey) {
+            ops.push({
+              kind: "IDEMPOTENCY_PUT",
+              key: idemStoreKey,
+              value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody }
+            });
+          }
+          await commitTx(ops);
+          return sendJson(res, 200, responseBody);
+        }
+      }
+
       if (req.method === "POST" && path === "/work-orders") {
         if (typeof store.getSubAgentWorkOrder !== "function" && !(store.subAgentWorkOrders instanceof Map)) {
           return sendError(res, 501, "sub-agent work orders not supported for this store");
@@ -61419,6 +62076,42 @@ export function createApi({
           );
         }
 
+        let resolvedIntentBinding = null;
+        try {
+          const intentResolution = await resolveAcceptedIntentBindingForWorkOrder({
+            tenantId,
+            intentBindingInput: body?.intentBinding ?? null,
+            principalAgentId,
+            subAgentId,
+            boundAt: nowAt,
+            requireBinding: workOrderRequireIntentBindingValue,
+            fieldName: "intentBinding"
+          });
+          resolvedIntentBinding = intentResolution?.intentBinding ?? null;
+        } catch (err) {
+          const errorCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "WORK_ORDER_INTENT_BINDING_BLOCKED";
+          const statusCode =
+            Number.isSafeInteger(Number(err?.statusCode)) && Number(err.statusCode) >= 400 && Number(err.statusCode) < 600
+              ? Number(err.statusCode)
+              : err instanceof TypeError
+                ? 400
+                : 409;
+          const details = err instanceof TypeError
+            ? { message: err?.message ?? "invalid work order intent binding" }
+            : {
+                reasonCode: errorCode,
+                message: err?.message ?? null,
+                ...(err?.details && typeof err.details === "object" ? err.details : {})
+              };
+          return sendError(
+            res,
+            statusCode,
+            statusCode >= 500 ? "work order intent binding unavailable" : "work order intent binding blocked",
+            details,
+            { code: errorCode }
+          );
+        }
+
         let workOrder = null;
         try {
           workOrder = buildSubAgentWorkOrderV1({
@@ -61443,6 +62136,7 @@ export function createApi({
             evidencePolicy: workOrderEvidencePolicy,
             delegationGrantRef,
             authorityGrantRef,
+            intentBinding: resolvedIntentBinding,
             metadata: workOrderMetadata,
             createdAt: nowAt
           });
@@ -62196,6 +62890,68 @@ export function createApi({
             );
           }
 
+          let resolvedIntentBinding = null;
+          try {
+            const intentResolution = await resolveAcceptedIntentBindingForWorkOrder({
+              tenantId,
+              intentBindingInput: existingWorkOrder?.intentBinding ?? null,
+              principalAgentId: existingWorkOrder?.principalAgentId ?? null,
+              subAgentId: existingWorkOrder?.subAgentId ?? null,
+              boundAt: nowIso(),
+              requireBinding: workOrderRequireIntentBindingValue,
+              fieldName: "workOrder.intentBinding"
+            });
+            resolvedIntentBinding = intentResolution?.intentBinding ?? null;
+          } catch (err) {
+            const reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "WORK_ORDER_INTENT_BINDING_BLOCKED";
+            const statusCode =
+              Number.isSafeInteger(Number(err?.statusCode)) && Number(err.statusCode) >= 400 && Number(err.statusCode) < 600
+                ? Number(err.statusCode)
+                : err instanceof TypeError
+                  ? 400
+                  : 409;
+            const details = err instanceof TypeError
+              ? { message: err?.message ?? "invalid work order intent binding" }
+              : {
+                  reasonCode,
+                  message: err?.message ?? null,
+                  ...(err?.details && typeof err.details === "object" ? err.details : {})
+                };
+            return sendError(
+              res,
+              statusCode,
+              statusCode >= 500 ? "work order completion unavailable" : "work order completion blocked",
+              details,
+              { code: reasonCode }
+            );
+          }
+
+          let requestedIntentHash = null;
+          if (typeof body?.intentHash === "string" && body.intentHash.trim() !== "") {
+            try {
+              requestedIntentHash = normalizeSha256HashInput(body.intentHash.trim(), "intentHash", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid work order completion", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+          }
+          const boundIntentHash =
+            resolvedIntentBinding && typeof resolvedIntentBinding.intentHash === "string" && resolvedIntentBinding.intentHash.trim() !== ""
+              ? resolvedIntentBinding.intentHash.trim().toLowerCase()
+              : null;
+          if (requestedIntentHash && boundIntentHash && requestedIntentHash !== boundIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order completion conflict",
+              {
+                message: "intentHash does not match work order intent binding",
+                expectedIntentHash: boundIntentHash,
+                providedIntentHash: requestedIntentHash
+              },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+
           let completionReceipt = null;
           let nextWorkOrder = null;
           try {
@@ -62216,6 +62972,7 @@ export function createApi({
                   : null,
               amountCents: body?.amountCents ?? null,
               currency: typeof body?.currency === "string" && body.currency.trim() !== "" ? body.currency.trim() : null,
+              intentHash: requestedIntentHash ?? boundIntentHash ?? null,
               traceId: requestedTraceId ?? workOrderTraceId ?? null,
               deliveredAt: typeof body?.deliveredAt === "string" && body.deliveredAt.trim() !== "" ? body.deliveredAt.trim() : nowIso(),
               metadata: body?.metadata ?? null
@@ -62469,6 +63226,110 @@ export function createApi({
                 { code: "WORK_ORDER_SETTLEMENT_CONFLICT" }
               );
             }
+          }
+
+          let requestedIntentHash = null;
+          if (typeof body?.intentHash === "string" && body.intentHash.trim() !== "") {
+            try {
+              requestedIntentHash = normalizeSha256HashInput(body.intentHash.trim(), "intentHash", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid work order settlement", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+          }
+          let resolvedIntentBinding = null;
+          try {
+            const intentResolution = await resolveAcceptedIntentBindingForWorkOrder({
+              tenantId,
+              intentBindingInput: existingWorkOrder?.intentBinding ?? null,
+              principalAgentId: existingWorkOrder?.principalAgentId ?? null,
+              subAgentId: existingWorkOrder?.subAgentId ?? null,
+              boundAt: nowIso(),
+              requireBinding: workOrderRequireIntentBindingValue,
+              fieldName: "workOrder.intentBinding"
+            });
+            resolvedIntentBinding = intentResolution?.intentBinding ?? null;
+          } catch (err) {
+            const reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "WORK_ORDER_INTENT_BINDING_BLOCKED";
+            const statusCode =
+              Number.isSafeInteger(Number(err?.statusCode)) && Number(err.statusCode) >= 400 && Number(err.statusCode) < 600
+                ? Number(err.statusCode)
+                : err instanceof TypeError
+                  ? 400
+                  : 409;
+            const details = err instanceof TypeError
+              ? { message: err?.message ?? "invalid work order intent binding" }
+              : {
+                  reasonCode,
+                  message: err?.message ?? null,
+                  ...(err?.details && typeof err.details === "object" ? err.details : {})
+                };
+            return sendError(
+              res,
+              statusCode,
+              statusCode >= 500 ? "work order settlement unavailable" : "work order settlement blocked",
+              details,
+              { code: reasonCode }
+            );
+          }
+          const boundIntentHash =
+            resolvedIntentBinding && typeof resolvedIntentBinding.intentHash === "string" && resolvedIntentBinding.intentHash.trim() !== ""
+              ? resolvedIntentBinding.intentHash.trim().toLowerCase()
+              : null;
+          const completionIntentHash =
+            typeof completionReceipt?.intentHash === "string" && completionReceipt.intentHash.trim() !== ""
+              ? completionReceipt.intentHash.trim().toLowerCase()
+              : null;
+          if (boundIntentHash && !completionIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order settlement blocked",
+              {
+                reasonCode: "WORK_ORDER_INTENT_BINDING_BLOCKED",
+                message: "completion receipt intentHash is required for bound intent settlement",
+                workOrderId
+              },
+              { code: "WORK_ORDER_SETTLEMENT_BLOCKED" }
+            );
+          }
+          if (boundIntentHash && completionIntentHash && completionIntentHash !== boundIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order settlement conflict",
+              {
+                message: "completion receipt intentHash does not match work order intent binding",
+                expectedIntentHash: boundIntentHash,
+                providedIntentHash: completionIntentHash
+              },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+          if (requestedIntentHash && boundIntentHash && requestedIntentHash !== boundIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order settlement conflict",
+              {
+                message: "intentHash does not match work order intent binding",
+                expectedIntentHash: boundIntentHash,
+                providedIntentHash: requestedIntentHash
+              },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+          if (requestedIntentHash && completionIntentHash && requestedIntentHash !== completionIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order settlement conflict",
+              {
+                message: "intentHash does not match completion receipt",
+                expectedIntentHash: completionIntentHash,
+                providedIntentHash: requestedIntentHash
+              },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
           }
 	          let requestedAuthorityGrantRef = null;
 	          try {
