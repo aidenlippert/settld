@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Nooterra API",
-    "version": "0.2.1",
+    "version": "0.2.8",
     "description": "Nooterra system-of-record API (protocol-gated).",
     "x-nooterra-protocol": "1.0"
   },
@@ -49841,6 +49841,14 @@
             }
           },
           {
+            "name": "checkpointConsumerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -50600,6 +50608,694 @@
         }
       }
     },
+    "/sessions/{sessionId}/events/checkpoint": {
+      "get": {
+        "summary": "Read SessionEvent inbox relay checkpoint for a session consumer",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "checkpointConsumerId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "checkpoint": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "tenantId",
+                        "sessionId",
+                        "consumerId",
+                        "sinceEventId",
+                        "createdAt",
+                        "updatedAt",
+                        "checkpointHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "SessionEventInboxRelayCheckpoint.v1"
+                          ]
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "consumerId": {
+                          "type": "string"
+                        },
+                        "sinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "checkpointHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    "inbox": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "eventCount",
+                        "sinceEventId",
+                        "nextSinceEventId",
+                        "headEventId"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "SessionEventInboxWatermark.v1"
+                          ]
+                        },
+                        "eventCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "nextSinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "headEventId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Advance SessionEvent inbox relay checkpoint (ack)",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "checkpointConsumerId"
+                ],
+                "properties": {
+                  "checkpointConsumerId": {
+                    "type": "string"
+                  },
+                  "sinceEventId": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "checkpoint": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "tenantId",
+                        "sessionId",
+                        "consumerId",
+                        "sinceEventId",
+                        "createdAt",
+                        "updatedAt",
+                        "checkpointHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "SessionEventInboxRelayCheckpoint.v1"
+                          ]
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "consumerId": {
+                          "type": "string"
+                        },
+                        "sinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "checkpointHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    "inbox": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "eventCount",
+                        "sinceEventId",
+                        "nextSinceEventId",
+                        "headEventId"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "SessionEventInboxWatermark.v1"
+                          ]
+                        },
+                        "eventCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "nextSinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "headEventId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/events/checkpoint/requeue": {
+      "post": {
+        "summary": "Requeue SessionEvent inbox relay checkpoint to an earlier cursor",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "checkpointConsumerId"
+                ],
+                "properties": {
+                  "checkpointConsumerId": {
+                    "type": "string"
+                  },
+                  "sinceEventId": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "checkpoint": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "tenantId",
+                        "sessionId",
+                        "consumerId",
+                        "sinceEventId",
+                        "createdAt",
+                        "updatedAt",
+                        "checkpointHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "SessionEventInboxRelayCheckpoint.v1"
+                          ]
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "consumerId": {
+                          "type": "string"
+                        },
+                        "sinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "checkpointHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    "inbox": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "eventCount",
+                        "sinceEventId",
+                        "nextSinceEventId",
+                        "headEventId"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "SessionEventInboxWatermark.v1"
+                          ]
+                        },
+                        "eventCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "nextSinceEventId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "headEventId": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{sessionId}/events/stream": {
       "get": {
         "summary": "Stream SessionEvent.v1 envelope records via SSE",
@@ -50664,6 +51360,14 @@
           },
           {
             "name": "sinceEventId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "checkpointConsumerId",
             "in": "query",
             "required": false,
             "schema": {
@@ -53731,6 +54435,1651 @@
         }
       }
     },
+    "/intents": {
+      "get": {
+        "summary": "List IntentContract.v1 records",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "intentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposerAgentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "counterpartyAgentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "proposed",
+                "countered",
+                "accepted"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "intents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "intentId",
+                          "tenantId",
+                          "proposerAgentId",
+                          "counterpartyAgentId",
+                          "objective",
+                          "budgetEnvelope",
+                          "requiredApprovals",
+                          "successCriteria",
+                          "terminationPolicy",
+                          "status",
+                          "proposedAt",
+                          "updatedAt",
+                          "revision",
+                          "intentHash"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "type": "string",
+                            "enum": [
+                              "IntentContract.v1"
+                            ]
+                          },
+                          "intentId": {
+                            "type": "string"
+                          },
+                          "tenantId": {
+                            "type": "string"
+                          },
+                          "proposerAgentId": {
+                            "type": "string"
+                          },
+                          "counterpartyAgentId": {
+                            "type": "string"
+                          },
+                          "objective": {},
+                          "constraints": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "nullable": true
+                          },
+                          "budgetEnvelope": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "currency",
+                              "maxAmountCents",
+                              "hardCap"
+                            ],
+                            "properties": {
+                              "currency": {
+                                "type": "string"
+                              },
+                              "maxAmountCents": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "hardCap": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          "requiredApprovals": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "approverRole",
+                                "minApprovals"
+                              ],
+                              "properties": {
+                                "approverRole": {
+                                  "type": "string"
+                                },
+                                "minApprovals": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              }
+                            }
+                          },
+                          "successCriteria": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "terminationPolicy": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "counterOfIntentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "parentIntentHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "proposed",
+                              "countered",
+                              "accepted"
+                            ]
+                          },
+                          "acceptedByAgentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "acceptedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "proposedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "nullable": true
+                          },
+                          "intentHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          }
+                        }
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/intents/propose": {
+      "post": {
+        "summary": "Propose a new IntentContract.v1",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "proposerAgentId",
+                  "counterpartyAgentId",
+                  "objective",
+                  "budgetEnvelope"
+                ],
+                "properties": {
+                  "intentId": {
+                    "type": "string"
+                  },
+                  "proposerAgentId": {
+                    "type": "string"
+                  },
+                  "counterpartyAgentId": {
+                    "type": "string"
+                  },
+                  "objective": {},
+                  "constraints": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "budgetEnvelope": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "requiredApprovals": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "nullable": true
+                  },
+                  "successCriteria": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "terminationPolicy": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "proposedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "intentContract": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "intentId",
+                        "tenantId",
+                        "proposerAgentId",
+                        "counterpartyAgentId",
+                        "objective",
+                        "budgetEnvelope",
+                        "requiredApprovals",
+                        "successCriteria",
+                        "terminationPolicy",
+                        "status",
+                        "proposedAt",
+                        "updatedAt",
+                        "revision",
+                        "intentHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "IntentContract.v1"
+                          ]
+                        },
+                        "intentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "proposerAgentId": {
+                          "type": "string"
+                        },
+                        "counterpartyAgentId": {
+                          "type": "string"
+                        },
+                        "objective": {},
+                        "constraints": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "budgetEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "currency",
+                            "maxAmountCents",
+                            "hardCap"
+                          ],
+                          "properties": {
+                            "currency": {
+                              "type": "string"
+                            },
+                            "maxAmountCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hardCap": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "requiredApprovals": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "approverRole",
+                              "minApprovals"
+                            ],
+                            "properties": {
+                              "approverRole": {
+                                "type": "string"
+                              },
+                              "minApprovals": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reason": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "successCriteria": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "terminationPolicy": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "counterOfIntentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parentIntentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "proposed",
+                            "countered",
+                            "accepted"
+                          ]
+                        },
+                        "acceptedByAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "acceptedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "proposedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/intents/{intentId}": {
+      "get": {
+        "summary": "Get IntentContract.v1 by id",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "intentContract": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "intentId",
+                        "tenantId",
+                        "proposerAgentId",
+                        "counterpartyAgentId",
+                        "objective",
+                        "budgetEnvelope",
+                        "requiredApprovals",
+                        "successCriteria",
+                        "terminationPolicy",
+                        "status",
+                        "proposedAt",
+                        "updatedAt",
+                        "revision",
+                        "intentHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "IntentContract.v1"
+                          ]
+                        },
+                        "intentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "proposerAgentId": {
+                          "type": "string"
+                        },
+                        "counterpartyAgentId": {
+                          "type": "string"
+                        },
+                        "objective": {},
+                        "constraints": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "budgetEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "currency",
+                            "maxAmountCents",
+                            "hardCap"
+                          ],
+                          "properties": {
+                            "currency": {
+                              "type": "string"
+                            },
+                            "maxAmountCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hardCap": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "requiredApprovals": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "approverRole",
+                              "minApprovals"
+                            ],
+                            "properties": {
+                              "approverRole": {
+                                "type": "string"
+                              },
+                              "minApprovals": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reason": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "successCriteria": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "terminationPolicy": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "counterOfIntentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parentIntentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "proposed",
+                            "countered",
+                            "accepted"
+                          ]
+                        },
+                        "acceptedByAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "acceptedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "proposedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/intents/{intentId}/counter": {
+      "post": {
+        "summary": "Create a counter IntentContract.v1 from an existing intent",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "proposerAgentId"
+                ],
+                "properties": {
+                  "intentId": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "proposerAgentId": {
+                    "type": "string"
+                  },
+                  "parentIntentHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "nullable": true
+                  },
+                  "objective": {
+                    "nullable": true
+                  },
+                  "constraints": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "budgetEnvelope": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "requiredApprovals": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "nullable": true
+                  },
+                  "successCriteria": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "terminationPolicy": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  },
+                  "proposedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "intentContract": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "intentId",
+                        "tenantId",
+                        "proposerAgentId",
+                        "counterpartyAgentId",
+                        "objective",
+                        "budgetEnvelope",
+                        "requiredApprovals",
+                        "successCriteria",
+                        "terminationPolicy",
+                        "status",
+                        "proposedAt",
+                        "updatedAt",
+                        "revision",
+                        "intentHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "IntentContract.v1"
+                          ]
+                        },
+                        "intentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "proposerAgentId": {
+                          "type": "string"
+                        },
+                        "counterpartyAgentId": {
+                          "type": "string"
+                        },
+                        "objective": {},
+                        "constraints": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "budgetEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "currency",
+                            "maxAmountCents",
+                            "hardCap"
+                          ],
+                          "properties": {
+                            "currency": {
+                              "type": "string"
+                            },
+                            "maxAmountCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hardCap": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "requiredApprovals": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "approverRole",
+                              "minApprovals"
+                            ],
+                            "properties": {
+                              "approverRole": {
+                                "type": "string"
+                              },
+                              "minApprovals": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reason": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "successCriteria": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "terminationPolicy": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "counterOfIntentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parentIntentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "proposed",
+                            "countered",
+                            "accepted"
+                          ]
+                        },
+                        "acceptedByAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "acceptedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "proposedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/intents/{intentId}/accept": {
+      "post": {
+        "summary": "Accept an IntentContract.v1",
+        "parameters": [
+          {
+            "name": "x-proxy-tenant-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tenant_default"
+            },
+            "description": "Tenant scope for the request."
+          },
+          {
+            "name": "x-nooterra-protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "1.0"
+            },
+            "description": "Client protocol version (major.minor). Required in production."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional request ID (echoed in responses)."
+          },
+          {
+            "name": "x-idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key. If reused, request body must match."
+          },
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "acceptedByAgentId"
+                ],
+                "properties": {
+                  "acceptedByAgentId": {
+                    "type": "string"
+                  },
+                  "acceptedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "intentHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "intentContract": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "intentId",
+                        "tenantId",
+                        "proposerAgentId",
+                        "counterpartyAgentId",
+                        "objective",
+                        "budgetEnvelope",
+                        "requiredApprovals",
+                        "successCriteria",
+                        "terminationPolicy",
+                        "status",
+                        "proposedAt",
+                        "updatedAt",
+                        "revision",
+                        "intentHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "string",
+                          "enum": [
+                            "IntentContract.v1"
+                          ]
+                        },
+                        "intentId": {
+                          "type": "string"
+                        },
+                        "tenantId": {
+                          "type": "string"
+                        },
+                        "proposerAgentId": {
+                          "type": "string"
+                        },
+                        "counterpartyAgentId": {
+                          "type": "string"
+                        },
+                        "objective": {},
+                        "constraints": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "budgetEnvelope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "currency",
+                            "maxAmountCents",
+                            "hardCap"
+                          ],
+                          "properties": {
+                            "currency": {
+                              "type": "string"
+                            },
+                            "maxAmountCents": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hardCap": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "requiredApprovals": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "approverRole",
+                              "minApprovals"
+                            ],
+                            "properties": {
+                              "approverRole": {
+                                "type": "string"
+                              },
+                              "minApprovals": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reason": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "successCriteria": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "terminationPolicy": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "counterOfIntentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parentIntentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "proposed",
+                            "countered",
+                            "accepted"
+                          ]
+                        },
+                        "acceptedByAgentId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "acceptedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "proposedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/work-orders": {
       "get": {
         "summary": "List SubAgentWorkOrder.v1 records",
@@ -54086,6 +56435,40 @@
                           },
                           "authorityGrantRef": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "intentBinding": {
+                            "allOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "schemaVersion",
+                                  "intentId",
+                                  "intentHash",
+                                  "boundAt"
+                                ],
+                                "properties": {
+                                  "schemaVersion": {
+                                    "type": "string",
+                                    "enum": [
+                                      "IntentBinding.v1"
+                                    ]
+                                  },
+                                  "intentId": {
+                                    "type": "string"
+                                  },
+                                  "intentHash": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  },
+                                  "boundAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              }
+                            ],
                             "nullable": true
                           },
                           "status": {
@@ -54553,6 +56936,26 @@
                   "authorityGrantRef": {
                     "type": "string"
                   },
+                  "intentBinding": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "nullable": true,
+                    "properties": {
+                      "intentId": {
+                        "type": "string"
+                      },
+                      "intentHash": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "nullable": true
+                      },
+                      "boundAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                      }
+                    }
+                  },
                   "metadata": {
                     "type": "object",
                     "additionalProperties": true
@@ -54812,6 +57215,40 @@
                         },
                         "authorityGrantRef": {
                           "type": "string",
+                          "nullable": true
+                        },
+                        "intentBinding": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "intentId",
+                                "intentHash",
+                                "boundAt"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "IntentBinding.v1"
+                                  ]
+                                },
+                                "intentId": {
+                                  "type": "string"
+                                },
+                                "intentHash": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "boundAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          ],
                           "nullable": true
                         },
                         "status": {
@@ -55325,6 +57762,40 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "intentBinding": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "intentId",
+                                "intentHash",
+                                "boundAt"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "IntentBinding.v1"
+                                  ]
+                                },
+                                "intentId": {
+                                  "type": "string"
+                                },
+                                "intentHash": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "boundAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          ],
+                          "nullable": true
+                        },
                         "status": {
                           "type": "string",
                           "enum": [
@@ -55823,6 +58294,40 @@
                         },
                         "authorityGrantRef": {
                           "type": "string",
+                          "nullable": true
+                        },
+                        "intentBinding": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "intentId",
+                                "intentHash",
+                                "boundAt"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "IntentBinding.v1"
+                                  ]
+                                },
+                                "intentId": {
+                                  "type": "string"
+                                },
+                                "intentHash": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "boundAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          ],
                           "nullable": true
                         },
                         "status": {
@@ -56361,6 +58866,40 @@
                         },
                         "authorityGrantRef": {
                           "type": "string",
+                          "nullable": true
+                        },
+                        "intentBinding": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "intentId",
+                                "intentHash",
+                                "boundAt"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "IntentBinding.v1"
+                                  ]
+                                },
+                                "intentId": {
+                                  "type": "string"
+                                },
+                                "intentHash": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "boundAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          ],
                           "nullable": true
                         },
                         "status": {
@@ -57288,6 +59827,11 @@
                     "type": "string",
                     "nullable": true
                   },
+                  "intentHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "nullable": true
+                  },
                   "traceId": {
                     "type": "string",
                     "nullable": true
@@ -57561,6 +60105,40 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "intentBinding": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "intentId",
+                                "intentHash",
+                                "boundAt"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "IntentBinding.v1"
+                                  ]
+                                },
+                                "intentId": {
+                                  "type": "string"
+                                },
+                                "intentHash": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "boundAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          ],
+                          "nullable": true
+                        },
                         "status": {
                           "type": "string",
                           "enum": [
@@ -57860,6 +60438,11 @@
                             }
                           }
                         },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
+                        },
                         "deliveredAt": {
                           "type": "string",
                           "format": "date-time"
@@ -58017,6 +60600,10 @@
                     "type": "string"
                   },
                   "completionReceiptHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "intentHash": {
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
                   },
@@ -58288,6 +60875,40 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "intentBinding": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "schemaVersion",
+                                "intentId",
+                                "intentHash",
+                                "boundAt"
+                              ],
+                              "properties": {
+                                "schemaVersion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "IntentBinding.v1"
+                                  ]
+                                },
+                                "intentId": {
+                                  "type": "string"
+                                },
+                                "intentHash": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "boundAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          ],
+                          "nullable": true
+                        },
                         "status": {
                           "type": "string",
                           "enum": [
@@ -58586,6 +61207,11 @@
                               "type": "string"
                             }
                           }
+                        },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
                         },
                         "deliveredAt": {
                           "type": "string",
@@ -58947,6 +61573,11 @@
                               }
                             }
                           },
+                          "intentHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                            "nullable": true
+                          },
                           "deliveredAt": {
                             "type": "string",
                             "format": "date-time"
@@ -59216,6 +61847,11 @@
                               "type": "string"
                             }
                           }
+                        },
+                        "intentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "nullable": true
                         },
                         "deliveredAt": {
                           "type": "string",

@@ -5,7 +5,7 @@
   "protocolVectors": {
     "schemaVersion": "ProtocolVectors.v1",
     "file": "v1.json",
-    "sha256": "c658173e55a7b5d535bd4d268705d979688ec0aa9086e3234f2c4e3f8cb1122e"
+    "sha256": "9cbcf18264195a4e1c160e897652268c2daf02bfe35632c9c63ad56793e11423"
   },
   "failureVectors": {
     "schemaVersion": "ProtocolFailureVectors.v1",
