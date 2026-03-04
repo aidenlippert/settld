@@ -3385,6 +3385,78 @@ test("API e2e: x402 webhook endpoint secret rotation supports dual-signature gra
   assert.ok(signatures.includes(expectedOld));
 });
 
+test("API e2e: x402 webhook endpoint routes fail closed with deterministic reject codes", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const invalidCreate = await request(api, {
+    method: "POST",
+    path: "/x402/webhooks/endpoints",
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_invalid_create_1"
+    },
+    body: {
+      url: "https://example.invalid/x402/invalid-create",
+      events: ["x402.unsupported.event"]
+    }
+  });
+  assert.equal(invalidCreate.statusCode, 400, invalidCreate.body);
+  assert.equal(invalidCreate.json?.code, "SCHEMA_INVALID");
+
+  const invalidList = await request(api, {
+    method: "GET",
+    path: "/x402/webhooks/endpoints?event=x402.unsupported.event"
+  });
+  assert.equal(invalidList.statusCode, 400, invalidList.body);
+  assert.equal(invalidList.json?.code, "SCHEMA_INVALID");
+
+  const missingEndpoint = await request(api, {
+    method: "GET",
+    path: "/x402/webhooks/endpoints/x402wh_missing_1"
+  });
+  assert.equal(missingEndpoint.statusCode, 404, missingEndpoint.body);
+  assert.equal(missingEndpoint.json?.code, "NOT_FOUND");
+
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/webhooks/endpoints",
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_revoke_for_rotate_1"
+    },
+    body: {
+      url: "https://example.invalid/x402/revoked-endpoint",
+      events: ["x402.escalation.created"]
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+  const endpointId = created.json?.endpoint?.endpointId;
+  assert.ok(typeof endpointId === "string" && endpointId.length > 0);
+
+  const revoked = await request(api, {
+    method: "DELETE",
+    path: `/x402/webhooks/endpoints/${encodeURIComponent(endpointId)}`,
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_revoke_for_rotate_1_delete"
+    }
+  });
+  assert.equal(revoked.statusCode, 200, revoked.body);
+  assert.equal(revoked.json?.endpoint?.status, "revoked");
+
+  const rotateRevoked = await request(api, {
+    method: "POST",
+    path: `/x402/webhooks/endpoints/${encodeURIComponent(endpointId)}/rotate-secret`,
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_rotate_revoked_1"
+    },
+    body: { gracePeriodSeconds: 60 }
+  });
+  assert.equal(rotateRevoked.statusCode, 409, rotateRevoked.body);
+  assert.equal(rotateRevoked.json?.code, "X402_WEBHOOK_ENDPOINT_REVOKED");
+});
+
 test("API e2e: production-like defaults fail closed when external reserve is unavailable", async (t) => {
   const prevNooterraEnv = process.env.NOOTERRA_ENV;
   const prevRequireReserve = process.env.X402_REQUIRE_EXTERNAL_RESERVE;
