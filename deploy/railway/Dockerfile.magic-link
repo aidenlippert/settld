@@ -8,7 +8,7 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev --ignore-scripts; else n
 FROM node:20-bookworm-slim AS prep
 RUN mkdir -p /data && chown -R 65532:65532 /data
 
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime
+FROM gcr.io/distroless/nodejs20-debian12 AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -30,7 +30,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
 COPY --from=deps /app/NOOTERRA_VERSION ./NOOTERRA_VERSION
 
-COPY --chown=65532:65532 --from=prep /data /data
+COPY --from=prep /data /data
 
 COPY src ./src
 COPY packages ./packages
