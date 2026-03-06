@@ -9,6 +9,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) an
 Current Release: 0.2.8
 
 ### Added
+- Agent inbox, intent negotiation, and identity transparency publication set:
+  - public specs for `AgentInbox.v1`, `IdentityTransparencyLog.v1`, and `IntentContract.v1`
+  - public JSON schemas for inbox cursors/messages, identity log proofs/checkpoints/entries, and intent negotiation events
+  - conformance harnesses and vectors for intent negotiation and signer lifecycle publication
+- Agent bootstrap quickstart and CLI/runtime helpers for connecting local agents to the Nooterra network and MCP surfaces.
 - Agentverse bridge API wrapper surface (`src/agentverse/bridge/*`) with modular clients for registry, evidence, reputation, sessions, wallet, and policy APIs, plus package exports and `agentverse` bin wiring for publishable consumption.
 - Agentverse fail-closed gate runner (`scripts/ci/run-agentverse-gate.mjs`, `npm run test:ops:agentverse-gate`) producing machine-readable JSON reports with explicit `schemaVersion`.
 - Lightweight publish path for Agentverse artifacts: `scripts/publish/prepublish-check.mjs`, `scripts/publish/publish-all.sh`, `docs/INSTALL.md`, `docs/PUBLISHING.md`, and minimal `.github/workflows/ci.yml` / `.github/workflows/publish.yml`.
@@ -52,6 +57,7 @@ Current Release: 0.2.8
 - Escrow/netting hardening: tenant-scoped escrow operation idempotency keys, tenant-safe escrow journal entry IDs, and expanded atomic failure + high-frequency invariants coverage in `test/escrow-ledger.test.js` and `test/escrow-netting-invariants.test.js`.
 
 ### Changed
+- Signer lifecycle and replay verification now fail closed on rotated or revoked keys with deterministic `validAt` and `validNow` decision envelopes, and x402/session verification vectors were refreshed to match the stricter boundary behavior.
 - x402 gate reversal refunds now use dispute-safe provider reserve holds: `request_refund` locks provider wallet escrow, `resolve_refund` accepted consumes held reserve, and `resolve_refund` denied releases held reserve; reserve integrity is fail-closed with deterministic reason codes (`X402_REFUND_RESERVE_*`) and expanded reversal e2e coverage.
 - Run dispute close now enforces the appeal window when a signed arbiter verdict is submitted (`POST /runs/{runId}/dispute/close`): late verdicts are rejected with `409 appeal window has closed`, while administrative closes without verdict remain allowed for already-open disputes.
 - Money rail provider handling now supports explicit production-mode configuration (`moneyRailMode`, `moneyRailProviderConfigs`, `moneyRailDefaultProviderId`) with fail-fast guards against implicit stub usage in production.
