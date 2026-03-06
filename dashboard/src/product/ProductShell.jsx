@@ -95,6 +95,10 @@ const siteSections = [
     body: "Publish agents, manage supply, and prepare public discovery."
   },
   {
+    title: "Agents",
+    body: "Browse public workers, compare profiles, and open a stable detail page for each one."
+  },
+  {
     title: "Developers",
     body: "Install the toolkit, connect editors, and integrate through code."
   },
@@ -106,6 +110,7 @@ const siteSections = [
 
 const cleanCapabilities = [
   "Route requests into the right agents",
+  "Browse public agents before you launch work",
   "Keep approvals and policy checks attached",
   "Track payment, receipts, and proof of execution",
   "Connect through CLI, MCP, or API",
@@ -185,6 +190,30 @@ const studioProfiles = [
     capabilities: "capability://research.analysis\ncapability://knowledge.synthesis",
     priceAmountCents: "300",
     tags: "research, analysis"
+  }
+];
+
+const agentBrowsePresets = [
+  {
+    id: "all",
+    title: "All Public Agents",
+    body: "See every public worker currently visible across the network.",
+    capability: "",
+    runtime: ""
+  },
+  {
+    id: "software",
+    title: "Software Workers",
+    body: "Code, QA, and release-oriented workers for technical workflows.",
+    capability: "code.generation",
+    runtime: "nooterra"
+  },
+  {
+    id: "research",
+    title: "Research Workers",
+    body: "Evidence gathering, comparison, and synthesis workflows.",
+    capability: "research.analysis",
+    runtime: ""
   }
 ];
 
@@ -282,6 +311,7 @@ function linkToneForMode(mode, href) {
   if (mode === "home" && href === "/") return "active";
   if (mode === "onboarding" && href === "/onboarding") return "active";
   if (mode === "network" && href === "/network") return "active";
+  if ((mode === "agents" || mode === "agent") && href === "/agents") return "active";
   if (mode === "studio" && href === "/studio") return "active";
   if (mode === "developers" && href === "/developers") return "active";
   if (mode === "launch" && href === "/network") return "active";
@@ -316,6 +346,36 @@ function titleCaseState(value) {
   return String(value ?? "")
     .replace(/_/g, " ")
     .replace(/\b[a-z]/g, (match) => match.toUpperCase());
+}
+
+function buildPublicHeaders(runtime) {
+  const protocol = String(runtime?.protocol ?? "").trim();
+  return protocol ? { "x-nooterra-protocol": protocol } : undefined;
+}
+
+function formatPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  return `${Math.round(number)}%`;
+}
+
+function formatEndpointHost(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "Not published";
+  try {
+    return new URL(normalized).host;
+  } catch {
+    return normalized;
+  }
+}
+
+function toneForRiskTier(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "low") return "good";
+  if (normalized === "guarded") return "accent";
+  if (normalized === "elevated") return "warn";
+  if (normalized === "high") return "bad";
+  return "neutral";
 }
 
 function StatusPill({ value }) {
@@ -611,6 +671,13 @@ function HomePage({ lastAgentId, onboardingState }) {
               </div>
               <ArrowUpRight size={16} />
             </a>
+            <a className="product-link-card" href="/agents">
+              <div>
+                <strong>Browse Agents</strong>
+                <span>Compare public workers and open a stable profile page before you route work.</span>
+              </div>
+              <ArrowUpRight size={16} />
+            </a>
             <a className="product-link-card" href="/developers">
               <div>
                 <strong>Developer Toolkit</strong>
@@ -707,6 +774,513 @@ function LaunchTaskCard({ task }) {
         ))}
       </div>
     </article>
+  );
+}
+
+function AgentDiscoveryCard({ result }) {
+  const agentCard = result?.agentCard ?? null;
+  if (!agentCard) return null;
+  const reputation = result?.reputation ?? null;
+  const riskTier = reputation?.riskTier ?? result?.riskTier ?? null;
+  const riskTone = toneForRiskTier(riskTier);
+  const badges = [...(agentCard.capabilities ?? []).slice(0, 3), ...(agentCard.tags ?? []).slice(0, 2)];
+
+  return (
+    <article className="product-card product-agent-card">
+      <div className="product-task-head">
+        <div>
+          <p>{agentCard.agentId}</p>
+          <h3>{agentCard.displayName ?? agentCard.agentId}</h3>
+        </div>
+        {riskTier ? <span className={`product-status-pill tone-${riskTone}`}>{titleCaseState(riskTier)}</span> : null}
+      </div>
+      <p className="product-agent-description">{agentCard.description ?? "No public description yet."}</p>
+      {badges.length > 0 ? (
+        <div className="product-badge-row">
+          {badges.map((badge) => (
+            <span key={`${agentCard.agentId}_${badge}`} className="product-badge">{badge}</span>
+          ))}
+        </div>
+      ) : null}
+      <div className="product-detail-meta">
+        <div>
+          <strong>Runtime</strong>
+          <span>{agentCard.host?.runtime ?? "runtime n/a"}</span>
+        </div>
+        <div>
+          <strong>Endpoint</strong>
+          <span>{formatEndpointHost(agentCard.host?.endpoint)}</span>
+        </div>
+        <div>
+          <strong>Price</strong>
+          <span>
+            {agentCard.priceHint?.amountCents
+              ? formatCurrency(agentCard.priceHint.amountCents, agentCard.priceHint.currency)
+              : "No public price"}
+          </span>
+        </div>
+        <div>
+          <strong>Trust</strong>
+          <span>{reputation ? `${reputation.trustScore}/100` : "Not requested"}</span>
+        </div>
+      </div>
+      <div className="product-actions">
+        <a className="product-button product-button-solid" href={`/agents/${encodeURIComponent(agentCard.agentId)}`}>
+          Open profile
+        </a>
+        {agentCard.host?.endpoint ? (
+          <a className="product-button product-button-ghost" href={agentCard.host.endpoint} target="_blank" rel="noreferrer">
+            Open endpoint
+          </a>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function AgentsPage({ runtime }) {
+  const [filters, setFilters] = useState({
+    capability: "",
+    runtime: "",
+    minTrustScore: "",
+    riskTier: ""
+  });
+  const [selectedPresetId, setSelectedPresetId] = useState(agentBrowsePresets[0].id);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [busyState, setBusyState] = useState("loading");
+  const [statusMessage, setStatusMessage] = useState("Loading public agents from the network...");
+  const [discovery, setDiscovery] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setBusyState("loading");
+      try {
+        const query = new URLSearchParams({
+          visibility: "public",
+          status: "active",
+          includeReputation: "true",
+          reputationVersion: "v2",
+          reputationWindow: "30d",
+          limit: "24",
+          offset: "0"
+        });
+        if (filters.capability.trim()) query.set("capability", filters.capability.trim());
+        if (filters.runtime.trim()) query.set("runtime", filters.runtime.trim());
+        if (filters.minTrustScore.trim()) query.set("minTrustScore", filters.minTrustScore.trim());
+        if (filters.riskTier.trim()) query.set("riskTier", filters.riskTier.trim());
+
+        const out = await requestJson({
+          baseUrl: runtime.baseUrl,
+          pathname: `/public/agent-cards/discover?${query.toString()}`,
+          method: "GET",
+          headers: buildPublicHeaders(runtime)
+        });
+        if (cancelled) return;
+        startTransition(() => {
+          setDiscovery(out);
+        });
+        setStatusMessage(`${out?.total ?? 0} public agent${out?.total === 1 ? "" : "s"} loaded.`);
+      } catch (error) {
+        if (cancelled) return;
+        startTransition(() => {
+          setDiscovery(null);
+        });
+        setStatusMessage(`Agent discovery failed: ${error.message}`);
+      } finally {
+        if (!cancelled) setBusyState("");
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.capability, filters.minTrustScore, filters.riskTier, filters.runtime, reloadToken, runtime]);
+
+  function applyPreset(preset) {
+    setSelectedPresetId(preset.id);
+    setFilters((previous) => ({
+      ...previous,
+      capability: preset.capability,
+      runtime: preset.runtime
+    }));
+    setStatusMessage(`${preset.title} selected. Refreshing the public directory.`);
+  }
+
+  const results = Array.isArray(discovery?.results) ? discovery.results : [];
+
+  return (
+    <div className="product-page">
+      <section className="product-page-top">
+        <div>
+          <p className="product-kicker">Public Directory</p>
+          <h1>Browse the public workers already visible on the network.</h1>
+          <p className="product-lead">
+            Compare live public agents by capability, runtime, and trust before you decide where work should go.
+          </p>
+        </div>
+        <div className="product-page-top-actions">
+          <a className="product-button product-button-ghost" href="/network">Ask the Network</a>
+          <a className="product-button product-button-ghost" href="/studio">Publish an agent</a>
+          <button className="product-button product-button-solid" type="button" disabled={busyState !== ""} onClick={() => setReloadToken((value) => value + 1)}>
+            {busyState === "loading" ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </section>
+
+      <section className="product-grid-two">
+        <article className="product-card">
+          <div className="product-section-head compact">
+            <p>Browse Lenses</p>
+            <h2>Start from a category instead of an empty filter form.</h2>
+          </div>
+          <div className="product-option-grid">
+            {agentBrowsePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className={`product-option-card ${selectedPresetId === preset.id ? "active" : ""}`}
+                onClick={() => applyPreset(preset)}
+              >
+                <strong>{preset.title}</strong>
+                <span>{preset.body}</span>
+              </button>
+            ))}
+          </div>
+        </article>
+
+        <article className="product-card">
+          <div className="product-section-head compact">
+            <p>Filters</p>
+            <h2>Trim the list to the workers you actually want to compare.</h2>
+          </div>
+          <div className="product-form-grid">
+            <label>
+              <span>Capability</span>
+              <input
+                value={filters.capability}
+                onChange={(event) => {
+                  setSelectedPresetId("");
+                  setFilters((previous) => ({ ...previous, capability: event.target.value }));
+                }}
+                placeholder="code.generation"
+              />
+            </label>
+            <label>
+              <span>Runtime</span>
+              <input
+                value={filters.runtime}
+                onChange={(event) => {
+                  setSelectedPresetId("");
+                  setFilters((previous) => ({ ...previous, runtime: event.target.value }));
+                }}
+                placeholder="nooterra"
+              />
+            </label>
+            <label>
+              <span>Min trust score</span>
+              <input
+                value={filters.minTrustScore}
+                onChange={(event) => setFilters((previous) => ({ ...previous, minTrustScore: event.target.value }))}
+                inputMode="numeric"
+                placeholder="60"
+              />
+            </label>
+            <label>
+              <span>Risk tier</span>
+              <select
+                value={filters.riskTier}
+                onChange={(event) => setFilters((previous) => ({ ...previous, riskTier: event.target.value }))}
+              >
+                <option value="">any</option>
+                <option value="low">low</option>
+                <option value="guarded">guarded</option>
+                <option value="elevated">elevated</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+          </div>
+          <div className="product-inline-note">{statusMessage}</div>
+        </article>
+      </section>
+
+      <section className="product-section">
+        <div className="product-section-head">
+          <p>Agents</p>
+          <h2>Open a profile before you route work.</h2>
+        </div>
+        {results.length > 0 ? (
+          <div className="product-agent-grid">
+            {results.map((result) => (
+              <AgentDiscoveryCard
+                key={result?.agentCard?.agentId ?? `agent_result_${result?.rank ?? createClientId("agent")}`}
+                result={result}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="product-empty-state">
+            {busyState === "loading"
+              ? "Loading public agents..."
+              : "No public agents matched the current filters. Adjust the filters or refresh to try again."}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AgentProfilePage({ runtime, agentId }) {
+  const [cardBundle, setCardBundle] = useState(null);
+  const [publicSummary, setPublicSummary] = useState(null);
+  const [statusMessage, setStatusMessage] = useState("Loading public agent profile...");
+  const [relationshipNote, setRelationshipNote] = useState("Loading public relationship summary...");
+  const [copyMessage, setCopyMessage] = useState("");
+  const [busyState, setBusyState] = useState("loading");
+
+  useEffect(() => {
+    if (!agentId) return;
+    let cancelled = false;
+
+    async function load() {
+      setBusyState("loading");
+      setRelationshipNote("Loading public relationship summary...");
+      try {
+        const detail = await requestJson({
+          baseUrl: runtime.baseUrl,
+          pathname:
+            `/public/agent-cards/${encodeURIComponent(agentId)}` +
+            "?includeReputation=true&reputationVersion=v2&reputationWindow=30d",
+          method: "GET",
+          headers: buildPublicHeaders(runtime)
+        });
+        if (cancelled) return;
+        startTransition(() => {
+          setCardBundle(detail);
+        });
+        setStatusMessage(`Public profile loaded for ${detail?.agentCard?.displayName ?? agentId}.`);
+
+        try {
+          const summary = await requestJson({
+            baseUrl: runtime.baseUrl,
+            pathname:
+              `/public/agents/${encodeURIComponent(agentId)}/reputation-summary` +
+              "?reputationVersion=v2&reputationWindow=30d&includeRelationships=true&relationshipLimit=5",
+            method: "GET",
+            headers: buildPublicHeaders(runtime)
+          });
+          if (cancelled) return;
+          startTransition(() => {
+            setPublicSummary(summary?.summary ?? null);
+          });
+          setRelationshipNote("Relationship summary is public for this agent.");
+        } catch (error) {
+          if (cancelled) return;
+          startTransition(() => {
+            setPublicSummary(null);
+          });
+          if (error?.code === "PUBLIC_REPUTATION_SUMMARY_DISABLED") {
+            setRelationshipNote("This agent keeps relationship-level reputation private.");
+          } else if (error?.code === "NOT_FOUND") {
+            setRelationshipNote("No public relationship summary is available yet.");
+          } else {
+            setRelationshipNote(`Relationship summary unavailable: ${error.message}`);
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        startTransition(() => {
+          setCardBundle(null);
+          setPublicSummary(null);
+        });
+        setStatusMessage(`Agent profile failed: ${error.message}`);
+        setRelationshipNote("Relationship summary unavailable.");
+      } finally {
+        if (!cancelled) setBusyState("");
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, runtime]);
+
+  async function handleCopyAgentId() {
+    const ok = await copyText(agentId);
+    setCopyMessage(ok ? "Agent ID copied." : "Copy failed.");
+  }
+
+  const agentCard = cardBundle?.agentCard ?? null;
+  const reputation = cardBundle?.reputation ?? null;
+  const publicRelationships = Array.isArray(publicSummary?.relationships) ? publicSummary.relationships : [];
+
+  return (
+    <div className="product-page">
+      <section className="product-page-top">
+        <div>
+          <p className="product-kicker">Agent Profile</p>
+          <h1>{agentCard?.displayName ?? agentId ?? "Public agent"}</h1>
+          <p className="product-lead">
+            {agentCard?.description ?? "Open a stable public page for one agent before you decide where work should go."}
+          </p>
+        </div>
+        <div className="product-page-top-actions">
+          <a className="product-button product-button-ghost" href="/agents">Browse agents</a>
+          <button className="product-button product-button-ghost" type="button" onClick={() => void handleCopyAgentId()}>
+            Copy agent ID
+          </button>
+          {agentCard?.host?.endpoint ? (
+            <a className="product-button product-button-solid" href={agentCard.host.endpoint} target="_blank" rel="noreferrer">
+              Open endpoint
+            </a>
+          ) : null}
+        </div>
+      </section>
+
+      <div className="product-inline-note">{statusMessage}</div>
+      {copyMessage ? <div className="product-inline-note good">{copyMessage}</div> : null}
+
+      {agentCard ? (
+        <>
+          <section className="product-detail-layout">
+            <article className="product-card">
+              <div className="product-section-head compact">
+                <p>Overview</p>
+                <h2>Public card and runtime details.</h2>
+              </div>
+              <div className="product-badge-row">
+                <span className="product-badge">{agentCard.agentId}</span>
+                <span className="product-badge">{agentCard.visibility}</span>
+                <span className="product-badge">{agentCard.host?.runtime ?? "runtime n/a"}</span>
+                {reputation?.riskTier ? (
+                  <span className={`product-status-pill tone-${toneForRiskTier(reputation.riskTier)}`}>
+                    {titleCaseState(reputation.riskTier)}
+                  </span>
+                ) : null}
+              </div>
+              <div className="product-detail-meta">
+                <div>
+                  <strong>Trust score</strong>
+                  <span>{reputation ? `${reputation.trustScore}/100` : "Not requested"}</span>
+                </div>
+                <div>
+                  <strong>Price</strong>
+                  <span>
+                    {agentCard.priceHint?.amountCents
+                      ? formatCurrency(agentCard.priceHint.amountCents, agentCard.priceHint.currency)
+                      : "No public price"}
+                  </span>
+                </div>
+                <div>
+                  <strong>Endpoint</strong>
+                  <span>{formatEndpointHost(agentCard.host?.endpoint)}</span>
+                </div>
+                <div>
+                  <strong>Updated</strong>
+                  <span>{formatDateTime(agentCard.updatedAt)}</span>
+                </div>
+              </div>
+            </article>
+
+            <article className="product-card">
+              <div className="product-section-head compact">
+                <p>Reputation</p>
+                <h2>What the public trust signals say.</h2>
+              </div>
+              <div className="product-metric-grid">
+                <div className="product-metric-card">
+                  <span>Trust</span>
+                  <strong>{reputation?.trustScore ?? 0}</strong>
+                  <small>current discovery score</small>
+                </div>
+                <div className="product-metric-card">
+                  <span>Window</span>
+                  <strong>{reputation?.primaryWindow ?? publicSummary?.reputationWindow ?? "30d"}</strong>
+                  <small>active public frame</small>
+                </div>
+                <div className="product-metric-card">
+                  <span>Events</span>
+                  <strong>{publicSummary?.eventCount ?? 0}</strong>
+                  <small>public reputation events</small>
+                </div>
+                <div className="product-metric-card">
+                  <span>Success</span>
+                  <strong>{formatPercent(publicSummary?.successRate)}</strong>
+                  <small>relationship success rate</small>
+                </div>
+              </div>
+              <div className={`product-inline-note ${publicSummary ? "good" : ""}`}>{relationshipNote}</div>
+            </article>
+          </section>
+
+          <section className="product-grid-two">
+            <article className="product-card">
+              <div className="product-section-head compact">
+                <p>Capabilities</p>
+                <h2>What this agent says it can do.</h2>
+              </div>
+              {(agentCard.capabilities ?? []).length > 0 ? (
+                <div className="product-badge-row">
+                  {agentCard.capabilities.map((capability) => (
+                    <span key={capability} className="product-badge">{capability}</span>
+                  ))}
+                </div>
+              ) : (
+                <div className="product-empty-state">No public capabilities listed.</div>
+              )}
+              {(agentCard.tags ?? []).length > 0 ? (
+                <>
+                  <div className="product-section-head compact">
+                    <p>Tags</p>
+                    <h2>How the publisher grouped this worker.</h2>
+                  </div>
+                  <div className="product-badge-row">
+                    {agentCard.tags.map((tag) => (
+                      <span key={tag} className="product-badge">{tag}</span>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </article>
+
+            <article className="product-card">
+              <div className="product-section-head compact">
+                <p>Relationships</p>
+                <h2>Public counterparties, if this agent opted in.</h2>
+              </div>
+              {publicRelationships.length > 0 ? (
+                <div className="product-step-list">
+                  {publicRelationships.map((row) => (
+                    <div key={row.counterpartyAgentId} className="product-step-item">
+                      <div className="product-step-copy">
+                        <strong>{row.counterpartyAgentId}</strong>
+                        <span>
+                          Worked together {row.workedWithCount} times. Success {formatPercent(row.successRate)}. Disputes {formatPercent(row.disputeRate)}.
+                        </span>
+                      </div>
+                      <span className="product-status-pill tone-accent">
+                        {row.lastInteractionAt ? formatDateTime(row.lastInteractionAt) : "No recent date"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="product-empty-state">{relationshipNote}</div>
+              )}
+            </article>
+          </section>
+        </>
+      ) : (
+        <div className="product-empty-state">
+          {busyState === "loading"
+            ? "Loading public agent profile..."
+            : "This public agent profile could not be loaded. It may not exist, may not be public, or the agent id may be ambiguous across tenants."}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2429,6 +3003,7 @@ function DeveloperPage({ runtime, onboardingState, lastAgentId }) {
         </div>
         <div className="product-home-links">
           <a href={docsLinks.quickstart}>Quickstart</a>
+          <a href="/agents">Browse agents</a>
           <a href="/onboarding">Workspace onboarding</a>
           <a href="/studio">Open Studio</a>
           <a href={ossLinks.repo}>GitHub</a>
@@ -2438,7 +3013,7 @@ function DeveloperPage({ runtime, onboardingState, lastAgentId }) {
   );
 }
 
-export default function ProductShell({ mode = "home", launchId = null }) {
+export default function ProductShell({ mode = "home", launchId = null, agentId = null }) {
   const [runtime, setRuntime] = useState(() => loadRuntimeConfig());
   const [lastLaunchId, setLastLaunchId] = useState(() => readStoredValue(LAST_LAUNCH_STORAGE_KEY));
   const [lastAgentId, setLastAgentId] = useState(() => readStoredValue(LAST_AGENT_STORAGE_KEY));
@@ -2474,7 +3049,7 @@ export default function ProductShell({ mode = "home", launchId = null }) {
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("debug") === "1";
   const showRuntimeBar =
-    (mode === "network" || mode === "launch" || mode === "studio") && debugMode;
+    (mode === "network" || mode === "launch" || mode === "studio" || mode === "agents" || mode === "agent") && debugMode;
 
   let page = <HomePage lastAgentId={lastAgentId} onboardingState={onboardingState} />;
   if (mode === "onboarding") {
@@ -2499,6 +3074,10 @@ export default function ProductShell({ mode = "home", launchId = null }) {
     );
   } else if (mode === "studio") {
     page = <StudioPage runtime={runtime} onboardingState={onboardingState} onAgentRecorded={setLastAgentId} lastAgentId={lastAgentId} debugMode={debugMode} />;
+  } else if (mode === "agents") {
+    page = <AgentsPage runtime={runtime} />;
+  } else if (mode === "agent") {
+    page = <AgentProfilePage runtime={runtime} agentId={agentId} />;
   } else if (mode === "developers") {
     page = <DeveloperPage runtime={runtime} onboardingState={onboardingState} lastAgentId={lastAgentId} />;
   }
@@ -2521,6 +3100,7 @@ export default function ProductShell({ mode = "home", launchId = null }) {
           <div className="product-nav-links">
             <a className={linkToneForMode(mode, "/")} href="/">Overview</a>
             <a className={linkToneForMode(mode, "/network")} href="/network">Ask the Network</a>
+            <a className={linkToneForMode(mode, "/agents")} href="/agents">Agents</a>
             <a className={linkToneForMode(mode, "/developers")} href="/developers">Developers</a>
             <a className={linkToneForMode(mode, "/studio")} href="/studio">Studio</a>
             <a href={docsLinks.home}>Docs</a>

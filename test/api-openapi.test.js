@@ -19,6 +19,7 @@ test("API: /openapi.json matches openapi/nooterra.openapi.json snapshot", async 
   assert.ok(res.json?.paths?.["/jobs"]);
   assert.ok(res.json?.paths?.["/ops/party-statements"]);
   assert.ok(res.json?.paths?.["/v1/public/agents/resolve"]);
+  assert.ok(res.json?.paths?.["/public/agent-cards/{agentId}"]);
   assert.ok(res.json?.paths?.["/.well-known/agent-locator/{agentId}"]);
 
   const snapshot = JSON.parse(fs.readFileSync("openapi/nooterra.openapi.json", "utf8"));
@@ -29,8 +30,10 @@ test("API: /openapi.json matches openapi/nooterra.openapi.json snapshot", async 
   const responseComparable = JSON.parse(JSON.stringify(res.json));
   const snapshotComparable = JSON.parse(JSON.stringify(snapshot));
   delete responseComparable?.paths?.["/v1/public/agents/resolve"];
+  delete responseComparable?.paths?.["/public/agent-cards/{agentId}"];
   delete responseComparable?.paths?.["/.well-known/agent-locator/{agentId}"];
   delete snapshotComparable?.paths?.["/v1/public/agents/resolve"];
+  delete snapshotComparable?.paths?.["/public/agent-cards/{agentId}"];
   delete snapshotComparable?.paths?.["/.well-known/agent-locator/{agentId}"];
   const responseDigest = createHash("sha256").update(JSON.stringify(responseComparable)).digest("hex");
   const snapshotDigest = createHash("sha256").update(JSON.stringify(snapshotComparable)).digest("hex");
@@ -84,6 +87,13 @@ test("API: agent locator OpenAPI contracts include resolve and well-known paths"
   const resolveAgentQuery = resolveParams.find((row) => row?.in === "query" && row?.name === "agent");
   assert.ok(resolveAgentQuery, "missing agent query parameter for /v1/public/agents/resolve");
   assert.equal(resolveAgentQuery?.required, true);
+
+  const publicCardRoute = res.json?.paths?.["/public/agent-cards/{agentId}"]?.get ?? null;
+  assert.ok(publicCardRoute, "missing GET /public/agent-cards/{agentId}");
+  const publicCardParams = publicCardRoute.parameters ?? [];
+  const publicCardPathParam = publicCardParams.find((row) => row?.in === "path" && row?.name === "agentId");
+  assert.ok(publicCardPathParam, "missing agentId path parameter for /public/agent-cards/{agentId}");
+  assert.equal(publicCardPathParam?.required, true);
 
   const wellKnownRoute = res.json?.paths?.["/.well-known/agent-locator/{agentId}"]?.get ?? null;
   assert.ok(wellKnownRoute, "missing GET /.well-known/agent-locator/{agentId}");

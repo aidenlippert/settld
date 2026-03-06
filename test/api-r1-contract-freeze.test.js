@@ -64,6 +64,7 @@ test("R1 API contract freeze: required operations remain published", () => {
   assertOperation(spec, "/ops/money-rails/{providerId}/operations/{operationId}", "get", { scopes: ["finance_read"] });
   assertOperation(spec, "/ops/money-rails/{providerId}/operations/{operationId}/cancel", "post", { scopes: ["finance_write"] });
   assertOperation(spec, "/x402/gate/authorize-payment", "post");
+  assertOperation(spec, "/public/agent-cards/{agentId}", "get");
 });
 
 test("R1 API contract freeze: agent-card discovery responses are schema-versioned", () => {

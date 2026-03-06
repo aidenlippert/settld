@@ -33805,6 +33805,7 @@ export function createApi({
     if (m === "GET" && /^\/router\/launches\/[^/]+\/status$/.test(p)) return "/router/launches/:launchId/status";
     if (m === "GET" && p === "/public/agent-cards/discover") return "/public/agent-cards/discover";
     if (m === "GET" && p === "/public/agent-cards/stream") return "/public/agent-cards/stream";
+    if (/^\/public\/agent-cards\/[^/]+$/.test(p)) return "/public/agent-cards/:agentId";
     if (m === "GET" && p === "/v1/public/agents/resolve") return "/v1/public/agents/resolve";
     if (/^\/\.well-known\/agent-locator\/[^/]+$/.test(p)) return "/.well-known/agent-locator/:agentId";
     if (m === "POST" && p === "/sessions") return "/sessions";
@@ -34720,6 +34721,7 @@ export function createApi({
           (req.method === "GET" && path === "/capabilities") ||
           (req.method === "GET" && path === "/public/agent-cards/discover") ||
           (req.method === "GET" && path === "/public/agent-cards/stream") ||
+          (req.method === "GET" && /^\/public\/agent-cards\/[^/]+$/.test(path)) ||
           (req.method === "GET" && path === "/v1/public/agents/resolve") ||
           (req.method === "GET" && /^\/public\/agents\/[^/]+\/reputation-summary$/.test(path)) ||
           (req.method === "GET" && /^\/\.well-known\/agent-locator\/[^/]+$/.test(path)) ||
@@ -61406,6 +61408,60 @@ export function createApi({
 
       {
         const parts = path.split("/").filter(Boolean);
+        if (req.method === "GET" && parts[0] === "public" && parts[1] === "agent-cards" && parts[2] && parts.length === 3) {
+          const targetAgentId = parts[2];
+          const defaultAsOf = nowIso();
+          let asOf = defaultAsOf;
+          let includeReputation = true;
+          let reputationVersion = "v2";
+          let reputationWindow = AGENT_REPUTATION_WINDOW.THIRTY_DAYS;
+          try {
+            asOf = parseAsOfDateTime(url.searchParams.get("asOf"), { defaultValue: defaultAsOf, fieldName: "asOf" });
+            includeReputation = parseBooleanQueryValue(url.searchParams.get("includeReputation"), {
+              defaultValue: true,
+              name: "includeReputation"
+            });
+            reputationVersion = parseReputationVersion(url.searchParams.get("reputationVersion") ?? "v2");
+            reputationWindow = parseReputationWindow(url.searchParams.get("reputationWindow") ?? AGENT_REPUTATION_WINDOW.THIRTY_DAYS);
+          } catch (err) {
+            return sendError(res, 400, "invalid public agent card query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          let resolvedPublicAgent = null;
+          try {
+            resolvedPublicAgent = await resolvePublicAgentCardByAgentId({ agentId: targetAgentId, status: AGENT_CARD_STATUS.ACTIVE });
+          } catch (err) {
+            return sendError(res, 501, "public agent cards are not supported for this store", { message: err?.message }, { code: "NOT_IMPLEMENTED" });
+          }
+          if (!resolvedPublicAgent?.ok) {
+            if (resolvedPublicAgent?.code === "PUBLIC_AGENT_AMBIGUOUS") {
+              return sendError(
+                res,
+                409,
+                "public agent card is ambiguous for this agent id",
+                resolvedPublicAgent?.details ?? null,
+                { code: "PUBLIC_AGENT_AMBIGUOUS" }
+              );
+            }
+            return sendError(res, 404, "public agent not found", null, { code: "NOT_FOUND" });
+          }
+
+          const agentCard = resolvedPublicAgent.card;
+          if (!includeReputation) {
+            return sendJson(res, 200, { ok: true, agentCard });
+          }
+
+          const publicTenantId = normalizeTenant(agentCard.tenantId ?? DEFAULT_TENANT_ID);
+          const reputation = await computeAgentReputationSnapshotVersioned({
+            tenantId: publicTenantId,
+            agentId: targetAgentId,
+            at: asOf,
+            reputationVersion,
+            reputationWindow
+          });
+          return sendJson(res, 200, { ok: true, agentCard, reputation });
+        }
+
         if (req.method === "GET" && parts[0] === "public" && parts[1] === "agents" && parts[2] && parts[3] === "reputation-summary" && parts.length === 4) {
           const targetAgentId = parts[2];
           const defaultAsOf = nowIso();

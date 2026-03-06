@@ -14,29 +14,38 @@ function ExternalRedirect({ href }) {
 }
 
 function getRouteMode() {
-  if (typeof window === "undefined") return { mode: "home", launchId: null };
+  if (typeof window === "undefined") return { mode: "home", launchId: null, agentId: null };
   const rawPath = window.location.pathname;
   const path = rawPath.length > 1 && rawPath.endsWith("/") ? rawPath.slice(0, -1) : rawPath;
 
-  if (path === "/operator") return { mode: "operator", launchId: null };
-  if (path === "/network" || path === "/app") return { mode: "network", launchId: null };
-  if (path === "/onboarding" || path === "/login") return { mode: "onboarding", launchId: null };
-  if (path === "/studio") return { mode: "studio", launchId: null };
-  if (path === "/developers") return { mode: "developers", launchId: null };
-  if (path === "/docs") return { mode: "docs", launchId: null };
-  if (path === "/docs/quickstart") return { mode: "docs_quickstart", launchId: null };
-  if (path === "/docs/architecture") return { mode: "docs_architecture", launchId: null };
-  if (path === "/docs/integrations") return { mode: "docs_integrations", launchId: null };
-  if (path === "/docs/api") return { mode: "docs_api", launchId: null };
-  if (path === "/docs/security") return { mode: "docs_security", launchId: null };
-  if (path === "/docs/ops") return { mode: "docs_ops", launchId: null };
+  if (path === "/operator") return { mode: "operator", launchId: null, agentId: null };
+  if (path === "/network" || path === "/app") return { mode: "network", launchId: null, agentId: null };
+  if (path === "/agents") return { mode: "agents", launchId: null, agentId: null };
+  if (path === "/onboarding" || path === "/login") return { mode: "onboarding", launchId: null, agentId: null };
+  if (path === "/studio") return { mode: "studio", launchId: null, agentId: null };
+  if (path === "/developers") return { mode: "developers", launchId: null, agentId: null };
+  if (path === "/docs") return { mode: "docs", launchId: null, agentId: null };
+  if (path === "/docs/quickstart") return { mode: "docs_quickstart", launchId: null, agentId: null };
+  if (path === "/docs/architecture") return { mode: "docs_architecture", launchId: null, agentId: null };
+  if (path === "/docs/integrations") return { mode: "docs_integrations", launchId: null, agentId: null };
+  if (path === "/docs/api") return { mode: "docs_api", launchId: null, agentId: null };
+  if (path === "/docs/security") return { mode: "docs_security", launchId: null, agentId: null };
+  if (path === "/docs/ops") return { mode: "docs_ops", launchId: null, agentId: null };
   if (path.startsWith("/launch/")) {
     return {
       mode: "launch",
-      launchId: decodeURIComponent(path.slice("/launch/".length))
+      launchId: decodeURIComponent(path.slice("/launch/".length)),
+      agentId: null
     };
   }
-  return { mode: "home", launchId: null };
+  if (path.startsWith("/agents/")) {
+    return {
+      mode: "agent",
+      launchId: null,
+      agentId: decodeURIComponent(path.slice("/agents/".length))
+    };
+  }
+  return { mode: "home", launchId: null, agentId: null };
 }
 
 export default function App() {
@@ -49,5 +58,5 @@ export default function App() {
   if (route.mode === "docs_api") return <ExternalRedirect href={docsLinks.api} />;
   if (route.mode === "docs_security") return <ExternalRedirect href={docsLinks.security} />;
   if (route.mode === "docs_ops") return <ExternalRedirect href={docsLinks.ops} />;
-  return <ProductShell mode={route.mode} launchId={route.launchId} />;
+  return <ProductShell mode={route.mode} launchId={route.launchId} agentId={route.agentId} />;
 }

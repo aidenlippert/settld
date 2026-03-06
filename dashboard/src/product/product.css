@@ -490,6 +490,7 @@ textarea {
 .product-hero-panel-grid,
 .product-access-grid,
 .product-ide-grid,
+.product-agent-grid,
 .product-task-grid,
 .product-code-grid,
 .product-metric-grid {
@@ -536,6 +537,12 @@ textarea {
   display: grid;
   gap: 1.15rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-detail-layout {
+  display: grid;
+  gap: 1.15rem;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
 }
 
 .product-section {
@@ -781,6 +788,44 @@ textarea {
   font-size: 2rem;
   line-height: 1;
   color: var(--product-accent);
+}
+
+.product-agent-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-agent-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.product-agent-description {
+  margin: 0;
+  color: var(--product-ink);
+  line-height: 1.62;
+}
+
+.product-detail-meta {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-detail-meta div {
+  display: grid;
+  gap: 0.24rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: var(--product-radius-md);
+  border: 1px solid var(--product-line);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.product-detail-meta strong {
+  color: var(--product-ink-strong);
+}
+
+.product-detail-meta span {
+  color: var(--product-ink);
 }
 
 .product-task-card {
@@ -1034,8 +1079,10 @@ textarea {
   .product-runtime,
   .product-hero,
   .product-grid-two,
+  .product-detail-layout,
   .product-code-grid,
-  .product-metric-grid {
+  .product-metric-grid,
+  .product-agent-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1064,6 +1111,10 @@ textarea {
   }
 
   .product-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .product-detail-meta {
     grid-template-columns: 1fr;
   }
 

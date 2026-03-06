@@ -8555,6 +8555,44 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
+      "/public/agent-cards/{agentId}": {
+        get: {
+          summary: "Get a public agent card by agentId",
+          parameters: [
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "agentId", in: "path", required: true, schema: { type: "string" } },
+            { name: "includeReputation", in: "query", required: false, schema: { type: "boolean" } },
+            { name: "reputationVersion", in: "query", required: false, schema: { type: "string", enum: ["v1", "v2"] } },
+            { name: "reputationWindow", in: "query", required: false, schema: { type: "string", enum: ["7d", "30d", "allTime"] } },
+            { name: "asOf", in: "query", required: false, schema: { type: "string", format: "date-time" } }
+          ],
+          security: [],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["ok", "agentCard"],
+                    properties: {
+                      ok: { type: "boolean" },
+                      agentCard: AgentCardV1,
+                      reputation: { ...AgentReputationAny, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
+            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
       "/public/agent-cards/discover": {
         get: {
           summary: "Discover public agent cards across tenants",

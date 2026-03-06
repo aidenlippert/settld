@@ -38,6 +38,7 @@ function isAuthExempt({ method, path }) {
     (method === "GET" && pathname === "/health") ||
     (method === "GET" && pathname === "/healthz") ||
     (method === "GET" && pathname === "/public/agent-cards/discover") ||
+    (method === "GET" && /^\/public\/agent-cards\/[^/]+$/.test(pathname)) ||
     (method === "POST" && pathname === "/ingest/proxy") ||
     (method === "POST" && pathname === "/exports/ack")
   );
