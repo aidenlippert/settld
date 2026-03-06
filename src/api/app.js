@@ -535,7 +535,8 @@ export function createApi({
   agentCardPublicRequireCapabilityAttestation = null,
   agentCardPublicAttestationMinLevel = null,
   agentCardPublicAttestationIssuerAgentId = null,
-  agentCardPublicAbuseSuppressionThreshold = null
+  agentCardPublicAbuseSuppressionThreshold = null,
+  publicBaseUrl = null
 } = {}) {
   const apiStartedAtMs = Date.now();
   const apiStartedAtIso = new Date(apiStartedAtMs).toISOString();
@@ -2555,6 +2556,15 @@ export function createApi({
       throw new TypeError("PROXY_AGENT_CARD_PUBLIC_ABUSE_SUPPRESSION_THRESHOLD must be a non-negative safe integer");
     }
     return n;
+  })();
+  const publicBaseUrlValue = (() => {
+    const raw =
+      publicBaseUrl ??
+      (typeof process !== "undefined" && process.env
+        ? process.env.PROXY_PUBLIC_BASE_URL ?? process.env.PUBLIC_BASE_URL ?? null
+        : null);
+    if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+    return normalizeOptionalAbsoluteUrl(String(raw).trim(), { fieldName: "PROXY_PUBLIC_BASE_URL" })?.replace(/\/+$/, "") ?? null;
   })();
 
   const ingestRecordsRetentionMaxDays = parseNonNegativeIntEnv("PROXY_RETENTION_INGEST_RECORDS_MAX_DAYS", 0);
@@ -26190,6 +26200,7 @@ export function createApi({
   }
 
   function deriveRequestBaseUrl(req) {
+    if (publicBaseUrlValue) return publicBaseUrlValue;
     const forwardedProtoRaw = req?.headers?.["x-forwarded-proto"] ?? null;
     const forwardedHostRaw = req?.headers?.["x-forwarded-host"] ?? req?.headers?.host ?? null;
     const proto = String(Array.isArray(forwardedProtoRaw) ? forwardedProtoRaw[0] : forwardedProtoRaw ?? "")

@@ -91,3 +91,28 @@ test("API e2e: ops tenant bootstrap validates scopes", async () => {
   assert.equal(invalid.statusCode, 400);
   assert.equal(invalid.json?.code, "SCHEMA_INVALID");
 });
+
+test("API e2e: ops tenant bootstrap prefers configured public base URL", async () => {
+  const api = createApi({
+    opsTokens: ["tok_opsw:ops_write"].join(";"),
+    publicBaseUrl: "https://api.nooterra.ai"
+  });
+
+  const tenantId = "tenant_bootstrap_public_base";
+  const bootstrap = await request(api, {
+    method: "POST",
+    path: "/ops/tenants/bootstrap",
+    headers: {
+      "x-proxy-tenant-id": tenantId,
+      "x-proxy-ops-token": "tok_opsw",
+      host: "nooterra-api.railway.internal:3000",
+      "x-forwarded-proto": "http",
+      "x-forwarded-host": "nooterra-api.railway.internal:3000"
+    },
+    body: {}
+  });
+  assert.equal(bootstrap.statusCode, 201, bootstrap.body);
+  assert.equal(bootstrap.json?.bootstrap?.apiBaseUrl, "https://api.nooterra.ai");
+  assert.equal(bootstrap.json?.bootstrap?.env?.NOOTERRA_BASE_URL, "https://api.nooterra.ai");
+  assert.equal(bootstrap.json?.bootstrap?.next?.healthcheckCurl, "curl -sS https://api.nooterra.ai/healthz | jq");
+});

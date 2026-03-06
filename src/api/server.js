@@ -2,6 +2,7 @@ import http from "node:http";
 import { createApi } from "./app.js";
 import { createStore } from "./store.js";
 import { createPgStore } from "../db/store-pg.js";
+import { applyCorsHeaders } from "./cors.js";
 import { logger } from "../core/log.js";
 import { configForLog, loadConfig } from "../core/config.js";
 
@@ -27,38 +28,6 @@ const corsAllowOrigins = new Set(
     .map((row) => row.trim())
     .filter((row) => row !== "")
 );
-const DEV_CORS_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
-
-function resolveCorsOrigin(originHeader) {
-  if (typeof originHeader !== "string" || originHeader.trim() === "") return null;
-  const origin = originHeader.trim();
-  if (corsAllowOrigins.has("*")) return "*";
-  if (corsAllowOrigins.has(origin)) return origin;
-  if (DEV_CORS_ORIGIN_RE.test(origin)) return origin;
-  return null;
-}
-
-function applyCorsHeaders(req, res) {
-  const allowOrigin = resolveCorsOrigin(req.headers?.origin);
-  if (!allowOrigin) return false;
-  res.setHeader("access-control-allow-origin", allowOrigin);
-  res.setHeader("vary", "origin");
-  res.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  res.setHeader(
-    "access-control-allow-headers",
-    [
-      "authorization",
-      "content-type",
-      "idempotency-key",
-      "x-proxy-tenant-id",
-      "x-proxy-ops-token",
-      "x-request-id",
-      "x-nooterra-protocol"
-    ].join(", ")
-  );
-  res.setHeader("access-control-max-age", "600");
-  return true;
-}
 
 let store;
 if (cfg.store.mode === "pg") {
@@ -75,7 +44,7 @@ const { handle } = api;
 
 const port = cfg.api.port;
 const server = http.createServer((req, res) => {
-  applyCorsHeaders(req, res);
+  applyCorsHeaders({ req, res, corsAllowOrigins });
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     res.end();
