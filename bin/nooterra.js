@@ -23,6 +23,9 @@ function usage() {
   console.error("  nooterra closepack verify <path.zip> [--json-out <path.json>]");
   console.error("  nooterra x402 receipt verify <receipt.json|-> [--strict] [--format json|text] [--json-out <path>]");
   console.error(
+    "  nooterra tui [--json] [--non-interactive] [--base-url <url>] [--tenant-id <id>] [--session-id <id>] [--work-order-id <id>] [--agent-ref <ref>] [--protocol <version>] [--ops-token <token>] [--api-key <key>]"
+  );
+  console.error(
     "  nooterra wallet status [--base-url <url>] [--tenant-id <id>] [--session-file <path>] [--cookie <cookie>] [--magic-link-api-key <key>] [--format text|json] [--json-out <path>]"
   );
   console.error(
@@ -32,9 +35,17 @@ function usage() {
     "  nooterra wallet balance [--watch] [--min-usdc <amount>] [--interval-seconds <n>] [--timeout-seconds <n>] [--base-url <url>] [--tenant-id <id>] [--session-file <path>] [--cookie <cookie>] [--magic-link-api-key <key>] [--format text|json] [--json-out <path>]"
   );
   console.error("  nooterra agent resolve <agentRef> [--json] [--base-url <url>] [--protocol <version>]");
-  console.error("  nooterra agent init <agentId> [--out <path>] [--force] [--json]");
-  console.error("  nooterra agent dev [--project <path>] [--json]");
-  console.error("  nooterra agent publish [--project <path>] [--registry <path>] [--json]");
+  console.error("  nooterra agent init <name> [--capability <cap>] [--description <text>] [--dir <path>] [--force]");
+  console.error("  nooterra agent run [--file <agent.js>] [--policy <policy.yaml>] [--agent-id <id>] [--base-url <url>] [--tenant-id <id>] [--protocol <v>] [--poll-ms <n>]");
+  console.error("  nooterra agent status --agent-id <id> [--base-url <url>] [--tenant-id <id>] [--protocol <v>]");
+  console.error("  nooterra agent logs --session-id <id> [--base-url <url>] [--tenant-id <id>] [--protocol <v>] [--max-events <n>] [--timeout-ms <n>]");
+  console.error(
+    "  nooterra agent upgrade [--pid-file <path>] [--no-reload] [--status <status>] [--agent-id <id>] [--reason-code <code>] [--reason-message <text>] [--base-url <url>] [--tenant-id <id>] [--protocol <v>]"
+  );
+  console.error(
+    "  nooterra agent decommission [--agent-id <id>] [--reason-code <code>] [--reason-message <text>] [--wind-down] [--no-stop] [--pid-file <path>] [--base-url <url>] [--tenant-id <id>] [--protocol <v>]"
+  );
+  console.error("  nooterra observe session --session-id <id> [--base-url <url>] [--tenant-id <id>] [--protocol <v>] [--max-events <n>] [--timeout-ms <n>]");
   console.error("  nooterra profile list [--format json|text] [--json-out <path>]");
   console.error("  nooterra profile init <profile-id> [--out <path>] [--force] [--format json|text] [--json-out <path>]");
   console.error(
@@ -288,8 +299,20 @@ function main() {
     return runNodeScript("scripts/wallet/cli.mjs", argv.slice(1));
   }
 
+  if (cmd === "tui") {
+    return runNodeScript("scripts/tui/cli.mjs", argv.slice(1));
+  }
+
   if (cmd === "agent") {
+    const sub = argv[1] ? String(argv[1]) : "";
+    if (sub === "init" || sub === "run" || sub === "status" || sub === "logs" || sub === "upgrade" || sub === "decommission") {
+      return runNodeScript("bin/agentverse-cli.js", ["agent", ...argv.slice(1)]);
+    }
     return runNodeScript("scripts/agent/cli.mjs", argv.slice(1));
+  }
+
+  if (cmd === "observe") {
+    return runNodeScript("bin/agentverse-cli.js", ["observe", ...argv.slice(1)]);
   }
 
   if (cmd === "profile") {

@@ -1634,6 +1634,11 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(out.json?.schemaVersion, "MagicLinkWalletFunding.v1");
     assert.equal(out.json?.tenantId, tenantId);
     assert.equal(out.json?.recommendedOptionId, "card_bank");
+    assert.equal(out.json?.fundingStatus?.schemaVersion, "MagicLinkWalletFundingStatus.v1");
+    assert.equal(out.json?.fundingStatus?.state, "prepared");
+    assert.equal(out.json?.fundingStatus?.method, null);
+    assert.equal(out.json?.fundingStatus?.optionAvailability?.transfer, true);
+    assert.equal(out.json?.fundingStatus?.optionAvailability?.card, true);
 
     const options = Array.isArray(out.json?.options) ? out.json.options : [];
     const cardBank = options.find((row) => row?.optionId === "card_bank");
@@ -1674,6 +1679,9 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(card.json?.ok, true);
     assert.equal(card.json?.session?.type, "hosted");
     assert.equal(card.json?.session?.method, "card");
+    assert.equal(card.json?.fundingStatus?.state, "prepared");
+    assert.equal(card.json?.fundingStatus?.method, "card");
+    assert.equal(card.json?.fundingStatus?.session?.type, "hosted");
     assert.match(String(card.json?.session?.url ?? ""), /defaultPaymentMethod=creditcard/);
     assert.match(String(card.json?.session?.url ?? ""), /networkWallets=base_sepolia%3A0x0000000000000000000000000000000000000a11/);
 
@@ -1690,6 +1698,178 @@ test("magic-link app (no listen): strict/auto, idempotency, downloads, revoke", 
     assert.equal(transfer.json?.session?.type, "transfer");
     assert.equal(transfer.json?.session?.address, "0x0000000000000000000000000000000000000a11");
     assert.equal(transfer.json?.session?.token, "USDC");
+    assert.equal(transfer.json?.fundingStatus?.state, "prepared");
+    assert.equal(transfer.json?.fundingStatus?.method, "transfer");
+    assert.equal(transfer.json?.fundingStatus?.session?.type, "transfer");
+  });
+
+  await t.test("tenant onboarding wallet bootstrap/funding: idempotency replay prevents duplicate provider side effects", async () => {
+    const tenantId = "tenant_wallet_idempotency_replay";
+    await createTenant({
+      tenantId,
+      name: "Wallet Idempotency Replay Tenant",
+      contactEmail: "ops+wallet-idempotency@example.com",
+      billingEmail: "billing+wallet-idempotency@example.com"
+    });
+
+    const bootstrapBefore = circleBootstrapRequests.length;
+    const bootstrapFirst = await postTenantWalletBootstrap({
+      tenantId,
+      headers: { "x-idempotency-key": "idem_wallet_bootstrap_replay_1" },
+      body: {
+        provider: "circle",
+        circle: {
+          mode: "sandbox",
+          faucet: false
+        }
+      }
+    });
+    assert.equal(bootstrapFirst.statusCode, 201, JSON.stringify(bootstrapFirst.json));
+    assert.equal(bootstrapFirst.json?.ok, true);
+    assert.equal(bootstrapFirst.json?.idempotency?.reused, false);
+    const bootstrapAfterFirst = circleBootstrapRequests.length;
+    assert.ok(bootstrapAfterFirst > bootstrapBefore);
+
+    const bootstrapReplay = await postTenantWalletBootstrap({
+      tenantId,
+      headers: { "x-idempotency-key": "idem_wallet_bootstrap_replay_1" },
+      body: {
+        provider: "circle",
+        circle: {
+          mode: "sandbox",
+          faucet: false
+        }
+      }
+    });
+    assert.equal(bootstrapReplay.statusCode, 201, JSON.stringify(bootstrapReplay.json));
+    assert.equal(bootstrapReplay.json?.ok, true);
+    assert.equal(bootstrapReplay.json?.idempotency?.reused, true);
+    assert.equal(circleBootstrapRequests.length, bootstrapAfterFirst);
+
+    const faucetBefore = circleBootstrapRequests.filter((row) => row.method === "POST" && row.pathname === "/v1/faucet/drips").length;
+    const fundingFirst = await postTenantWalletFunding({
+      tenantId,
+      headers: { "x-idempotency-key": "idem_wallet_funding_replay_1" },
+      body: {
+        provider: "circle",
+        method: "faucet",
+        circle: { mode: "sandbox" }
+      }
+    });
+    assert.equal(fundingFirst.statusCode, 200, JSON.stringify(fundingFirst.json));
+    assert.equal(fundingFirst.json?.ok, true);
+    assert.equal(fundingFirst.json?.idempotency?.reused, false);
+    assert.equal(fundingFirst.json?.session?.type, "faucet");
+    assert.equal(fundingFirst.json?.fundingStatus?.state, "attempted");
+    assert.ok(Number.isInteger(fundingFirst.json?.fundingStatus?.faucet?.total));
+    const faucetAfterFirst = circleBootstrapRequests.filter((row) => row.method === "POST" && row.pathname === "/v1/faucet/drips").length;
+    assert.ok(faucetAfterFirst >= faucetBefore + 2);
+
+    const fundingReplay = await postTenantWalletFunding({
+      tenantId,
+      headers: { "x-idempotency-key": "idem_wallet_funding_replay_1" },
+      body: {
+        provider: "circle",
+        method: "faucet",
+        circle: { mode: "sandbox" }
+      }
+    });
+    assert.equal(fundingReplay.statusCode, 200, JSON.stringify(fundingReplay.json));
+    assert.equal(fundingReplay.json?.ok, true);
+    assert.equal(fundingReplay.json?.idempotency?.reused, true);
+    assert.equal(circleBootstrapRequests.filter((row) => row.method === "POST" && row.pathname === "/v1/faucet/drips").length, faucetAfterFirst);
+    assert.deepEqual(fundingReplay.json?.session?.results, fundingFirst.json?.session?.results);
+  });
+
+  await t.test("tenant onboarding wallet bootstrap/funding: failure matrix stays fail-closed with explicit codes", async () => {
+    const tenantId = "tenant_wallet_failure_matrix";
+    await createTenant({
+      tenantId,
+      name: "Wallet Failure Matrix Tenant",
+      contactEmail: "ops+wallet-failure-matrix@example.com",
+      billingEmail: "billing+wallet-failure-matrix@example.com"
+    });
+
+    const invalidMethod = await postTenantWalletFunding({
+      tenantId,
+      body: {
+        provider: "circle",
+        method: "cash",
+        circle: { mode: "sandbox" }
+      }
+    });
+    assert.equal(invalidMethod.statusCode, 400, JSON.stringify(invalidMethod.json));
+    assert.equal(invalidMethod.json?.ok, false);
+    assert.equal(invalidMethod.json?.code, "INVALID_FUNDING_METHOD");
+
+    const restoreNoCircle = applyEnv({ CIRCLE_API_KEY: null });
+    try {
+      const bootstrapProviderMissing = await postTenantWalletBootstrap({
+        tenantId,
+        body: { provider: "circle", circle: { mode: "sandbox" } }
+      });
+      assert.equal(bootstrapProviderMissing.statusCode, 503, JSON.stringify(bootstrapProviderMissing.json));
+      assert.equal(bootstrapProviderMissing.json?.ok, false);
+      assert.equal(bootstrapProviderMissing.json?.code, "WALLET_PROVIDER_NOT_CONFIGURED");
+
+      const fundingProviderMissing = await postTenantWalletFunding({
+        tenantId,
+        body: { provider: "circle", method: "transfer", circle: { mode: "sandbox" } }
+      });
+      assert.equal(fundingProviderMissing.statusCode, 503, JSON.stringify(fundingProviderMissing.json));
+      assert.equal(fundingProviderMissing.json?.ok, false);
+      assert.equal(fundingProviderMissing.json?.code, "WALLET_PROVIDER_NOT_CONFIGURED");
+    } finally {
+      restoreNoCircle();
+    }
+
+    const restoreBadCircle = applyEnv({ CIRCLE_API_KEY: "TEST_API_KEY:bad_credentials" });
+    try {
+      const bootstrapPrepFailure = await postTenantWalletBootstrap({
+        tenantId,
+        body: { provider: "circle", circle: { mode: "sandbox" } }
+      });
+      assert.equal(bootstrapPrepFailure.statusCode, 502, JSON.stringify(bootstrapPrepFailure.json));
+      assert.equal(bootstrapPrepFailure.json?.ok, false);
+      assert.equal(bootstrapPrepFailure.json?.code, "WALLET_BOOTSTRAP_FAILED");
+
+      const fundingPrepFailure = await postTenantWalletFunding({
+        tenantId,
+        body: { provider: "circle", circle: { mode: "sandbox" } }
+      });
+      assert.equal(fundingPrepFailure.statusCode, 502, JSON.stringify(fundingPrepFailure.json));
+      assert.equal(fundingPrepFailure.json?.ok, false);
+      assert.equal(fundingPrepFailure.json?.code, "WALLET_FUNDING_PREP_FAILED");
+    } finally {
+      restoreBadCircle();
+    }
+
+    const originalSpendAddress = circleWalletRows[0]?.address;
+    circleWalletRows[0].address = "";
+    try {
+      const transferPrepFailure = await postTenantWalletFunding({
+        tenantId,
+        body: {
+          provider: "circle",
+          method: "transfer",
+          circle: { mode: "sandbox" }
+        }
+      });
+      assert.equal(transferPrepFailure.statusCode, 502, JSON.stringify(transferPrepFailure.json));
+      assert.equal(transferPrepFailure.json?.ok, false);
+      assert.equal(transferPrepFailure.json?.code, "WALLET_FUNDING_PREP_FAILED");
+    } finally {
+      circleWalletRows[0].address = originalSpendAddress;
+    }
+
+    const invalidIdempotency = await postTenantWalletFunding({
+      tenantId,
+      headers: { "x-idempotency-key": "x".repeat(161) },
+      body: { provider: "circle", method: "card", circle: { mode: "sandbox" } }
+    });
+    assert.equal(invalidIdempotency.statusCode, 400, JSON.stringify(invalidIdempotency.json));
+    assert.equal(invalidIdempotency.json?.ok, false);
+    assert.equal(invalidIdempotency.json?.code, "INVALID_IDEMPOTENCY_KEY");
   });
 
   await t.test("tenant onboarding runtime bootstrap smoke-test: initialize + tools/list", async () => {

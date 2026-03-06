@@ -26,7 +26,7 @@ test("api-sdk-python: stream_session_events parses SSE and sends Last-Event-ID",
 
     if (
       req.method === "GET" &&
-      req.url === "/sessions/sess_py_stream_1/events/stream?eventType=TASK_REQUESTED&sinceEventId=evt_prev_1"
+      req.url === "/sessions/sess_py_stream_1/events/stream?eventType=TASK_REQUESTED&sinceEventId=evt_prev_1&checkpointConsumerId=relay_py_1"
     ) {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
@@ -77,7 +77,7 @@ client = NooterraClient(
 events = []
 for event in client.stream_session_events(
     "sess_py_stream_1",
-    {"eventType": "TASK_REQUESTED", "sinceEventId": "evt_prev_1"},
+    {"eventType": "TASK_REQUESTED", "sinceEventId": "evt_prev_1", "checkpointConsumerId": "relay_py_1"},
     last_event_id="evt_resume_1",
 ):
     events.append(event)
@@ -110,7 +110,10 @@ print(json.dumps({"events": events}))
     });
 
     assert.equal(run.status, 0, `python stream_session_events failed\nstdout:\n${run.stdout}\n\nstderr:\n${run.stderr}`);
-    assert.equal(seen.url, "/sessions/sess_py_stream_1/events/stream?eventType=TASK_REQUESTED&sinceEventId=evt_prev_1");
+    assert.equal(
+      seen.url,
+      "/sessions/sess_py_stream_1/events/stream?eventType=TASK_REQUESTED&sinceEventId=evt_prev_1&checkpointConsumerId=relay_py_1"
+    );
     assert.equal(seen.headers?.accept, "text/event-stream");
     assert.equal(seen.headers?.["last-event-id"], "evt_resume_1");
     assert.equal(seen.headers?.authorization, "Bearer sk_test_py_stream");

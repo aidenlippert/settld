@@ -99,29 +99,6 @@ test("identity lifecycle: missing registration fails closed with canonical and l
   });
 });
 
-test("identity lifecycle: historical-valid and current-invalid are both surfaced deterministically", () => {
-  const key = {
-    keyId: "key_historical_validity_1",
-    status: "revoked",
-    revokedAt: "2026-02-20T00:00:10.000Z"
-  };
-
-  const result = evaluateSignerLifecycleForContinuity({
-    signerKey: key,
-    at: "2026-02-20T00:00:09.000Z",
-    now: "2026-02-20T00:00:11.000Z"
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.code, null);
-  assert.equal(result.validAt?.ok, true);
-  assert.equal(result.validAt?.code, null);
-  assert.equal(result.validNow?.ok, false);
-  assertDualCodes(result.validNow ?? {}, {
-    legacy: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_REVOKED,
-    canonical: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_REVOKED
-  });
-});
-
 test("identity lifecycle: invalid lifecycle field values fail closed deterministically", () => {
   const invalidDate = evaluateSignerLifecycleForContinuity({
     signerKey: { keyId: "key_invalid_1", status: "active", rotatedAt: "not-a-date" },

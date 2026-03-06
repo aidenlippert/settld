@@ -44,10 +44,19 @@ demo/**/output/
 nooterra-debug-*.tar.gz
 nooterra-debug-*.zip
 nooterra-debug-*.sha256
+*.tgz
 
 # Local signing / ops keys
 keys/
 .vercel
+
+# Local assistant scratch files
+\# Code Citations.md
+
+# Local demo runtime scratch files
+demo-agent/.agent-run.log
+demo-agent/.agent-run.pid
+demo-agent/.nooterra/*.pid
 
 # Keep conformance bundle public key fixtures tracked (required by CI conformance cases).
 !conformance/v1/bundles/**/keys/

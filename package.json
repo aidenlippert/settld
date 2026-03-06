@@ -19,6 +19,7 @@
     "NOOTERRA_VERSION",
     "README.md",
     "Dockerfile",
+    "Dockerfile.agentverse",
     "docker-compose.yml",
     "openclaw.plugin.json",
     "openclaw",
@@ -36,7 +37,8 @@
   ],
   "bin": {
     "nooterra": "bin/nooterra.js",
-    "nooterra-mcp": "bin/nooterra-mcp"
+    "nooterra-mcp": "bin/nooterra-mcp",
+    "agentverse": "bin/agentverse-cli.js"
   },
   "openclaw": {
     "extensions": [
@@ -44,7 +46,10 @@
     ]
   },
   "exports": {
-    "./mcp": "./scripts/mcp/nooterra-mcp-server.mjs"
+    "./mcp": "./scripts/mcp/nooterra-mcp-server.mjs",
+    "./agentverse": "./src/agentverse/index.js",
+    "./agentverse/bridge": "./src/agentverse/bridge/index.js",
+    "./agentverse/bridge/*": "./src/agentverse/bridge/*.js"
   },
   "scripts": {
     "preinstall": "node scripts/init/preinstall-node-version.mjs",
@@ -131,11 +136,16 @@
     "test:ops:offline-verification-parity-gate": "node scripts/ci/run-offline-verification-parity-gate.mjs",
     "test:ops:self-serve-gate": "node scripts/ci/run-self-serve-launch-gate.mjs",
     "test:ops:onboarding-policy-slo-gate": "node scripts/ci/run-onboarding-policy-slo-gate.mjs",
+    "test:ops:settlement-latency-budget-gate": "node scripts/ci/run-settlement-latency-budget-gate.mjs",
+    "test:ops:money-rails-degraded-mode": "node scripts/ci/run-money-rails-degraded-mode-gate.mjs",
+    "test:ops:money-rails-degraded-mode:e2e": "node --test test/api-e2e-money-rails-degraded-mode.test.js",
     "test:ops:onboarding-host-success-gate": "node scripts/ci/run-onboarding-host-success-gate.mjs",
     "test:ops:acs-e10-readiness-gate": "node scripts/ci/run-acs-e10-readiness-gate.mjs",
     "test:ops:self-host-topology-bundle-gate": "node scripts/ci/run-self-host-topology-bundle-gate.mjs",
     "test:ops:self-host-upgrade-migration-gate": "node scripts/ci/run-self-host-upgrade-migration-gate.mjs",
     "test:ops:serving-mode-boundary-gate": "node scripts/ci/run-serving-mode-boundary-gate.mjs",
+    "test:ops:agentverse-gate": "node scripts/ci/run-agentverse-gate.mjs",
+    "test:ops:agentverse-live-e2e": "node --test test/agentverse/agent-daemon-live-api.test.js test/agentverse/agent-build-pipeline-smoke.test.js",
     "test:ops:agent-substrate-fast-loop": "node scripts/ci/run-agent-substrate-fast-loop.mjs --bootstrap-local",
     "test:ops:agent-substrate-adversarial-harness": "node scripts/ci/run-agent-substrate-adversarial-harness.mjs",
     "test:ops:agent-substrate-adversarial-harness:prompt-contagion": "node scripts/ci/run-agent-substrate-adversarial-harness.mjs --profile prompt-contagion",
@@ -177,7 +187,11 @@
     "magic-link:migrate-runs-db": "node scripts/magic-link/migrate-run-records-to-db.mjs",
     "release:artifacts": "node scripts/release/build-artifacts.mjs",
     "release:cutover:audit-view": "node scripts/release/build-cutover-audit-view.mjs",
-    "audit:packet": "node scripts/audit/build-audit-packet.mjs"
+    "audit:packet": "node scripts/audit/build-audit-packet.mjs",
+    "version:check": "node scripts/ci/check-version-consistency.mjs",
+    "publish:precheck": "node scripts/publish/prepublish-check.mjs",
+    "publish:tarball": "npm pack",
+    "publish:agentverse": "bash scripts/publish/publish-all.sh"
   },
   "dependencies": {
     "@circle-fin/developer-controlled-wallets": "^10.1.0",

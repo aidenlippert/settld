@@ -1,11 +1,23 @@
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-function readVersionForIndex() {
-  const v = process.env.NOOTERRA_VERSION ?? null;
-  return typeof v === "string" && v.trim() ? v.trim() : "0.0.0-local";
+function readCanonicalReleaseVersion(repoRoot = process.cwd()) {
+  const versionPath = path.join(repoRoot, "NOOTERRA_VERSION");
+  if (!fsSync.existsSync(versionPath)) {
+    throw new Error("NOOTERRA_VERSION file is required to build release artifacts");
+  }
+  const fileVersion = String(fsSync.readFileSync(versionPath, "utf8")).trim();
+  if (!fileVersion) {
+    throw new Error("NOOTERRA_VERSION file is empty");
+  }
+  const envVersionRaw = process.env.NOOTERRA_VERSION ?? null;
+  if (typeof envVersionRaw === "string" && envVersionRaw.trim() !== "" && envVersionRaw.trim() !== fileVersion) {
+    throw new Error(`NOOTERRA_VERSION env (${envVersionRaw.trim()}) does not match NOOTERRA_VERSION file (${fileVersion})`);
+  }
+  return fileVersion;
 }
 
 function sh(cmd, args, { cwd, env } = {}) {
@@ -162,7 +174,7 @@ async function main() {
   });
 
   // ReleaseIndex.v1 is a signed release manifest (artifact authenticity surface).
-  const version = readVersionForIndex();
+  const version = readCanonicalReleaseVersion();
   const tag = `v${version}`;
   sh(process.execPath, ["scripts/release/generate-release-index.mjs", "--dir", outDir, "--tag", tag, "--version", version]);
   if (signReleaseIndex) {

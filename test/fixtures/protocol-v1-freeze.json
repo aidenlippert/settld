@@ -16,6 +16,6 @@
     "docs/spec/schemas/VerifyAboutOutput.v1.schema.json": "0b31c6f666b343a855a17650ba1721bfba9930a823d2ab4c7d540900c3d2c5ca",
     "docs/spec/schemas/VerifyCliOutput.v1.schema.json": "633bfae42bb3eda998f6fbef95907a941a4f4f8caedaf5d5c74bb635d995b20d",
     "docs/spec/schemas/ProduceCliOutput.v1.schema.json": "e913a6a9cc9027137df1cd89455f0bb544ac5be8959db290271024dd0d548a85",
-    "test/fixtures/protocol-vectors/v1.json": "c658173e55a7b5d535bd4d268705d979688ec0aa9086e3234f2c4e3f8cb1122e"
+    "test/fixtures/protocol-vectors/v1.json": "9cbcf18264195a4e1c160e897652268c2daf02bfe35632c9c63ad56793e11423"
   }
 }

@@ -140,8 +140,7 @@ test("API e2e: ops arbitration workspace page renders queue + case workspace con
     headers: {},
     auth: "none"
   });
-  assert.equal(workspaceWithQueryAuth.statusCode, 200, workspaceWithQueryAuth.body);
-  assert.match(workspaceWithQueryAuth.body, /Arbitration Operator Workspace/);
+  assert.equal(workspaceWithQueryAuth.statusCode, 403, workspaceWithQueryAuth.body);
 
   const forbidden = await request(api, {
     method: "GET",

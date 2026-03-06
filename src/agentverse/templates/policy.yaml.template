@@ -1,0 +1,13 @@
+version: "1"
+defaults:
+  action: deny
+rules:
+  - name: allow-{{CAPABILITY_ID}}
+    when:
+      requiredCapability: {{CAPABILITY_ID}}
+    then: allow
+  - name: require-approval-high-spend
+    when:
+      amountUsdCents:
+        gt: {{HIGH_SPEND_THRESHOLD_CENTS}}
+    then: require_approval

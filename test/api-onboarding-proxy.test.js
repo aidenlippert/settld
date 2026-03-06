@@ -70,3 +70,106 @@ test("api onboarding proxy: forwards onboarding requests to configured upstream"
     restore();
   }
 });
+
+test("api onboarding proxy: preserves auth-mode payload contract across supported modes", async () => {
+  const restore = withEnv("PROXY_ONBOARDING_BASE_URL", "https://onboarding.nooterra.test");
+  try {
+    const modeRows = ["public_signup", "hybrid", "enterprise_preprovisioned"];
+    for (const mode of modeRows) {
+      const api = createApi({
+        fetchFn: async () =>
+          new Response(
+            JSON.stringify({
+              ok: true,
+              schemaVersion: "MagicLinkAuthMode.v1",
+              authMode: mode
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json; charset=utf-8" }
+            }
+          )
+      });
+
+      // eslint-disable-next-line no-await-in-loop
+      const res = await request(api, {
+        method: "GET",
+        path: "/v1/public/auth-mode",
+        auth: "none"
+      });
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(res.json?.ok, true);
+      assert.equal(res.json?.schemaVersion, "MagicLinkAuthMode.v1");
+      assert.equal(res.json?.authMode, mode);
+    }
+  } finally {
+    restore();
+  }
+});
+
+test("api onboarding proxy: preserves stable disabled-mode reason codes for signup/login endpoints", async () => {
+  const restore = withEnv("PROXY_ONBOARDING_BASE_URL", "https://onboarding.nooterra.test");
+  try {
+    const api = createApi({
+      fetchFn: async (url) => {
+        const pathname = new URL(String(url)).pathname;
+        if (pathname === "/v1/public/signup") {
+          return new Response(JSON.stringify({ ok: false, code: "SIGNUP_DISABLED", message: "public signup is disabled" }), {
+            status: 403,
+            headers: { "content-type": "application/json; charset=utf-8" }
+          });
+        }
+        if (pathname.endsWith("/buyer/login/otp") || pathname.endsWith("/buyer/login")) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              code: "BUYER_AUTH_DISABLED",
+              message: "buyer OTP login is not enabled for this tenant"
+            }),
+            {
+              status: 400,
+              headers: { "content-type": "application/json; charset=utf-8" }
+            }
+          );
+        }
+        return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND" }), {
+          status: 404,
+          headers: { "content-type": "application/json; charset=utf-8" }
+        });
+      }
+    });
+
+    const signup = await request(api, {
+      method: "POST",
+      path: "/v1/public/signup",
+      body: {
+        company: "Nooterra Labs",
+        fullName: "Aiden",
+        email: "aiden@nooterra.work"
+      },
+      auth: "none"
+    });
+    assert.equal(signup.statusCode, 403, signup.body);
+    assert.equal(signup.json?.code, "SIGNUP_DISABLED");
+
+    const otp = await request(api, {
+      method: "POST",
+      path: "/v1/tenants/tenant_default/buyer/login/otp",
+      body: { email: "buyer@acme.example" },
+      auth: "none"
+    });
+    assert.equal(otp.statusCode, 400, otp.body);
+    assert.equal(otp.json?.code, "BUYER_AUTH_DISABLED");
+
+    const login = await request(api, {
+      method: "POST",
+      path: "/v1/tenants/tenant_default/buyer/login",
+      body: { email: "buyer@acme.example", code: "123456" },
+      auth: "none"
+    });
+    assert.equal(login.statusCode, 400, login.body);
+    assert.equal(login.json?.code, "BUYER_AUTH_DISABLED");
+  } finally {
+    restore();
+  }
+});

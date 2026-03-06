@@ -985,6 +985,48 @@ export class NooterraClient {
     return this.request("GET", `/task-acceptances/${encodeURIComponent(acceptanceId)}`, opts);
   }
 
+  proposeIntentContract(body, opts) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("body is required");
+    assertNonEmptyString(body?.proposerAgentId, "body.proposerAgentId");
+    assertNonEmptyString(body?.counterpartyAgentId, "body.counterpartyAgentId");
+    if (body?.objective === null || body?.objective === undefined) throw new TypeError("body.objective is required");
+    if (!body?.budgetEnvelope || typeof body.budgetEnvelope !== "object" || Array.isArray(body.budgetEnvelope)) {
+      throw new TypeError("body.budgetEnvelope is required");
+    }
+    return this.request("POST", "/intents/propose", { ...opts, body });
+  }
+
+  listIntentContracts(params = {}, opts) {
+    const qs = new URLSearchParams();
+    if (params.intentId) qs.set("intentId", String(params.intentId));
+    if (params.proposerAgentId) qs.set("proposerAgentId", String(params.proposerAgentId));
+    if (params.counterpartyAgentId) qs.set("counterpartyAgentId", String(params.counterpartyAgentId));
+    if (params.status) qs.set("status", String(params.status));
+    if (params.limit !== undefined && params.limit !== null) qs.set("limit", String(params.limit));
+    if (params.offset !== undefined && params.offset !== null) qs.set("offset", String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return this.request("GET", `/intents${suffix}`, opts);
+  }
+
+  getIntentContract(intentId, opts) {
+    assertNonEmptyString(intentId, "intentId");
+    return this.request("GET", `/intents/${encodeURIComponent(intentId)}`, opts);
+  }
+
+  counterIntentContract(intentId, body, opts) {
+    assertNonEmptyString(intentId, "intentId");
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("body is required");
+    assertNonEmptyString(body?.proposerAgentId, "body.proposerAgentId");
+    return this.request("POST", `/intents/${encodeURIComponent(intentId)}/counter`, { ...opts, body });
+  }
+
+  acceptIntentContract(intentId, body, opts) {
+    assertNonEmptyString(intentId, "intentId");
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("body is required");
+    assertNonEmptyString(body?.acceptedByAgentId, "body.acceptedByAgentId");
+    return this.request("POST", `/intents/${encodeURIComponent(intentId)}/accept`, { ...opts, body });
+  }
+
   createWorkOrder(body, opts) {
     if (!body || typeof body !== "object") throw new TypeError("body is required");
     return this.request("POST", "/work-orders", { ...opts, body });
@@ -1239,6 +1281,7 @@ export class NooterraClient {
     const qs = new URLSearchParams();
     if (params.eventType) qs.set("eventType", String(params.eventType));
     if (params.sinceEventId) qs.set("sinceEventId", String(params.sinceEventId));
+    if (params.checkpointConsumerId) qs.set("checkpointConsumerId", String(params.checkpointConsumerId));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
 
     const rid = opts.requestId ?? randomRequestId();

@@ -1561,6 +1561,97 @@ function buildTools() {
       }
     },
     {
+      name: "nooterra.intent_propose",
+      description: "Propose an IntentContract.v1 between two agents.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["proposerAgentId", "counterpartyAgentId", "objective", "budgetEnvelope"],
+        properties: {
+          intentId: { type: ["string", "null"], default: null },
+          proposerAgentId: { type: "string" },
+          counterpartyAgentId: { type: "string" },
+          objective: { type: ["object", "array", "string", "number", "boolean"] },
+          constraints: { type: ["object", "null"], additionalProperties: true, default: null },
+          budgetEnvelope: { type: "object", additionalProperties: true },
+          requiredApprovals: { type: ["array", "null"], items: { type: "object", additionalProperties: true }, default: null },
+          successCriteria: { type: ["object", "null"], additionalProperties: true, default: null },
+          terminationPolicy: { type: ["object", "null"], additionalProperties: true, default: null },
+          proposedAt: { type: ["string", "null"], default: null },
+          metadata: { type: ["object", "null"], additionalProperties: true, default: null },
+          idempotencyKey: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "nooterra.intent_list",
+      description: "List IntentContract.v1 records.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          intentId: { type: ["string", "null"], default: null },
+          proposerAgentId: { type: ["string", "null"], default: null },
+          counterpartyAgentId: { type: ["string", "null"], default: null },
+          status: { type: ["string", "null"], enum: ["proposed", "countered", "accepted", null], default: null },
+          limit: { type: ["integer", "null"], minimum: 1, default: null },
+          offset: { type: ["integer", "null"], minimum: 0, default: null }
+        }
+      }
+    },
+    {
+      name: "nooterra.intent_get",
+      description: "Fetch an IntentContract.v1 by intentId.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["intentId"],
+        properties: {
+          intentId: { type: "string" }
+        }
+      }
+    },
+    {
+      name: "nooterra.intent_counter",
+      description: "Create a counter IntentContract.v1 from an existing intent.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["intentId", "proposerAgentId"],
+        properties: {
+          intentId: { type: "string" },
+          newIntentId: { type: ["string", "null"], default: null },
+          proposerAgentId: { type: "string" },
+          parentIntentHash: { type: ["string", "null"], default: null },
+          objective: { type: ["object", "array", "string", "number", "boolean", "null"], default: null },
+          constraints: { type: ["object", "null"], additionalProperties: true, default: null },
+          budgetEnvelope: { type: ["object", "null"], additionalProperties: true, default: null },
+          requiredApprovals: { type: ["array", "null"], items: { type: "object", additionalProperties: true }, default: null },
+          successCriteria: { type: ["object", "null"], additionalProperties: true, default: null },
+          terminationPolicy: { type: ["object", "null"], additionalProperties: true, default: null },
+          proposedAt: { type: ["string", "null"], default: null },
+          metadata: { type: ["object", "null"], additionalProperties: true, default: null },
+          idempotencyKey: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "nooterra.intent_accept",
+      description: "Accept an IntentContract.v1.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["intentId", "acceptedByAgentId"],
+        properties: {
+          intentId: { type: "string" },
+          acceptedByAgentId: { type: "string" },
+          acceptedAt: { type: ["string", "null"], default: null },
+          intentHash: { type: ["string", "null"], default: null },
+          idempotencyKey: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
       name: "nooterra.work_order_create",
       description: "Create a SubAgentWorkOrder.v1 for delegated paid execution.",
       inputSchema: {
@@ -1655,6 +1746,16 @@ function buildTools() {
               acceptanceHash: { type: ["string", "null"], default: null }
             }
           },
+          intentBinding: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            default: null,
+            properties: {
+              intentId: { type: "string" },
+              intentHash: { type: ["string", "null"], default: null },
+              boundAt: { type: ["string", "null"], default: null }
+            }
+          },
           metadata: { type: ["object", "null"], additionalProperties: true, default: null },
           idempotencyKey: { type: ["string", "null"], default: null }
         }
@@ -1744,6 +1845,7 @@ function buildTools() {
           evidenceRefs: { type: ["array", "null"], items: { type: "string" }, default: null },
           amountCents: { type: ["integer", "null"], minimum: 0, default: null },
           currency: { type: ["string", "null"], default: null },
+          intentHash: { type: ["string", "null"], default: null },
           traceId: { type: ["string", "null"], default: null },
           intentHash: { type: ["string", "null"], default: null },
           deliveredAt: { type: ["string", "null"], default: null },
@@ -1769,6 +1871,7 @@ function buildTools() {
           x402SettlementStatus: { type: ["string", "null"], default: null },
           x402ReceiptId: { type: ["string", "null"], default: null },
           completionReceiptHash: { type: ["string", "null"], default: null },
+          intentHash: { type: ["string", "null"], default: null },
           acceptanceHash: { type: ["string", "null"], default: null },
           intentHash: { type: ["string", "null"], default: null },
           traceId: { type: ["string", "null"], default: null },
@@ -1837,8 +1940,53 @@ function buildTools() {
           sessionId: { type: "string" },
           principalId: { type: ["string", "null"], default: null },
           eventType: { type: ["string", "null"], default: null },
+          checkpointConsumerId: { type: ["string", "null"], default: null },
           limit: { type: ["integer", "null"], minimum: 1, default: null },
           offset: { type: ["integer", "null"], minimum: 0, default: null }
+        }
+      }
+    },
+    {
+      name: "nooterra.session_event_checkpoint_get",
+      description: "Read SessionEvent inbox relay checkpoint for a session consumer.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sessionId", "checkpointConsumerId"],
+        properties: {
+          sessionId: { type: "string" },
+          checkpointConsumerId: { type: "string" },
+          principalId: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "nooterra.session_event_checkpoint_ack",
+      description: "Advance SessionEvent inbox relay checkpoint (ack).",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sessionId", "checkpointConsumerId"],
+        properties: {
+          sessionId: { type: "string" },
+          checkpointConsumerId: { type: "string" },
+          sinceEventId: { type: ["string", "null"], default: null },
+          principalId: { type: ["string", "null"], default: null }
+        }
+      }
+    },
+    {
+      name: "nooterra.session_event_checkpoint_requeue",
+      description: "Requeue SessionEvent inbox relay checkpoint to an earlier cursor.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sessionId", "checkpointConsumerId"],
+        properties: {
+          sessionId: { type: "string" },
+          checkpointConsumerId: { type: "string" },
+          sinceEventId: { type: ["string", "null"], default: null },
+          principalId: { type: ["string", "null"], default: null }
         }
       }
     },
@@ -1854,6 +2002,7 @@ function buildTools() {
           principalId: { type: ["string", "null"], default: null },
           eventType: { type: ["string", "null"], default: null },
           sinceEventId: { type: ["string", "null"], default: null },
+          checkpointConsumerId: { type: ["string", "null"], default: null },
           lastEventId: { type: ["string", "null"], default: null },
           maxEvents: { type: ["integer", "null"], minimum: 1, maximum: 200, default: 20 },
           timeoutMs: { type: ["integer", "null"], minimum: 200, maximum: 30000, default: 2000 }
@@ -3408,6 +3557,116 @@ async function main() {
             if (Number.isSafeInteger(Number(args?.offset)) && Number(args.offset) >= 0) query.set("offset", String(Number(args.offset)));
             const out = await client.requestJson(`/task-acceptances${query.toString() ? `?${query.toString()}` : ""}`, { method: "GET" });
             result = { ok: true, ...redactSecrets(out) };
+          } else if (name === "nooterra.intent_propose") {
+            const proposerAgentId = String(args?.proposerAgentId ?? "").trim();
+            const counterpartyAgentId = String(args?.counterpartyAgentId ?? "").trim();
+            assertNonEmptyString(proposerAgentId, "proposerAgentId");
+            assertNonEmptyString(counterpartyAgentId, "counterpartyAgentId");
+            if (args?.objective === null || args?.objective === undefined) throw new TypeError("objective is required");
+            if (!args?.budgetEnvelope || typeof args.budgetEnvelope !== "object" || Array.isArray(args.budgetEnvelope)) {
+              throw new TypeError("budgetEnvelope is required");
+            }
+            const idempotencyKey =
+              typeof args?.idempotencyKey === "string" && args.idempotencyKey.trim() !== ""
+                ? args.idempotencyKey.trim()
+                : makeIdempotencyKey("mcp_intent_propose");
+            const body = {
+              proposerAgentId,
+              counterpartyAgentId,
+              objective: args.objective,
+              budgetEnvelope: args.budgetEnvelope
+            };
+            if (typeof args?.intentId === "string" && args.intentId.trim() !== "") body.intentId = args.intentId.trim();
+            if (args?.constraints && typeof args.constraints === "object" && !Array.isArray(args.constraints)) body.constraints = args.constraints;
+            if (Array.isArray(args?.requiredApprovals)) body.requiredApprovals = args.requiredApprovals;
+            if (args?.successCriteria && typeof args.successCriteria === "object" && !Array.isArray(args.successCriteria)) {
+              body.successCriteria = args.successCriteria;
+            }
+            if (args?.terminationPolicy && typeof args.terminationPolicy === "object" && !Array.isArray(args.terminationPolicy)) {
+              body.terminationPolicy = args.terminationPolicy;
+            }
+            if (typeof args?.proposedAt === "string" && args.proposedAt.trim() !== "") body.proposedAt = args.proposedAt.trim();
+            if (args?.metadata && typeof args.metadata === "object" && !Array.isArray(args.metadata)) body.metadata = args.metadata;
+            const out = await client.requestJson("/intents/propose", {
+              method: "POST",
+              write: true,
+              body,
+              idem: idempotencyKey
+            });
+            result = { ok: true, idempotencyKey, ...redactSecrets(out) };
+          } else if (name === "nooterra.intent_list") {
+            const query = new URLSearchParams();
+            if (typeof args?.intentId === "string" && args.intentId.trim() !== "") query.set("intentId", args.intentId.trim());
+            if (typeof args?.proposerAgentId === "string" && args.proposerAgentId.trim() !== "") {
+              query.set("proposerAgentId", args.proposerAgentId.trim());
+            }
+            if (typeof args?.counterpartyAgentId === "string" && args.counterpartyAgentId.trim() !== "") {
+              query.set("counterpartyAgentId", args.counterpartyAgentId.trim());
+            }
+            if (typeof args?.status === "string" && args.status.trim() !== "") query.set("status", args.status.trim().toLowerCase());
+            if (Number.isSafeInteger(Number(args?.limit)) && Number(args.limit) > 0) query.set("limit", String(Number(args.limit)));
+            if (Number.isSafeInteger(Number(args?.offset)) && Number(args.offset) >= 0) query.set("offset", String(Number(args.offset)));
+            const out = await client.requestJson(`/intents${query.toString() ? `?${query.toString()}` : ""}`, { method: "GET" });
+            result = { ok: true, ...redactSecrets(out) };
+          } else if (name === "nooterra.intent_get") {
+            const intentId = String(args?.intentId ?? "").trim();
+            assertNonEmptyString(intentId, "intentId");
+            const out = await client.requestJson(`/intents/${encodeURIComponent(intentId)}`, { method: "GET" });
+            result = { ok: true, intentId, ...redactSecrets(out) };
+          } else if (name === "nooterra.intent_counter") {
+            const intentId = String(args?.intentId ?? "").trim();
+            const proposerAgentId = String(args?.proposerAgentId ?? "").trim();
+            assertNonEmptyString(intentId, "intentId");
+            assertNonEmptyString(proposerAgentId, "proposerAgentId");
+            const idempotencyKey =
+              typeof args?.idempotencyKey === "string" && args.idempotencyKey.trim() !== ""
+                ? args.idempotencyKey.trim()
+                : makeIdempotencyKey("mcp_intent_counter");
+            const body = { proposerAgentId };
+            if (typeof args?.newIntentId === "string" && args.newIntentId.trim() !== "") body.intentId = args.newIntentId.trim();
+            if (typeof args?.parentIntentHash === "string" && args.parentIntentHash.trim() !== "") {
+              body.parentIntentHash = args.parentIntentHash.trim().toLowerCase();
+            }
+            if (args?.objective !== undefined) body.objective = args.objective;
+            if (args?.constraints && typeof args.constraints === "object" && !Array.isArray(args.constraints)) body.constraints = args.constraints;
+            if (args?.budgetEnvelope && typeof args.budgetEnvelope === "object" && !Array.isArray(args.budgetEnvelope)) {
+              body.budgetEnvelope = args.budgetEnvelope;
+            }
+            if (Array.isArray(args?.requiredApprovals)) body.requiredApprovals = args.requiredApprovals;
+            if (args?.successCriteria && typeof args.successCriteria === "object" && !Array.isArray(args.successCriteria)) {
+              body.successCriteria = args.successCriteria;
+            }
+            if (args?.terminationPolicy && typeof args.terminationPolicy === "object" && !Array.isArray(args.terminationPolicy)) {
+              body.terminationPolicy = args.terminationPolicy;
+            }
+            if (typeof args?.proposedAt === "string" && args.proposedAt.trim() !== "") body.proposedAt = args.proposedAt.trim();
+            if (args?.metadata && typeof args.metadata === "object" && !Array.isArray(args.metadata)) body.metadata = args.metadata;
+            const out = await client.requestJson(`/intents/${encodeURIComponent(intentId)}/counter`, {
+              method: "POST",
+              write: true,
+              body,
+              idem: idempotencyKey
+            });
+            result = { ok: true, intentId, idempotencyKey, ...redactSecrets(out) };
+          } else if (name === "nooterra.intent_accept") {
+            const intentId = String(args?.intentId ?? "").trim();
+            const acceptedByAgentId = String(args?.acceptedByAgentId ?? "").trim();
+            assertNonEmptyString(intentId, "intentId");
+            assertNonEmptyString(acceptedByAgentId, "acceptedByAgentId");
+            const idempotencyKey =
+              typeof args?.idempotencyKey === "string" && args.idempotencyKey.trim() !== ""
+                ? args.idempotencyKey.trim()
+                : makeIdempotencyKey("mcp_intent_accept");
+            const body = { acceptedByAgentId };
+            if (typeof args?.acceptedAt === "string" && args.acceptedAt.trim() !== "") body.acceptedAt = args.acceptedAt.trim();
+            if (typeof args?.intentHash === "string" && args.intentHash.trim() !== "") body.intentHash = args.intentHash.trim().toLowerCase();
+            const out = await client.requestJson(`/intents/${encodeURIComponent(intentId)}/accept`, {
+              method: "POST",
+              write: true,
+              body,
+              idem: idempotencyKey
+            });
+            result = { ok: true, intentId, idempotencyKey, ...redactSecrets(out) };
           } else if (name === "nooterra.work_order_create") {
             const principalAgentId = String(args?.principalAgentId ?? "").trim();
             const subAgentId = String(args?.subAgentId ?? "").trim();
@@ -3492,6 +3751,17 @@ async function main() {
               body.acceptanceRef = { acceptanceId };
               if (typeof args.acceptanceRef.acceptanceHash === "string" && args.acceptanceRef.acceptanceHash.trim() !== "") {
                 body.acceptanceRef.acceptanceHash = args.acceptanceRef.acceptanceHash.trim().toLowerCase();
+              }
+            }
+            if (args?.intentBinding && typeof args.intentBinding === "object" && !Array.isArray(args.intentBinding)) {
+              const intentId = String(args.intentBinding.intentId ?? "").trim();
+              if (!intentId) throw new TypeError("intentBinding.intentId is required when intentBinding is provided");
+              body.intentBinding = { intentId };
+              if (typeof args.intentBinding.intentHash === "string" && args.intentBinding.intentHash.trim() !== "") {
+                body.intentBinding.intentHash = args.intentBinding.intentHash.trim().toLowerCase();
+              }
+              if (typeof args.intentBinding.boundAt === "string" && args.intentBinding.boundAt.trim() !== "") {
+                body.intentBinding.boundAt = args.intentBinding.boundAt.trim();
               }
             }
             if (args?.metadata && typeof args.metadata === "object" && !Array.isArray(args.metadata)) body.metadata = args.metadata;
@@ -3612,6 +3882,7 @@ async function main() {
               body.amountCents = amountCents;
             }
             if (typeof args?.currency === "string" && args.currency.trim() !== "") body.currency = args.currency.trim();
+            if (typeof args?.intentHash === "string" && args.intentHash.trim() !== "") body.intentHash = args.intentHash.trim().toLowerCase();
             if (typeof args?.traceId === "string" && args.traceId.trim() !== "") body.traceId = args.traceId.trim();
             if (typeof args?.intentHash === "string" && args.intentHash.trim() !== "") body.intentHash = args.intentHash.trim().toLowerCase();
             if (typeof args?.deliveredAt === "string" && args.deliveredAt.trim() !== "") body.deliveredAt = args.deliveredAt.trim();
@@ -3646,6 +3917,9 @@ async function main() {
             if (typeof args?.x402ReceiptId === "string" && args.x402ReceiptId.trim() !== "") body.x402ReceiptId = args.x402ReceiptId.trim();
             if (typeof args?.completionReceiptHash === "string" && args.completionReceiptHash.trim() !== "") {
               body.completionReceiptHash = args.completionReceiptHash.trim().toLowerCase();
+            }
+            if (typeof args?.intentHash === "string" && args.intentHash.trim() !== "") {
+              body.intentHash = args.intentHash.trim().toLowerCase();
             }
             if (typeof args?.acceptanceHash === "string" && args.acceptanceHash.trim() !== "") {
               body.acceptanceHash = args.acceptanceHash.trim().toLowerCase();
@@ -3723,6 +3997,9 @@ async function main() {
             assertNonEmptyString(sessionId, "sessionId");
             const query = new URLSearchParams();
             if (typeof args?.eventType === "string" && args.eventType.trim() !== "") query.set("eventType", args.eventType.trim());
+            if (typeof args?.checkpointConsumerId === "string" && args.checkpointConsumerId.trim() !== "") {
+              query.set("checkpointConsumerId", args.checkpointConsumerId.trim());
+            }
             if (Number.isSafeInteger(Number(args?.limit)) && Number(args.limit) > 0) query.set("limit", String(Number(args.limit)));
             if (Number.isSafeInteger(Number(args?.offset)) && Number(args.offset) >= 0) query.set("offset", String(Number(args.offset)));
             const out = await client.requestJson(
@@ -3733,6 +4010,54 @@ async function main() {
               }
             );
             result = { ok: true, sessionId, ...redactSecrets(out) };
+          } else if (name === "nooterra.session_event_checkpoint_get") {
+            const sessionId = String(args?.sessionId ?? "").trim();
+            const checkpointConsumerId = String(args?.checkpointConsumerId ?? "").trim();
+            const principalId = parseOptionalStringArg(args?.principalId, "principalId", { max: 200 });
+            assertNonEmptyString(sessionId, "sessionId");
+            assertNonEmptyString(checkpointConsumerId, "checkpointConsumerId");
+            const query = new URLSearchParams();
+            query.set("checkpointConsumerId", checkpointConsumerId);
+            const out = await client.requestJson(
+              `/sessions/${encodeURIComponent(sessionId)}/events/checkpoint?${query.toString()}`,
+              {
+                method: "GET",
+                headers: principalId ? { "x-proxy-principal-id": principalId } : {}
+              }
+            );
+            result = { ok: true, sessionId, checkpointConsumerId, ...redactSecrets(out) };
+          } else if (name === "nooterra.session_event_checkpoint_ack") {
+            const sessionId = String(args?.sessionId ?? "").trim();
+            const checkpointConsumerId = String(args?.checkpointConsumerId ?? "").trim();
+            const principalId = parseOptionalStringArg(args?.principalId, "principalId", { max: 200 });
+            assertNonEmptyString(sessionId, "sessionId");
+            assertNonEmptyString(checkpointConsumerId, "checkpointConsumerId");
+            const body = { checkpointConsumerId };
+            if (typeof args?.sinceEventId === "string" && args.sinceEventId.trim() !== "") body.sinceEventId = args.sinceEventId.trim();
+            else if (args?.sinceEventId === null) body.sinceEventId = null;
+            const out = await client.requestJson(`/sessions/${encodeURIComponent(sessionId)}/events/checkpoint`, {
+              method: "POST",
+              write: true,
+              body,
+              headers: principalId ? { "x-proxy-principal-id": principalId } : {}
+            });
+            result = { ok: true, sessionId, checkpointConsumerId, ...redactSecrets(out) };
+          } else if (name === "nooterra.session_event_checkpoint_requeue") {
+            const sessionId = String(args?.sessionId ?? "").trim();
+            const checkpointConsumerId = String(args?.checkpointConsumerId ?? "").trim();
+            const principalId = parseOptionalStringArg(args?.principalId, "principalId", { max: 200 });
+            assertNonEmptyString(sessionId, "sessionId");
+            assertNonEmptyString(checkpointConsumerId, "checkpointConsumerId");
+            const body = { checkpointConsumerId };
+            if (typeof args?.sinceEventId === "string" && args.sinceEventId.trim() !== "") body.sinceEventId = args.sinceEventId.trim();
+            else if (args?.sinceEventId === null) body.sinceEventId = null;
+            const out = await client.requestJson(`/sessions/${encodeURIComponent(sessionId)}/events/checkpoint/requeue`, {
+              method: "POST",
+              write: true,
+              body,
+              headers: principalId ? { "x-proxy-principal-id": principalId } : {}
+            });
+            result = { ok: true, sessionId, checkpointConsumerId, ...redactSecrets(out) };
           } else if (name === "nooterra.session_events_stream") {
             const sessionId = String(args?.sessionId ?? "").trim();
             const principalId = parseOptionalStringArg(args?.principalId, "principalId", { max: 200 });
@@ -3740,6 +4065,9 @@ async function main() {
             const query = new URLSearchParams();
             if (typeof args?.eventType === "string" && args.eventType.trim() !== "") query.set("eventType", args.eventType.trim());
             if (typeof args?.sinceEventId === "string" && args.sinceEventId.trim() !== "") query.set("sinceEventId", args.sinceEventId.trim());
+            if (typeof args?.checkpointConsumerId === "string" && args.checkpointConsumerId.trim() !== "") {
+              query.set("checkpointConsumerId", args.checkpointConsumerId.trim());
+            }
             const lastEventId = typeof args?.lastEventId === "string" && args.lastEventId.trim() !== "" ? args.lastEventId.trim() : null;
             const maxEvents = parseOptionalIntegerArg(args?.maxEvents, "maxEvents", { min: 1, max: 200 });
             const timeoutMs = parseOptionalIntegerArg(args?.timeoutMs, "timeoutMs", { min: 200, max: 30_000 });

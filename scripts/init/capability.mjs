@@ -355,8 +355,10 @@ async function main() {
   console.log("");
   // eslint-disable-next-line no-console
   console.log(
-    \`Explorer: \${baseUrl}/ops/kernel/workspace?opsToken=\${encodeURIComponent(opsToken)}&agreementHash=\${encodeURIComponent(settled.agreementHash)}\`
+    \`Explorer: \${baseUrl}/ops/kernel/workspace?tenantId=\${encodeURIComponent(tenantId)}&agreementHash=\${encodeURIComponent(settled.agreementHash)}\`
   );
+  // eslint-disable-next-line no-console
+  console.log("Auth note: ops token query-param auth is disabled; use x-proxy-ops-token header or session auth.");
 }
 
 main().catch((err) => {

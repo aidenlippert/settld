@@ -1,130 +1,180 @@
-# ACS S4-S9 Reality Audit (2026-02-27)
+# ACS S4-S9 Reality Audit (2026-03-02)
 
-Date: 2026-02-27
-Scope: Milestones S4-S9 in Linear project `Agent Collaboration Substrate`.
+Date: 2026-03-02  
+Scope: repository-grounded audit of S4-S9 delivery in `/Users/aidenlippert/nooterra`.  
+Supersedes: prior 2026-02-27 content in this file (stale assumptions removed).
+
+## Why this rewrite exists
+
+The previous audit was no longer accurate against current code. Verified drift:
+
+- OpenAPI is now `163` paths / `186` operations / `0` tags.
+- State-checkpoint lineage compaction and restore are implemented and tested.
+- Simulation scenario DSL, fault matrix, and scorecard gates are implemented and test-covered.
+- Federation dispute jurisdiction continuity hashing is implemented and e2e-tested.
+- Reputation anti-gaming includes reciprocal wash-loop/collusion handling and e2e coverage.
 
 ## Method
 
-Two views are tracked for each sprint:
+This audit is based on repository evidence only:
 
-- Ticket view: `Build left` = `Backlog + In Progress + Todo`.
-- Code-adjusted view: classify ticket scope as `implemented`, `partial`, or `missing` based on repository evidence (runtime paths + tests + specs).
+1. Runtime code paths (`src/**`, `scripts/**`).
+2. Public/spec contracts (`docs/spec/**`).
+3. Test coverage (`test/**`) including deterministic/fail-closed checks.
+4. Targeted verification commands run on 2026-03-02.
 
-This prevents under-counting shipped code and over-counting stale backlog entries.
+No Linear/ticket-state percentages are used.
 
-## Sprint Reality
+Status labels:
 
-### S4 - Interop and Conformance Distribution
+- `Shipped`: runtime + tests + contracts present.
+- `Shipped + Hardening`: core is shipped, launch/operator hardening remains.
+- `In Flight`: partial implementation.
 
-- Linear counts: total 6, done 1, in review 4, backlog 1.
-- Ticket build left: 16.7% (1/6).
-- Code-adjusted left: ~10%.
-- Why: core interop stack is present and heavily tested.
+## Baseline Snapshot (2026-03-02)
 
-Evidence:
+- OpenAPI: `163` paths / `186` operations / `0` tags (`openapi/nooterra.openapi.json`)
+- Specs: `120` markdown docs under `docs/spec`
+- Public specs: `31` markdown docs under `docs/spec/public`
+- JSON schemas: `85` under `docs/spec/schemas`
+- Test files: `477` under `test`
+
+Focused verification run (pass):
+
+```bash
+node --test \
+  test/state-checkpoint-lineage.test.js \
+  test/simulation-scenario-dsl.test.js \
+  test/simulation-scorecard-gate-script.test.js \
+  test/api-e2e-federated-dispute-jurisdiction.test.js \
+  test/api-e2e-agent-card-discovery.test.js
+```
+
+Result: `38 pass`, `0 fail`.
+
+## S4 - Interop and Conformance Distribution
+
+Status: `Shipped + Hardening`
+
+Evidence in repo:
+
 - `scripts/conformance/publish-session-conformance-cert.mjs`
 - `scripts/conformance/publish-session-stream-conformance-cert.mjs`
 - `scripts/conformance/publish-federation-conformance-cert.mjs`
 - `scripts/ci/run-protocol-compatibility-matrix.mjs`
 - `scripts/ci/run-protocol-compatibility-drift-gate.mjs`
-- `test/sdk-parity-adapters-cross-sdk.test.js`
+- `test/protocol-compatibility-matrix-script.test.js`
 - `test/protocol-compatibility-drift-gate-script.test.js`
 
-### S5 - Agent Marketplace Economy Core
+Remaining to close:
 
-- Linear counts: total 5, in review 2, backlog 3.
-- Ticket build left: 60% (3/5).
-- Code-adjusted left: ~40%.
-- Why: metering/reconciliation/reserve/reversal machinery exists; anti-gaming collusion controls still incomplete.
+1. Regenerate/publish cert artifacts from current `main` on release cadence.
+2. Keep host-cert matrix evidence fresh for each supported host/runtime pair.
 
-Evidence:
+## S5 - Agent Marketplace Economy Core
+
+Status: `Shipped + Hardening`
+
+Evidence in repo:
+
 - `scripts/settlement/x402-batch-worker.mjs`
-- `test/x402-batch-settlement-worker.test.js`
 - `scripts/ops/dispute-finance-reconciliation-packet.mjs`
-- `docs/ops/PAYMENTS_ALPHA_R5.md`
+- `src/api/app.js` (reputation anti-gaming + collusion signals)
+- `docs/spec/public/VerifiedInteractionGraphPack.v1.md`
+- `test/x402-batch-settlement-worker.test.js`
+- `test/api-e2e-agent-card-discovery.test.js`
+- `test/api-e2e-agent-reputation.test.js`
 
-Remaining focus:
-- Wash-loop/collusion detection and operator controls.
+Remaining to close:
 
-### S6 - Persistent Memory and Identity Portability
+1. Production threshold calibration for anti-gaming controls (operator policy tuning).
+2. Live-run evidence loops for financial safety controls and dispute economics.
 
-- Linear counts: total 5, in review 2, backlog 3.
-- Ticket build left: 60% (3/5).
-- Code-adjusted left: ~40%.
-- Why: memory export/import + state checkpoint + identity lifecycle guardrails are mostly present; checkpoint compaction path is not found.
+## S6 - Persistent Memory and Identity Portability
 
-Evidence:
-- `src/core/session-replay-pack.js` (`SessionMemoryExport.v1`)
-- `src/services/memory/contract-hooks.js`
-- `src/core/state-checkpoint.js`
-- `test/state-checkpoint.test.js`
+Status: `Shipped`
+
+Evidence in repo:
+
+- `src/core/session-replay-pack.js` (`SessionMemoryExport.v1` path)
+- `src/core/state-checkpoint.js` (`compactStateCheckpointLineageV1`, `restoreStateCheckpointLineageV1`)
+- `test/state-checkpoint-lineage.test.js`
 - `test/api-e2e-state-checkpoints.test.js`
 - `docs/spec/public/SessionReplayPack.v1.md`
 
-Gap evidence:
-- No concrete checkpoint compaction implementation detected via search (`checkpoint compaction`, `compact checkpoint`).
+Remaining to close:
 
-### S7 - Governance and Enterprise Controls
+1. No critical runtime gap found in this sweep.
+2. Keep portability invariants pinned by deterministic vectors as protocol expands.
 
-- Linear counts: total 5, in progress 1, backlog 4.
-- Ticket build left: 100% (5/5).
-- Code-adjusted left: ~60%.
-- Why: strong governance/audit/approval primitives exist, but full enterprise orchestration packaging remains.
+## S7 - Governance and Enterprise Controls
 
-Evidence:
+Status: `Shipped + Hardening`
+
+Evidence in repo:
+
 - `src/services/human-approval/gate.js`
-- `src/services/simulation/harness.js`
 - `scripts/audit/build-audit-packet.mjs`
-- `test/audit-export.test.js`
-- `docs/ops/GOVERNANCE_AUDIT_EXPORT_S7.md`
+- `docs/spec/GovernancePolicy.v2.md`
+- `docs/spec/STRICTNESS.md`
+- `docs/spec/TRUST_ANCHORS.md`
+- `docs/ops/GOVERNANCE_TEMPLATES_API.md`
+- `docs/ops/EMERGENCY_CONTAINMENT_DRILL_S7.md`
 
-Remaining focus:
-- Policy template library packaging, multi-agent budget orchestration, and consolidated emergency control automation workflows.
+Remaining to close:
 
-### S8 - Simulation and Personal Agent Ecosystems
+1. Final packaging of governance template sets for operator/enterprise onboarding.
+2. Routine drill automation and runbook execution evidence in hosted environments.
 
-- Linear counts: total 10, in progress 1, backlog 9.
-- Ticket build left: 100% (10/10).
-- Code-adjusted left: ~60%.
-- Why: deterministic simulation harness and high-risk human approval gates are implemented, but large-scale DSL/world generation and scorecard-to-gate integration remain incomplete.
+## S8 - Simulation and Personal Agent Ecosystems
 
-Evidence:
+Status: `Shipped + Hardening`
+
+Evidence in repo:
+
 - `src/services/simulation/harness.js`
-- `docs/spec/SimulationHarness.v1.md`
-- `test/personal-agent-simulation.test.js`
-- `test/api-e2e-simulation-harness.test.js`
+- `src/services/simulation/high-scale-harness.js`
+- `scripts/ci/run-simulation-fault-matrix.mjs`
+- `scripts/ci/run-simulation-scorecard-gate.mjs`
+- `scripts/ci/run-simulation-high-scale-harness.mjs`
+- `scripts/ci/run-release-promotion-guard.mjs` (high-scale gate input)
+- `test/simulation-scenario-dsl.test.js`
+- `test/simulation-fault-matrix.test.js`
+- `test/simulation-scorecard-gate-script.test.js`
+- `test/simulation-high-scale-harness.test.js`
 
-Gap evidence:
-- No explicit scenario DSL/world-generator implementation found beyond harness schema.
-- No explicit simulation scorecard -> promotion gate wiring found.
+Remaining to close:
 
-### S9 - Federation and Internet-Scale Launch Readiness
+1. Expand curated scenario packs for real operator profiles.
+2. Standardize simulation evidence publication for release and cutover workflows.
 
-- Linear counts: total 5, in progress 1, backlog 4.
-- Ticket build left: 100% (5/5).
-- Code-adjusted left: ~60%.
-- Why: federation invoke/result runtime, namespace route policy, replay dedupe, and conformance publication exist; cross-plane dispute jurisdiction/audit continuity remains largely unimplemented.
+## S9 - Federation and Internet-Scale Launch Readiness
 
-Evidence:
-- `src/api/app.js` (`/v1/federation/invoke`, `/v1/federation/result`)
+Status: `Shipped + Hardening`
+
+Evidence in repo:
+
+- `src/api/app.js` (`/federation/*` and dispute jurisdiction continuity paths)
 - `src/federation/proxy-policy.js`
 - `conformance/federation-v1/run.mjs`
-- `scripts/conformance/publish-federation-conformance-cert.mjs`
-- `test/api-federation-proxy.test.js`
-- `test/federation-policy.test.js`
+- `test/conformance-federation-v1.test.js`
+- `test/api-e2e-federated-dispute-jurisdiction.test.js`
 - `docs/spec/federation.md`
 
-Gap evidence:
-- Minimal explicit cross-plane dispute jurisdiction implementation surfaced.
+Remaining to close:
 
-## Summary
+1. Multi-plane operational runbooks and recurring trust-anchor lifecycle drills.
+2. Hosted federation pilot evidence bundles tied into release/cutover artifacts.
 
-S4-S9 totals in Linear: 36 issues.
+## Cross-Sprint Work Left (Most Important)
 
-- Ticket build-left view: 27/36 left (75%).
-- Code-adjusted view: ~18/36 left (~50%).
+1. Run and archive full ACS-E10 upstream artifacts in live/staging environments, then aggregate with `test:ops:acs-e10-readiness-gate`.
+2. Integrate in-flight local surfaces (`intent-contract` + TUI) with targeted tests and clean merge slices.
+3. Keep OpenAPI/spec/sdk parity fully synchronized during ongoing migration churn.
+4. Run full `npm test` after current dirty-tree integration stabilizes (this audit used targeted verification only).
 
-Interpretation:
+## Confidence and Limits
 
-- We are materially ahead of raw backlog state in S4/S5/S6.
-- S7/S8/S9 have substantial foundations in code, but still need productized closure on orchestration and cross-plane governance/dispute flows.
+- High confidence on claims above for S4-S9 runtime presence and fail-closed behavior in covered paths.
+- This is a codebase audit, not a hosted-production health report.
+- Full-suite regression was not rerun in this update; only focused tests listed above were executed.

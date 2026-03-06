@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "NooterraAgentProject.v1",
+  "name": "{{AGENT_SLUG}}",
+  "description": "{{AGENT_DESCRIPTION}}",
+  "agentId": "agt_{{AGENT_ID_SUFFIX}}",
+  "entrypoint": "./agent.js",
+  "policyPath": "./policy.yaml",
+  "defaults": {
+    "baseUrl": "{{BASE_URL}}",
+    "protocol": "{{PROTOCOL_VERSION}}",
+    "tenantId": "{{TENANT_ID}}"
+  }
+}

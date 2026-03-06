@@ -144,7 +144,6 @@ import {
 } from "../core/capability-attestation.js";
 import {
   SUB_AGENT_COMPLETION_STATUS,
-  SUB_AGENT_WORK_ORDER_INTENT_BINDING_SCHEMA_VERSION,
   SUB_AGENT_WORK_ORDER_SCHEMA_VERSION,
   SUB_AGENT_WORK_ORDER_SETTLEMENT_STATUS,
   SUB_AGENT_WORK_ORDER_STATUS,
@@ -157,6 +156,13 @@ import {
   validateSubAgentCompletionReceiptV1,
   validateSubAgentWorkOrderV1
 } from "../core/subagent-work-order.js";
+import {
+  INTENT_CONTRACT_STATUS,
+  buildIntentContractV1,
+  counterIntentContractV1,
+  acceptIntentContractV1,
+  validateIntentContractV1
+} from "../core/intent-contract.js";
 import {
   buildStateCheckpointV1,
   compactStateCheckpointLineageV1,
@@ -176,13 +182,6 @@ import {
   buildTaskOfferV1,
   buildTaskQuoteV1
 } from "../core/task-negotiation.js";
-import { validateIntentContractV1 } from "../core/intent-contract.js";
-import {
-  INTENT_NEGOTIATION_EVENT_TYPE,
-  buildIntentNegotiationEventV1,
-  evaluateIntentNegotiationTranscriptV1,
-  validateIntentNegotiationEventV1
-} from "../core/intent-negotiation.js";
 import {
   SESSION_EVENT_TYPE,
   SESSION_VISIBILITY,
@@ -200,6 +199,17 @@ import {
 } from "../core/session-memory-access.js";
 import { buildSessionReplayPackV1, signSessionReplayPackV1 } from "../core/session-replay-pack.js";
 import { buildSessionTranscriptV1, signSessionTranscriptV1 } from "../core/session-transcript.js";
+import {
+  ROUTER_PLAN_ISSUE_CODE,
+  ROUTER_PLAN_ISSUE_SEVERITY,
+  ROUTER_PLAN_SCOPE,
+  buildRouterPlanV1,
+  deriveRouterDraftFromText
+} from "../core/router-plan.js";
+import { buildRouterMarketplaceLaunchV1 } from "../core/router-marketplace-launch.js";
+import { buildRouterLaunchStatusV1, ROUTER_LAUNCH_STATUS_TASK_STATE } from "../core/router-launch-status.js";
+import { selectMarketplaceAutoAwardBidV1 } from "../core/marketplace-auto-award.js";
+import { buildRouterMarketplaceDispatchV1, ROUTER_MARKETPLACE_DISPATCH_STATE } from "../core/router-marketplace-dispatch.js";
 import {
   buildSessionMemoryExportResponseV1,
   buildSessionReplayExportMetadataV1,
@@ -228,13 +238,6 @@ import {
   parseAgentLocatorRef,
   resolveAgentLocator
 } from "../core/agent-locator.js";
-import {
-  buildIdentityLogCheckpoint,
-  buildIdentityLogProof,
-  deriveIdentityLogEventTypes,
-  buildIdentityLogEventContext,
-  assertIdentityLogNoEquivocation
-} from "../core/identity-transparency-log.js";
 import { buildX402SettlementTerms, parseX402PaymentRequired } from "../core/x402-gate.js";
 import { createCircleReserveAdapter } from "../core/circle-reserve-adapter.js";
 import { signX402ReversalCommandV1, verifyX402ReversalCommandV1 } from "../core/x402-reversal-command.js";
@@ -507,6 +510,7 @@ export function createApi({
   x402RequireExecutionIntent = null,
   x402RequireAuthorityGrant = null,
   workOrderRequireAcceptanceBinding = null,
+  workOrderRequireIntentBinding = null,
   x402PromptRiskForceMode = null,
   x402PromptRiskForceModeByPrincipal = null,
   x402SessionTaintEscalateAmountCents = null,
@@ -547,6 +551,11 @@ export function createApi({
     "putMarketplaceCapabilityListing",
     "deleteMarketplaceCapabilityListing"
   ]);
+  const requiredPgFinanceReconciliationStoreMethods = Object.freeze([
+    "getFinanceReconciliationTriage",
+    "putFinanceReconciliationTriage",
+    "listFinanceReconciliationTriages"
+  ]);
   if (store?.kind === "pg") {
     const missingPgMarketplaceStoreMethods = requiredPgMarketplaceStoreMethods.filter(
       (methodName) => typeof store?.[methodName] !== "function"
@@ -554,6 +563,14 @@ export function createApi({
     if (missingPgMarketplaceStoreMethods.length > 0) {
       throw new TypeError(
         `pg store missing required marketplace methods: ${missingPgMarketplaceStoreMethods.join(", ")}`
+      );
+    }
+    const missingPgFinanceReconciliationStoreMethods = requiredPgFinanceReconciliationStoreMethods.filter(
+      (methodName) => typeof store?.[methodName] !== "function"
+    );
+    if (missingPgFinanceReconciliationStoreMethods.length > 0) {
+      throw new TypeError(
+        `pg store missing required finance reconciliation methods: ${missingPgFinanceReconciliationStoreMethods.join(", ")}`
       );
     }
   }
@@ -3160,6 +3177,12 @@ export function createApi({
       (typeof process !== "undefined" ? process.env.WORK_ORDER_REQUIRE_ACCEPTANCE_BINDING : null);
     return parseBooleanLike(raw, false);
   })();
+  const workOrderRequireIntentBindingValue = (() => {
+    const raw =
+      workOrderRequireIntentBinding ??
+      (typeof process !== "undefined" ? process.env.WORK_ORDER_REQUIRE_INTENT_BINDING : null);
+    return parseBooleanLike(raw, false);
+  })();
   const x402QuoteTtlSecondsValue = (() => {
     const raw = typeof process !== "undefined" ? process.env.X402_QUOTE_TTL_SECONDS : null;
     if (raw === null || raw === undefined || String(raw).trim() === "") return 300;
@@ -3807,6 +3830,57 @@ export function createApi({
     try {
       metrics.setGauge(name, labels, value);
     } catch {}
+  }
+
+  const SETTLEMENT_LATENCY_METRIC_ROUTE = Object.freeze({
+    "/runs/:runId/settlement/policy-replay": "policy_replay",
+    "/runs/:runId/settlement/replay-evaluate": "replay_evaluate",
+    "/runs/:runId/settlement/explainability": "explainability"
+  });
+  const settlementLatencyWindowSize = (() => {
+    const raw = Number.parseInt(
+      typeof process !== "undefined" ? String(process.env.SLO_SETTLEMENT_LATENCY_WINDOW_SIZE ?? "256") : "256",
+      10
+    );
+    if (!Number.isSafeInteger(raw) || raw < 10) return 256;
+    return Math.min(raw, 10_000);
+  })();
+  const settlementLatencySamplesByRoute = new Map(
+    Object.values(SETTLEMENT_LATENCY_METRIC_ROUTE).map((routeKey) => [routeKey, []])
+  );
+
+  function resolveSettlementLatencyRouteKey({ route, requestPath }) {
+    const direct = SETTLEMENT_LATENCY_METRIC_ROUTE[route];
+    if (direct) return direct;
+    const pathValue = typeof requestPath === "string" ? requestPath : "";
+    if (/^\/runs\/[^/]+\/settlement\/policy-replay$/u.test(pathValue)) return "policy_replay";
+    if (/^\/runs\/[^/]+\/settlement\/replay-evaluate$/u.test(pathValue)) return "replay_evaluate";
+    if (/^\/runs\/[^/]+\/settlement\/explainability$/u.test(pathValue)) return "explainability";
+    return null;
+  }
+
+  function recordSettlementRouteLatencyMetric({ route, requestPath, durationMs }) {
+    const routeKey = resolveSettlementLatencyRouteKey({ route, requestPath });
+    if (!routeKey) return;
+    const safeDurationMs = Number(durationMs);
+    if (!Number.isFinite(safeDurationMs) || safeDurationMs < 0) return;
+
+    const samples = settlementLatencySamplesByRoute.get(routeKey) ?? [];
+    samples.push(Math.round(safeDurationMs));
+    if (samples.length > settlementLatencyWindowSize) {
+      samples.splice(0, samples.length - settlementLatencyWindowSize);
+    }
+    settlementLatencySamplesByRoute.set(routeKey, samples);
+
+    const p50 = computePercentile(samples, 50);
+    const p95 = computePercentile(samples, 95);
+    metricInc("run_settlement_latency_samples_total", { route: routeKey }, 1);
+    metricGauge("run_settlement_read_latency_ms_last_gauge", { route: routeKey }, safeDurationMs);
+    if (Number.isFinite(p50)) metricGauge("run_settlement_read_latency_ms_p50_gauge", { route: routeKey }, p50);
+    if (Number.isFinite(p95)) metricGauge("run_settlement_read_latency_ms_p95_gauge", { route: routeKey }, p95);
+    metricGauge(`run_settlement_${routeKey}_latency_ms_last_gauge`, null, safeDurationMs);
+    if (Number.isFinite(p50)) metricGauge(`run_settlement_${routeKey}_latency_ms_p50_gauge`, null, p50);
+    if (Number.isFinite(p95)) metricGauge(`run_settlement_${routeKey}_latency_ms_p95_gauge`, null, p95);
   }
 
   function classifyOutboxDebugRowState(row) {
@@ -11248,9 +11322,7 @@ export function createApi({
       tenantId,
       signerKeyId,
       at: typeof at === "string" && at.trim() !== "" ? at.trim() : nowIso(),
-      now: nowIso(),
-      requireRegistered: false,
-      enforceCurrentValidity: true
+      requireRegistered: false
     });
     if (lifecycle.ok) return;
     const err = new TypeError(`${artifactLabel} signer key blocked: ${lifecycle.reasonCode ?? "SIGNER_KEY_INVALID"}`);
@@ -11262,10 +11334,7 @@ export function createApi({
       signerStatus: lifecycle.signerStatus ?? null,
       validFrom: lifecycle.validFrom ?? null,
       validTo: lifecycle.validTo ?? null,
-      rotatedAt: lifecycle.rotatedAt ?? null,
-      revokedAt: lifecycle.revokedAt ?? null,
-      validAt: lifecycle.validAt ?? null,
-      validNow: lifecycle.validNow ?? null
+      revokedAt: lifecycle.revokedAt ?? null
     };
     throw err;
   }
@@ -17388,33 +17457,6 @@ export function createApi({
       });
     }
 
-    const delegationParentGrantHash =
-      typeof delegationChain.parentGrantHash === "string" && delegationChain.parentGrantHash.trim() !== ""
-        ? delegationChain.parentGrantHash.trim().toLowerCase()
-        : null;
-    const authorityGrantHash =
-      typeof authorityGrant?.grantHash === "string" && authorityGrant.grantHash.trim() !== ""
-        ? authorityGrant.grantHash.trim().toLowerCase()
-        : null;
-    if (Number.isSafeInteger(delegationDepth) && delegationDepth > 0 && !delegationParentGrantHash) {
-      throw consistencyError({
-        code: "X402_AUTHORITY_DELEGATION_PARENT_MISSING",
-        message: "delegation chain parent grant hash is required when delegation depth > 0",
-        field: "chainBinding.parentGrantHash",
-        delegationValue: delegationParentGrantHash,
-        authorityValue: authorityGrantHash
-      });
-    }
-    if (delegationParentGrantHash && authorityGrantHash && delegationParentGrantHash !== authorityGrantHash) {
-      throw consistencyError({
-        code: "X402_AUTHORITY_DELEGATION_PARENT_MISMATCH",
-        message: "delegation parent grant hash must match authority grant hash",
-        field: "chainBinding.parentGrantHash",
-        delegationValue: delegationParentGrantHash,
-        authorityValue: authorityGrantHash
-      });
-    }
-
     const delegationRootGrantHash =
       typeof delegationChain.rootGrantHash === "string" && delegationChain.rootGrantHash.trim() !== ""
         ? delegationChain.rootGrantHash.trim().toLowerCase()
@@ -17439,6 +17481,28 @@ export function createApi({
         field: "chainBinding.rootGrantHash",
         delegationValue: delegationRootGrantHash,
         authorityValue: authorityRootGrantHash
+      });
+    }
+    const delegationParentGrantHash =
+      typeof delegationChain.parentGrantHash === "string" && delegationChain.parentGrantHash.trim() !== ""
+        ? delegationChain.parentGrantHash.trim().toLowerCase()
+        : null;
+    const authorityGrantHash =
+      typeof authorityGrant?.grantHash === "string" && authorityGrant.grantHash.trim() !== ""
+        ? authorityGrant.grantHash.trim().toLowerCase()
+        : null;
+    if (
+      Number.isSafeInteger(authorityDepth) &&
+      authorityDepth > 0 &&
+      authorityGrantHash &&
+      delegationParentGrantHash !== authorityGrantHash
+    ) {
+      throw consistencyError({
+        code: "X402_AUTHORITY_DELEGATION_PARENT_MISMATCH",
+        message: "delegation parent grant hash does not match authority grant hash",
+        field: "chainBinding.parentGrantHash",
+        delegationValue: delegationParentGrantHash,
+        authorityValue: authorityGrantHash
       });
     }
     const isAuthorityRootDepthZero = Number.isSafeInteger(authorityDepth) && authorityDepth === 0;
@@ -19441,6 +19505,125 @@ export function createApi({
     return rows;
   }
 
+  function readRouterLaunchMetadataFromRfq(rfq) {
+    const metadata =
+      rfq?.metadata && typeof rfq.metadata === "object" && !Array.isArray(rfq.metadata) ? rfq.metadata : null;
+    const routerLaunch =
+      metadata?.routerLaunch && typeof metadata.routerLaunch === "object" && !Array.isArray(metadata.routerLaunch)
+        ? metadata.routerLaunch
+        : null;
+    if (!routerLaunch) return null;
+    const launchId =
+      typeof routerLaunch.launchId === "string" && routerLaunch.launchId.trim() !== "" ? routerLaunch.launchId.trim() : null;
+    const taskId = typeof routerLaunch.taskId === "string" && routerLaunch.taskId.trim() !== "" ? routerLaunch.taskId.trim() : null;
+    const taskIndex = Number(routerLaunch.taskIndex);
+    if (!launchId || !taskId || !Number.isSafeInteger(taskIndex) || taskIndex < 1) return null;
+    return normalizeForCanonicalJson(
+      {
+        schemaVersion:
+          typeof routerLaunch.schemaVersion === "string" && routerLaunch.schemaVersion.trim() !== ""
+            ? routerLaunch.schemaVersion.trim()
+            : null,
+        launchId,
+        launchHash:
+          typeof routerLaunch.launchHash === "string" && /^[0-9a-f]{64}$/i.test(routerLaunch.launchHash.trim())
+            ? routerLaunch.launchHash.trim().toLowerCase()
+            : null,
+        requestTextSha256:
+          typeof routerLaunch.requestTextSha256 === "string" && /^[0-9a-f]{64}$/i.test(routerLaunch.requestTextSha256.trim())
+            ? routerLaunch.requestTextSha256.trim().toLowerCase()
+            : null,
+        planId: typeof routerLaunch.planId === "string" && routerLaunch.planId.trim() !== "" ? routerLaunch.planId.trim() : null,
+        planHash:
+          typeof routerLaunch.planHash === "string" && /^[0-9a-f]{64}$/i.test(routerLaunch.planHash.trim())
+            ? routerLaunch.planHash.trim().toLowerCase()
+            : null,
+        taskId,
+        taskIndex,
+        scope: typeof routerLaunch.scope === "string" && routerLaunch.scope.trim() !== "" ? routerLaunch.scope.trim().toLowerCase() : null,
+        dependsOnTaskIds: Array.isArray(routerLaunch.dependsOnTaskIds)
+          ? [...new Set(routerLaunch.dependsOnTaskIds.map((row) => String(row ?? "").trim()).filter(Boolean))].sort((left, right) =>
+              left.localeCompare(right)
+            )
+          : [],
+        candidateAgentIds: Array.isArray(routerLaunch.candidateAgentIds)
+          ? [...new Set(routerLaunch.candidateAgentIds.map((row) => String(row ?? "").trim()).filter(Boolean))]
+          : []
+      },
+      { path: "$" }
+    );
+  }
+
+  function listMarketplaceRfqsByRouterLaunchId({
+    tenantId,
+    launchId,
+    posterAgentId = null
+  } = {}) {
+    const normalizedLaunchId =
+      typeof launchId === "string" && launchId.trim() !== "" ? launchId.trim() : null;
+    if (!normalizedLaunchId) return [];
+    const rfqs = listMarketplaceRfqs({ tenantId, status: "all", posterAgentId });
+    const rows = [];
+    for (const rfq of rfqs) {
+      const launch = readRouterLaunchMetadataFromRfq(rfq);
+      if (!launch || launch.launchId !== normalizedLaunchId) continue;
+      rows.push(rfq);
+    }
+    rows.sort((left, right) => {
+      const leftLaunch = readRouterLaunchMetadataFromRfq(left);
+      const rightLaunch = readRouterLaunchMetadataFromRfq(right);
+      const leftIndex = Number(leftLaunch?.taskIndex ?? Number.MAX_SAFE_INTEGER);
+      const rightIndex = Number(rightLaunch?.taskIndex ?? Number.MAX_SAFE_INTEGER);
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+      const leftTaskId = String(leftLaunch?.taskId ?? "");
+      const rightTaskId = String(rightLaunch?.taskId ?? "");
+      if (leftTaskId !== rightTaskId) return leftTaskId.localeCompare(rightTaskId);
+      return String(left?.rfqId ?? "").localeCompare(String(right?.rfqId ?? ""));
+    });
+    return rows;
+  }
+
+  function deriveRouterLaunchStatusTaskSnapshot({
+    rfqStatus,
+    missingDependencies = [],
+    cancelledDependencies = [],
+    pendingDependencies = [],
+    bidCount = 0
+  } = {}) {
+    const normalizedStatus = typeof rfqStatus === "string" ? rfqStatus.trim().toLowerCase() : "open";
+    if (normalizedStatus === "assigned") {
+      return { state: ROUTER_LAUNCH_STATUS_TASK_STATE.ASSIGNED, blockedByTaskIds: [] };
+    }
+    if (normalizedStatus === "closed") {
+      return { state: ROUTER_LAUNCH_STATUS_TASK_STATE.CLOSED, blockedByTaskIds: [] };
+    }
+    if (normalizedStatus === "cancelled") {
+      return { state: ROUTER_LAUNCH_STATUS_TASK_STATE.CANCELLED, blockedByTaskIds: [] };
+    }
+    if (missingDependencies.length > 0) {
+      return {
+        state: ROUTER_LAUNCH_STATUS_TASK_STATE.BLOCKED_DEPENDENCY_MISSING,
+        blockedByTaskIds: [...missingDependencies].sort((left, right) => left.localeCompare(right))
+      };
+    }
+    if (cancelledDependencies.length > 0) {
+      return {
+        state: ROUTER_LAUNCH_STATUS_TASK_STATE.BLOCKED_DEPENDENCY_CANCELLED,
+        blockedByTaskIds: [...cancelledDependencies].sort((left, right) => left.localeCompare(right))
+      };
+    }
+    if (pendingDependencies.length > 0) {
+      return {
+        state: ROUTER_LAUNCH_STATUS_TASK_STATE.BLOCKED_DEPENDENCIES_PENDING,
+        blockedByTaskIds: [...pendingDependencies].sort((left, right) => left.localeCompare(right))
+      };
+    }
+    return {
+      state: bidCount > 0 ? ROUTER_LAUNCH_STATUS_TASK_STATE.OPEN_READY : ROUTER_LAUNCH_STATUS_TASK_STATE.OPEN_NO_BIDS,
+      blockedByTaskIds: []
+    };
+  }
+
   function toMarketplaceRfqResponse(rfq) {
     if (!rfq || typeof rfq !== "object" || Array.isArray(rfq)) return null;
     return {
@@ -19959,9 +20142,7 @@ export function createApi({
       tenantId,
       signerKeyId,
       at: normalizedPublishSignature?.signedAt ?? null,
-      now: nowIso(),
-      requireRegistered: false,
-      enforceCurrentValidity: true
+      requireRegistered: false
     });
     if (!signerLifecycle.ok) {
       return {
@@ -19975,10 +20156,7 @@ export function createApi({
           signerStatus: signerLifecycle.signerStatus ?? null,
           validFrom: signerLifecycle.validFrom ?? null,
           validTo: signerLifecycle.validTo ?? null,
-          rotatedAt: signerLifecycle.rotatedAt ?? null,
-          revokedAt: signerLifecycle.revokedAt ?? null,
-          validAt: signerLifecycle.validAt ?? null,
-          validNow: signerLifecycle.validNow ?? null
+          revokedAt: signerLifecycle.revokedAt ?? null
         })
       };
     }
@@ -20382,30 +20560,6 @@ export function createApi({
     return evaluateSessionSignerLifecycleAt({ signerKey, at, now, enforceCurrentValidity });
   }
 
-  async function buildReplayVerificationSignerRegistry({
-    tenantId,
-    replayPack = null,
-    transcript = null
-  } = {}) {
-    const keyIds = new Set();
-    const collect = (artifact) => {
-      if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) return;
-      const keyId = typeof artifact?.signature?.keyId === "string" ? artifact.signature.keyId.trim() : "";
-      if (keyId) keyIds.add(keyId);
-    };
-    collect(replayPack);
-    collect(transcript);
-    if (keyIds.size === 0) return null;
-
-    const registry = new Map();
-    const sorted = [...keyIds].sort((a, b) => a.localeCompare(b));
-    for (const keyId of sorted) {
-      const signerKey = await getSignerKeyRecord({ tenantId: normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID), keyId });
-      registry.set(keyId, signerKey ?? null);
-    }
-    return registry;
-  }
-
   async function resolveVerifiedSessionMaterial({ tenantId, sessionId, artifactLabel = "session artifact" } = {}) {
     const session = await getSessionRecord({ tenantId, sessionId });
     if (!session) {
@@ -20443,9 +20597,7 @@ export function createApi({
         tenantId,
         signerKeyId: event?.signerKeyId ?? null,
         at: event?.at ?? null,
-        now: nowIso(),
-        signerKeyCache,
-        enforceCurrentValidity: true
+        signerKeyCache
       });
       if (lifecycle.ok) continue;
       return {
@@ -20463,10 +20615,7 @@ export function createApi({
           signerStatus: lifecycle.signerStatus ?? null,
           validFrom: lifecycle.validFrom ?? null,
           validTo: lifecycle.validTo ?? null,
-          rotatedAt: lifecycle.rotatedAt ?? null,
-          revokedAt: lifecycle.revokedAt ?? null,
-          validAt: lifecycle.validAt ?? null,
-          validNow: lifecycle.validNow ?? null
+          revokedAt: lifecycle.revokedAt ?? null
         }
       };
     }
@@ -20600,9 +20749,7 @@ export function createApi({
         tenantId,
         signerKeyId: event?.signerKeyId ?? null,
         at: event?.at ?? null,
-        now: nowIso(),
-        signerKeyCache,
-        enforceCurrentValidity: true
+        signerKeyCache
       });
       if (signerLifecycle.ok) continue;
       return {
@@ -20621,10 +20768,7 @@ export function createApi({
             signerStatus: signerLifecycle.signerStatus ?? null,
             validFrom: signerLifecycle.validFrom ?? null,
             validTo: signerLifecycle.validTo ?? null,
-            rotatedAt: signerLifecycle.rotatedAt ?? null,
-            revokedAt: signerLifecycle.revokedAt ?? null,
-            validAt: signerLifecycle.validAt ?? null,
-            validNow: signerLifecycle.validNow ?? null
+            revokedAt: signerLifecycle.revokedAt ?? null
           },
           { path: "$" }
         )
@@ -20746,6 +20890,183 @@ export function createApi({
     throw new TypeError("sub-agent work orders not supported for this store");
   }
 
+  async function getIntentContractRecord({ tenantId, intentId }) {
+    if (typeof store.getIntentContract === "function") return store.getIntentContract({ tenantId, intentId });
+    if (store.intentContracts instanceof Map) return store.intentContracts.get(makeScopedKey({ tenantId, id: String(intentId) })) ?? null;
+    throw new TypeError("intent contracts not supported for this store");
+  }
+
+  async function listIntentContractRecords({
+    tenantId,
+    intentId = null,
+    proposerAgentId = null,
+    counterpartyAgentId = null,
+    status = null,
+    limit = 200,
+    offset = 0
+  } = {}) {
+    if (typeof store.listIntentContracts === "function") {
+      return store.listIntentContracts({ tenantId, intentId, proposerAgentId, counterpartyAgentId, status, limit, offset });
+    }
+    if (!(store.intentContracts instanceof Map)) throw new TypeError("intent contracts not supported for this store");
+    const intentFilter = typeof intentId === "string" && intentId.trim() !== "" ? intentId.trim() : null;
+    const proposerFilter =
+      typeof proposerAgentId === "string" && proposerAgentId.trim() !== "" ? proposerAgentId.trim() : null;
+    const counterpartyFilter =
+      typeof counterpartyAgentId === "string" && counterpartyAgentId.trim() !== "" ? counterpartyAgentId.trim() : null;
+    const statusFilter = typeof status === "string" && status.trim() !== "" ? status.trim().toLowerCase() : null;
+    const safeLimit = Math.min(1000, Number.isSafeInteger(limit) && limit > 0 ? limit : 200);
+    const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+    const rows = [];
+    for (const row of store.intentContracts.values()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
+      if (intentFilter && String(row.intentId ?? "") !== intentFilter) continue;
+      if (proposerFilter && String(row.proposerAgentId ?? "") !== proposerFilter) continue;
+      if (counterpartyFilter && String(row.counterpartyAgentId ?? "") !== counterpartyFilter) continue;
+      if (statusFilter && String(row.status ?? "").toLowerCase() !== statusFilter) continue;
+      rows.push(row);
+    }
+    rows.sort((left, right) => String(left.intentId ?? "").localeCompare(String(right.intentId ?? "")));
+    return rows.slice(safeOffset, safeOffset + safeLimit);
+  }
+
+  function normalizeWorkOrderIntentBindingInput(rawValue, { fieldName = "intentBinding", allowNull = true } = {}) {
+    if (rawValue === null || rawValue === undefined) {
+      if (allowNull) return null;
+      throw new TypeError(`${fieldName} is required`);
+    }
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+      throw new TypeError(`${fieldName} must be an object`);
+    }
+    const intentId =
+      typeof rawValue.intentId === "string" && rawValue.intentId.trim() !== ""
+        ? rawValue.intentId.trim()
+        : null;
+    if (!intentId) throw new TypeError(`${fieldName}.intentId is required`);
+    const intentHash =
+      typeof rawValue.intentHash === "string" && rawValue.intentHash.trim() !== ""
+        ? normalizeSha256HashInput(rawValue.intentHash.trim(), `${fieldName}.intentHash`, { allowNull: false })
+        : null;
+    const boundAt =
+      typeof rawValue.boundAt === "string" && rawValue.boundAt.trim() !== ""
+        ? parseAsOfDateTime(rawValue.boundAt.trim(), { fieldName: `${fieldName}.boundAt` })
+        : null;
+    return {
+      schemaVersion: "IntentBinding.v1",
+      intentId,
+      intentHash,
+      boundAt
+    };
+  }
+
+  async function resolveAcceptedIntentBindingForWorkOrder({
+    tenantId,
+    intentBindingInput = null,
+    principalAgentId = null,
+    subAgentId = null,
+    boundAt = nowIso(),
+    requireBinding = false,
+    fieldName = "intentBinding"
+  } = {}) {
+    const normalizedIntentBindingInput = normalizeWorkOrderIntentBindingInput(intentBindingInput, { fieldName, allowNull: true });
+    if (!normalizedIntentBindingInput) {
+      if (!requireBinding) {
+        return {
+          intentBinding: null,
+          intentContract: null
+        };
+      }
+      const err = new Error("accepted intent binding is required");
+      err.statusCode = 409;
+      err.code = "WORK_ORDER_INTENT_BINDING_REQUIRED";
+      throw err;
+    }
+
+    const intentContract = await getIntentContractRecord({
+      tenantId,
+      intentId: normalizedIntentBindingInput.intentId
+    });
+    if (!intentContract) {
+      const err = new Error("intent contract not found");
+      err.statusCode = 404;
+      err.code = "NOT_FOUND";
+      throw err;
+    }
+    try {
+      validateIntentContractV1(intentContract);
+    } catch (validationError) {
+      const err = new Error(`intent contract invalid: ${validationError?.message ?? "invalid intent contract"}`);
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_INVALID";
+      throw err;
+    }
+
+    const intentStatus = String(intentContract?.status ?? "").trim().toLowerCase();
+    if (intentStatus !== INTENT_CONTRACT_STATUS.ACCEPTED) {
+      const err = new Error("intent contract must be accepted before work-order binding");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_NOT_ACCEPTED";
+      throw err;
+    }
+    if (normalizeTenantId(intentContract?.tenantId ?? DEFAULT_TENANT_ID) !== normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID)) {
+      const err = new Error("intent contract tenant mismatch");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_TENANT_MISMATCH";
+      throw err;
+    }
+
+    const intentParticipants = new Set([
+      String(intentContract?.proposerAgentId ?? "").trim(),
+      String(intentContract?.counterpartyAgentId ?? "").trim()
+    ]);
+    const workOrderParticipants = new Set([String(principalAgentId ?? "").trim(), String(subAgentId ?? "").trim()]);
+    if (
+      !intentParticipants.has(String(principalAgentId ?? "").trim()) ||
+      !intentParticipants.has(String(subAgentId ?? "").trim()) ||
+      intentParticipants.size !== workOrderParticipants.size
+    ) {
+      const err = new Error("intent contract participants must match work order participants");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_PARTICIPANT_MISMATCH";
+      throw err;
+    }
+
+    const contractIntentHash = normalizeSha256HashInput(intentContract?.intentHash, "intentContract.intentHash", { allowNull: false });
+    if (normalizedIntentBindingInput.intentHash && normalizedIntentBindingInput.intentHash !== contractIntentHash) {
+      const err = new Error("intentHash does not match accepted intent contract");
+      err.statusCode = 409;
+      err.code = "INTENT_CONTRACT_HASH_MISMATCH";
+      throw err;
+    }
+
+    return {
+      intentContract,
+      intentBinding: normalizeForCanonicalJson(
+        {
+          schemaVersion: "IntentBinding.v1",
+          intentId: normalizedIntentBindingInput.intentId,
+          intentHash: contractIntentHash,
+          boundAt: normalizedIntentBindingInput.boundAt ?? parseAsOfDateTime(boundAt, { fieldName: "boundAt" })
+        },
+        { path: "$.intentBinding" }
+      )
+    };
+  }
+
+  function parseIntentContractStatus(rawValue, { allowNull = true, fieldName = "status" } = {}) {
+    if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+      if (allowNull) return null;
+      throw new TypeError(`${fieldName} is required`);
+    }
+    const value = String(rawValue).trim().toLowerCase();
+    const allowed = new Set(Object.values(INTENT_CONTRACT_STATUS));
+    if (!allowed.has(value)) {
+      throw new TypeError(`${fieldName} must be one of ${Array.from(allowed.values()).join("|")}`);
+    }
+    return value;
+  }
+
   async function getTaskQuoteRecord({ tenantId, quoteId }) {
     if (typeof store.getTaskQuote === "function") return store.getTaskQuote({ tenantId, quoteId });
     if (store.taskQuotes instanceof Map) return store.taskQuotes.get(makeScopedKey({ tenantId, id: String(quoteId) })) ?? null;
@@ -20778,287 +21099,12 @@ export function createApi({
     throw new TypeError("sub-agent completion receipts not supported for this store");
   }
 
-  const TASK_INTENT_NEGOTIATION_BINDING_SCHEMA_VERSION = "TaskIntentNegotiationBinding.v1";
-
-  function normalizeTaskIntentNegotiationBinding(rawValue, { fieldPath = "metadata.intentNegotiation", allowNull = true } = {}) {
-    if (allowNull && (rawValue === null || rawValue === undefined)) return null;
-    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
-      throw new TypeError(`${fieldPath} must be an object`);
-    }
-    const schemaVersion =
-      typeof rawValue.schemaVersion === "string" && rawValue.schemaVersion.trim() !== ""
-        ? rawValue.schemaVersion.trim()
-        : TASK_INTENT_NEGOTIATION_BINDING_SCHEMA_VERSION;
-    if (schemaVersion !== TASK_INTENT_NEGOTIATION_BINDING_SCHEMA_VERSION) {
-      throw new TypeError(`${fieldPath}.schemaVersion must be ${TASK_INTENT_NEGOTIATION_BINDING_SCHEMA_VERSION}`);
-    }
-    const intentContract = rawValue.intentContract ?? null;
-    validateIntentContractV1(intentContract);
-    const event = rawValue.event ?? null;
-    validateIntentNegotiationEventV1(event, { intentContract });
-    const transcriptStatusRaw =
-      typeof rawValue.transcriptStatus === "string" && rawValue.transcriptStatus.trim() !== ""
-        ? rawValue.transcriptStatus.trim().toLowerCase()
-        : null;
-    const transcriptStatus =
-      transcriptStatusRaw === null
-        ? null
-        : transcriptStatusRaw === "open" || transcriptStatusRaw === "accepted"
-          ? transcriptStatusRaw
-          : (() => {
-              throw new TypeError(`${fieldPath}.transcriptStatus must be open|accepted`);
-            })();
-    const transcriptHash = normalizeSha256HashInput(rawValue.transcriptHash ?? null, `${fieldPath}.transcriptHash`, { allowNull: true });
-    return normalizeForCanonicalJson(
-      {
-        schemaVersion,
-        intentContract: normalizeForCanonicalJson(intentContract, { path: `$.${fieldPath}.intentContract` }),
-        event: normalizeForCanonicalJson(event, { path: `$.${fieldPath}.event` }),
-        transcriptStatus,
-        transcriptHash
-      },
-      { path: `$.${fieldPath}` }
-    );
-  }
-
-  function extractTaskIntentNegotiationBinding(taskRecord, { fieldPath = "taskRecord", allowNull = true } = {}) {
-    if (allowNull && (!taskRecord || typeof taskRecord !== "object" || Array.isArray(taskRecord))) return null;
-    const metadata =
-      taskRecord?.metadata && typeof taskRecord.metadata === "object" && !Array.isArray(taskRecord.metadata)
-        ? taskRecord.metadata
-        : null;
-    if (!metadata) return null;
-    const rawBinding = metadata.intentNegotiation ?? null;
-    return normalizeTaskIntentNegotiationBinding(rawBinding, {
-      fieldPath: `${fieldPath}.metadata.intentNegotiation`,
-      allowNull: true
-    });
-  }
-
-  function mergeTaskIntentNegotiationMetadata({ metadata = null, intentNegotiationBinding = null } = {}) {
-    const metadataSeed =
-      metadata && typeof metadata === "object" && !Array.isArray(metadata) ? normalizeForCanonicalJson(metadata, { path: "$.metadata" }) : null;
-    if (!intentNegotiationBinding) return metadataSeed;
-    const merged = metadataSeed && typeof metadataSeed === "object" && !Array.isArray(metadataSeed) ? { ...metadataSeed } : {};
-    merged.intentNegotiation = normalizeTaskIntentNegotiationBinding(intentNegotiationBinding, {
-      fieldPath: "metadata.intentNegotiation",
-      allowNull: false
-    });
-    return normalizeForCanonicalJson(merged, { path: "$.metadata" });
-  }
-
-  function sortIntentNegotiationEvents(events = []) {
-    return [...events].sort((left, right) => {
-      const atOrder = String(left?.at ?? "").localeCompare(String(right?.at ?? ""));
-      if (atOrder !== 0) return atOrder;
-      return String(left?.eventId ?? "").localeCompare(String(right?.eventId ?? ""));
-    });
-  }
-
-  function buildTaskIntentNegotiationBinding({
-    eventType,
-    tenantId,
-    intentContract,
-    actorAgentId,
-    eventId = null,
-    at = null,
-    eventMetadata = null,
-    prevEventHash = null,
-    priorBindings = []
-  } = {}) {
-    const normalizedEventType = String(eventType ?? "").trim().toLowerCase();
-    if (
-      normalizedEventType !== INTENT_NEGOTIATION_EVENT_TYPE.PROPOSE &&
-      normalizedEventType !== INTENT_NEGOTIATION_EVENT_TYPE.COUNTER &&
-      normalizedEventType !== INTENT_NEGOTIATION_EVENT_TYPE.ACCEPT
-    ) {
-      throw new TypeError("intent negotiation eventType must be propose|counter|accept");
-    }
-    validateIntentContractV1(intentContract);
-    if (String(intentContract.tenantId ?? "") !== String(tenantId ?? "")) {
-      throw new TypeError("intent contract tenantId must match request tenant");
-    }
-    const normalizedActorAgentId =
-      typeof actorAgentId === "string" && actorAgentId.trim() !== ""
-        ? actorAgentId.trim()
-        : normalizedEventType === INTENT_NEGOTIATION_EVENT_TYPE.PROPOSE
-          ? String(intentContract.proposerAgentId ?? "").trim()
-          : String(intentContract.responderAgentId ?? "").trim();
-    if (!normalizedActorAgentId) throw new TypeError("intent negotiation actorAgentId is required");
-    const validActors = new Set([String(intentContract.proposerAgentId), String(intentContract.responderAgentId)]);
-    if (!validActors.has(normalizedActorAgentId)) {
-      throw new TypeError("intent negotiation actorAgentId must match proposer/responder");
-    }
-
-    const normalizedPriorBindings = [];
-    for (const binding of Array.isArray(priorBindings) ? priorBindings : []) {
-      if (!binding) continue;
-      normalizedPriorBindings.push(
-        normalizeTaskIntentNegotiationBinding(binding, {
-          fieldPath: "priorIntentNegotiation",
-          allowNull: false
-        })
-      );
-    }
-    for (const priorBinding of normalizedPriorBindings) {
-      const priorContract = priorBinding.intentContract;
-      if (String(priorContract.negotiationId ?? "") !== String(intentContract.negotiationId ?? "")) {
-        throw new TypeError("intent negotiationId must remain stable across transcript");
-      }
-    }
-    const priorEvents = sortIntentNegotiationEvents(normalizedPriorBindings.map((binding) => binding.event));
-    const lastPriorEvent = priorEvents.length > 0 ? priorEvents[priorEvents.length - 1] : null;
-    const normalizedPrevEventHash = normalizeSha256HashInput(prevEventHash, "intentPrevEventHash", { allowNull: true });
-    if (normalizedPrevEventHash && lastPriorEvent && normalizedPrevEventHash !== String(lastPriorEvent.eventHash ?? "").toLowerCase()) {
-      throw new TypeError("intentPrevEventHash does not match latest negotiation event hash");
-    }
-    const effectivePrevEventHash = normalizedPrevEventHash ?? (lastPriorEvent ? String(lastPriorEvent.eventHash ?? "").toLowerCase() : null);
-    const builtEvent = buildIntentNegotiationEventV1({
-      eventId: typeof eventId === "string" && eventId.trim() !== "" ? eventId.trim() : createId("inevent"),
-      eventType: normalizedEventType,
-      actorAgentId: normalizedActorAgentId,
-      intentContract,
-      prevEventHash: effectivePrevEventHash,
-      at: typeof at === "string" && at.trim() !== "" ? at.trim() : nowIso(),
-      metadata: eventMetadata && typeof eventMetadata === "object" && !Array.isArray(eventMetadata) ? eventMetadata : null
-    });
-    const transcript = evaluateIntentNegotiationTranscriptV1({
-      events: [...priorEvents, builtEvent]
-    });
-    return normalizeForCanonicalJson(
-      {
-        schemaVersion: TASK_INTENT_NEGOTIATION_BINDING_SCHEMA_VERSION,
-        intentContract,
-        event: builtEvent,
-        transcriptStatus: transcript.status,
-        transcriptHash: transcript.transcriptHash
-      },
-      { path: "$.intentNegotiation" }
-    );
-  }
-
-  function deriveWorkOrderIntentBindingFromTaskAcceptance(taskAcceptance, { fieldPath = "taskAcceptance" } = {}) {
-    const intentNegotiation = extractTaskIntentNegotiationBinding(taskAcceptance, { fieldPath, allowNull: true });
-    if (!intentNegotiation) return null;
-    const eventType = String(intentNegotiation.event?.eventType ?? "").trim().toLowerCase();
-    if (eventType !== INTENT_NEGOTIATION_EVENT_TYPE.ACCEPT) {
-      throw new TypeError(`${fieldPath}.metadata.intentNegotiation.event.eventType must be accept`);
-    }
-    return normalizeForCanonicalJson(
-      {
-        schemaVersion: SUB_AGENT_WORK_ORDER_INTENT_BINDING_SCHEMA_VERSION,
-        negotiationId: String(intentNegotiation.intentContract.negotiationId),
-        intentId: String(intentNegotiation.intentContract.intentId),
-        intentHash: String(intentNegotiation.intentContract.intentHash).toLowerCase(),
-        acceptedEventId: String(intentNegotiation.event.eventId),
-        acceptedEventHash: String(intentNegotiation.event.eventHash).toLowerCase(),
-        acceptanceId: String(taskAcceptance.acceptanceId),
-        acceptanceHash: normalizeSha256HashInput(taskAcceptance.acceptanceHash ?? null, `${fieldPath}.acceptanceHash`, { allowNull: true }),
-        acceptedAt: String(intentNegotiation.event.at)
-      },
-      { path: "$.workOrderIntentBinding" }
-    );
-  }
-
-  function normalizeWorkOrderIntentRefInput(rawValue, { fieldPath = "intentRef", allowNull = true } = {}) {
-    if (allowNull && (rawValue === null || rawValue === undefined)) return null;
-    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
-      throw new TypeError(`${fieldPath} must be an object`);
-    }
-    const negotiationId =
-      typeof rawValue.negotiationId === "string" && rawValue.negotiationId.trim() !== "" ? rawValue.negotiationId.trim() : null;
-    const intentId = typeof rawValue.intentId === "string" && rawValue.intentId.trim() !== "" ? rawValue.intentId.trim() : null;
-    if (!negotiationId || !intentId) {
-      throw new TypeError(`${fieldPath}.negotiationId and ${fieldPath}.intentId are required`);
-    }
-    return normalizeForCanonicalJson(
-      {
-        negotiationId,
-        intentId,
-        intentHash: normalizeSha256HashInput(rawValue.intentHash, `${fieldPath}.intentHash`, { allowNull: false }),
-        acceptedEventHash: normalizeSha256HashInput(rawValue.acceptedEventHash ?? null, `${fieldPath}.acceptedEventHash`, {
-          allowNull: true
-        })
-      },
-      { path: `$.${fieldPath}` }
-    );
-  }
-
   async function getStateCheckpointRecord({ tenantId, checkpointId }) {
     if (typeof store.getStateCheckpoint === "function") return store.getStateCheckpoint({ tenantId, checkpointId });
     if (store.stateCheckpoints instanceof Map) {
       return store.stateCheckpoints.get(makeScopedKey({ tenantId, id: String(checkpointId) })) ?? null;
     }
     throw new TypeError("state checkpoints not supported for this store");
-  }
-
-  async function listIdentityLogEntriesRecords({
-    tenantId,
-    agentId = null,
-    eventType = null,
-    entryId = null,
-    limit = 200,
-    offset = 0
-  } = {}) {
-    if (typeof store.listIdentityLogEntries === "function") {
-      return store.listIdentityLogEntries({ tenantId, agentId, eventType, entryId, limit, offset });
-    }
-    throw new TypeError("identity log not supported for this store");
-  }
-
-  async function getIdentityLogEntryRecord({ tenantId, entryId }) {
-    if (typeof store.getIdentityLogEntry === "function") return store.getIdentityLogEntry({ tenantId, entryId });
-    throw new TypeError("identity log not supported for this store");
-  }
-
-  async function getIdentityLogCheckpointRecord({ tenantId, generatedAt = null } = {}) {
-    if (typeof store.getIdentityLogCheckpoint === "function") {
-      return store.getIdentityLogCheckpoint({ tenantId, generatedAt });
-    }
-    const entries = await listIdentityLogEntriesRecords({ tenantId, limit: 10_000, offset: 0 });
-    return buildIdentityLogCheckpoint({
-      tenantId,
-      entries,
-      generatedAt: generatedAt ?? nowIso()
-    });
-  }
-
-  async function appendIdentityLogEventsForIdentityTransition({
-    tenantId,
-    beforeIdentity = null,
-    afterIdentity,
-    reasonCode = null,
-    reason = null,
-    metadata = null,
-    audit = null
-  } = {}) {
-    if (typeof store.appendIdentityLogEvent !== "function") {
-      throw new TypeError("identity log append not supported for this store");
-    }
-    const eventTypes = deriveIdentityLogEventTypes({ beforeIdentity, afterIdentity });
-    const appended = [];
-    for (const eventType of eventTypes) {
-      const context = buildIdentityLogEventContext({ eventType, beforeIdentity, afterIdentity });
-      // eslint-disable-next-line no-await-in-loop
-      const entry = await store.appendIdentityLogEvent({
-        tenantId,
-        agentId: afterIdentity?.agentId,
-        eventType,
-        beforeIdentity,
-        afterIdentity,
-        reasonCode,
-        reason,
-        metadata: {
-          ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
-          context
-        },
-        occurredAt: afterIdentity?.updatedAt ?? nowIso(),
-        recordedAt: nowIso(),
-        audit
-      });
-      appended.push(entry);
-    }
-    return appended;
   }
 
   function normalizeStateCheckpointArtifactHash(value) {
@@ -23934,6 +23980,9 @@ export function createApi({
     if (typeof store.getFinanceReconciliationTriage === "function") {
       return store.getFinanceReconciliationTriage({ tenantId, triageKey });
     }
+    if (store?.kind === "pg") {
+      throw new TypeError("finance reconciliation triage not supported for this store");
+    }
     if (store.financeReconciliationTriages instanceof Map) {
       return store.financeReconciliationTriages.get(makeScopedKey({ tenantId, id: String(triageKey) })) ?? null;
     }
@@ -23943,6 +23992,9 @@ export function createApi({
   async function putFinanceReconciliationTriageRecord({ tenantId, triage, audit = null }) {
     if (typeof store.putFinanceReconciliationTriage === "function") {
       return store.putFinanceReconciliationTriage({ tenantId, triage, audit });
+    }
+    if (store?.kind === "pg") {
+      throw new TypeError("finance reconciliation triage not supported for this store");
     }
     if (store.financeReconciliationTriages instanceof Map) {
       const key = makeScopedKey({ tenantId, id: String(triage?.triageKey ?? "") });
@@ -23966,6 +24018,9 @@ export function createApi({
   } = {}) {
     if (typeof store.listFinanceReconciliationTriages === "function") {
       return store.listFinanceReconciliationTriages({ tenantId, period, status, sourceType, providerId, limit, offset });
+    }
+    if (store?.kind === "pg") {
+      throw new TypeError("finance reconciliation triage not supported for this store");
     }
     if (!(store.financeReconciliationTriages instanceof Map)) {
       throw new TypeError("finance reconciliation triage not supported for this store");
@@ -24054,8 +24109,12 @@ export function createApi({
         providerId,
         pageSize: 1000
       });
-    } catch {
-      triages = [];
+    } catch (err) {
+      const reasonCode =
+        err?.code === "42P01"
+          ? "FINANCE_RECONCILIATION_TRIAGE_EVIDENCE_MISSING"
+          : "FINANCE_RECONCILIATION_TRIAGE_EVIDENCE_UNAVAILABLE";
+      throw makeHttpStatusError(409, "finance reconciliation triage evidence unavailable", { code: reasonCode });
     }
     const byTriageKey = new Map();
     for (const row of triages) {
@@ -24456,6 +24515,11 @@ export function createApi({
           String(a.operationId).localeCompare(String(b.operationId)) ||
           String(a.artifactId ?? "").localeCompare(String(b.artifactId ?? ""))
       );
+    if (!payoutInstructions.length) {
+      throw makeHttpStatusError(409, "money rail reconciliation requires payout instruction evidence", {
+        code: "MONEY_RAIL_RECONCILE_EVIDENCE_REQUIRED"
+      });
+    }
 
     const expectedByOperationId = new Map();
     const duplicateExpected = [];
@@ -25355,6 +25419,18 @@ export function createApi({
     NET: "net"
   });
 
+  const MONEY_RAIL_DEGRADED_ACTION = Object.freeze({
+    ENQUEUE_PAYOUT: "enqueue_payout",
+    SUBMIT_PAYOUT: "submit_payout"
+  });
+
+  const MONEY_RAIL_DEGRADED_BLOCK_CODE = Object.freeze({
+    [MONEY_RAIL_DEGRADED_ACTION.ENQUEUE_PAYOUT]: "MONEY_RAIL_DEGRADED_ENQUEUE_DENIED",
+    [MONEY_RAIL_DEGRADED_ACTION.SUBMIT_PAYOUT]: "MONEY_RAIL_DEGRADED_SUBMIT_DENIED"
+  });
+
+  const MONEY_RAIL_DEGRADED_DEFAULT_REASON_CODE = "MONEY_RAIL_PROVIDER_DEGRADED";
+
   function normalizeMoneyRailChargebackNegativeBalanceMode(value, { fieldName = "moneyRails.chargebacks.negativeBalanceMode" } = {}) {
     const normalized = normalizeNonEmptyStringOrNull(value);
     if (normalized === null) return MONEY_RAIL_CHARGEBACK_NEGATIVE_BALANCE_MODE.HOLD;
@@ -25390,6 +25466,58 @@ export function createApi({
         fieldName: "moneyRails.chargebacks.maxOutstandingCents",
         allowNull: true
       }),
+      updatedAt: normalizeBillingTimestampInput(value.updatedAt) ?? nowAt ?? null
+    };
+  }
+
+  function normalizeMoneyRailDegradedReasonCode(value, { fieldName = "moneyRails.degradedMode.reasonCode", allowNull = true } = {}) {
+    const normalized = normalizeNonEmptyStringOrNull(value);
+    if (!normalized) {
+      if (allowNull) return null;
+      throw new TypeError(`${fieldName} is required`);
+    }
+    const reasonCode = String(normalized).toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]{2,120}$/.test(reasonCode)) {
+      throw new TypeError(`${fieldName} must match ^[A-Z][A-Z0-9_]{2,120}$`);
+    }
+    return reasonCode;
+  }
+
+  function normalizeMoneyRailDegradedMode(value, { allowNull = true, nowAt = null } = {}) {
+    if (value === null || value === undefined) {
+      if (allowNull) return null;
+      return {
+        schemaVersion: "MoneyRailDegradedMode.v1",
+        enabled: false,
+        providerIds: null,
+        denyEnqueuePayouts: true,
+        denySubmitPayouts: true,
+        reasonCode: MONEY_RAIL_DEGRADED_DEFAULT_REASON_CODE,
+        updatedAt: nowAt ?? null
+      };
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new TypeError("moneyRails.degradedMode must be an object or null");
+    }
+    const enabled = value.enabled === true;
+    const denyEnqueuePayouts = value.denyEnqueuePayouts !== false;
+    const denySubmitPayouts = value.denySubmitPayouts !== false;
+    if (enabled && denyEnqueuePayouts !== true && denySubmitPayouts !== true) {
+      throw new TypeError("moneyRails.degradedMode must deny at least one payout action when enabled");
+    }
+    return {
+      schemaVersion: "MoneyRailDegradedMode.v1",
+      enabled,
+      providerIds: normalizeMoneyRailAllowedProviderIds(value.providerIds, {
+        fieldName: "moneyRails.degradedMode.providerIds"
+      }),
+      denyEnqueuePayouts,
+      denySubmitPayouts,
+      reasonCode:
+        normalizeMoneyRailDegradedReasonCode(value.reasonCode, {
+          fieldName: "moneyRails.degradedMode.reasonCode",
+          allowNull: true
+        }) ?? MONEY_RAIL_DEGRADED_DEFAULT_REASON_CODE,
       updatedAt: normalizeBillingTimestampInput(value.updatedAt) ?? nowAt ?? null
     };
   }
@@ -25559,6 +25687,7 @@ export function createApi({
         allowedProviderIds: null,
         connect: null,
         chargebacks: null,
+        degradedMode: null,
         updatedAt: nowAt ?? null
       };
     }
@@ -25580,6 +25709,7 @@ export function createApi({
       allowedProviderIds: normalizeMoneyRailAllowedProviderIds(input.allowedProviderIds),
       connect: normalizeMoneyRailConnectConfig(input.connect ?? null, { allowNull: true, nowAt }),
       chargebacks: normalizeMoneyRailChargebackPolicy(input.chargebacks ?? null, { allowNull: true, nowAt }),
+      degradedMode: normalizeMoneyRailDegradedMode(input.degradedMode ?? null, { allowNull: true, nowAt }),
       updatedAt: normalizeBillingTimestampInput(input.updatedAt) ?? nowAt ?? null
     };
   }
@@ -25600,7 +25730,34 @@ export function createApi({
       allowedProviderIds: null,
       connect: normalizeMoneyRailConnectConfig(null, { allowNull: false, nowAt: null }),
       chargebacks: normalizeMoneyRailChargebackPolicy(null, { allowNull: false, nowAt: null }),
+      degradedMode: normalizeMoneyRailDegradedMode(null, { allowNull: false, nowAt: null }),
       updatedAt: null
+    };
+  }
+
+  function evaluateMoneyRailDegradedModeGuard({ moneyRailControls, providerId, action } = {}) {
+    const degradedMode = normalizeMoneyRailDegradedMode(moneyRailControls?.degradedMode ?? null, {
+      allowNull: false,
+      nowAt: null
+    });
+    if (degradedMode.enabled !== true) return { blocked: false, degradedMode };
+    const normalizedProviderId = normalizeNonEmptyStringOrNull(providerId);
+    if (Array.isArray(degradedMode.providerIds) && degradedMode.providerIds.length > 0) {
+      if (!normalizedProviderId || !degradedMode.providerIds.includes(normalizedProviderId)) {
+        return { blocked: false, degradedMode };
+      }
+    }
+    const normalizedAction = String(action ?? "").trim().toLowerCase();
+    const denyForAction =
+      (normalizedAction === MONEY_RAIL_DEGRADED_ACTION.ENQUEUE_PAYOUT && degradedMode.denyEnqueuePayouts === true) ||
+      (normalizedAction === MONEY_RAIL_DEGRADED_ACTION.SUBMIT_PAYOUT && degradedMode.denySubmitPayouts === true);
+    if (!denyForAction) return { blocked: false, degradedMode };
+    return {
+      blocked: true,
+      code: MONEY_RAIL_DEGRADED_BLOCK_CODE[normalizedAction] ?? "MONEY_RAIL_DEGRADED_ACTION_DENIED",
+      outageReasonCode: degradedMode.reasonCode ?? MONEY_RAIL_DEGRADED_DEFAULT_REASON_CODE,
+      outageAction: normalizedAction,
+      degradedMode
     };
   }
 
@@ -28940,10 +29097,7 @@ export function createApi({
       signerStatus: lifecycle?.signerStatus ?? null,
       validFrom: lifecycle?.validFrom ?? null,
       validTo: lifecycle?.validTo ?? null,
-      rotatedAt: lifecycle?.rotatedAt ?? null,
-      revokedAt: lifecycle?.revokedAt ?? null,
-      validAt: lifecycle?.validAt ?? null,
-      validNow: lifecycle?.validNow ?? null
+      revokedAt: lifecycle?.revokedAt ?? null
     };
   }
 
@@ -28953,9 +29107,7 @@ export function createApi({
       tenantId,
       signerKeyId,
       at,
-      now: nowIso(),
-      requireRegistered: false,
-      enforceCurrentValidity: true
+      requireRegistered: false
     });
     if (lifecycle.ok) return { ok: true, at, details: null };
     return {
@@ -29000,10 +29152,7 @@ export function createApi({
         signerStatus: lifecycle?.signerStatus ?? null,
         validFrom: lifecycle?.validFrom ?? null,
         validTo: lifecycle?.validTo ?? null,
-        rotatedAt: lifecycle?.rotatedAt ?? null,
         revokedAt: lifecycle?.revokedAt ?? null,
-        validAt: lifecycle?.validAt ?? null,
-        validNow: lifecycle?.validNow ?? null,
         ...(contextField === "openedAt" ? { openedAt: normalizedContextAt } : { signedAt: normalizedContextAt })
       },
       { path: "$.details" }
@@ -29022,9 +29171,7 @@ export function createApi({
       tenantId,
       signerKeyId,
       at: normalizedAt,
-      now: nowIso(),
-      requireRegistered: false,
-      enforceCurrentValidity: true
+      requireRegistered: false
     });
     if (lifecycle.ok) return;
     const reasonCode = lifecycle.reasonCode ?? "SIGNER_KEY_INVALID";
@@ -33641,20 +33788,28 @@ export function createApi({
     if (m === "GET" && p === "/metrics") return "/metrics";
     if (m === "GET" && p === "/capabilities") return "/capabilities";
     if (m === "GET" && p === "/openapi.json") return "/openapi.json";
+    if (m === "POST" && p === "/router/plan") return "/router/plan";
+    if (m === "POST" && p === "/router/launch") return "/router/launch";
+    if (m === "POST" && p === "/router/dispatch") return "/router/dispatch";
+    if (m === "GET" && /^\/router\/launches\/[^/]+\/status$/.test(p)) return "/router/launches/:launchId/status";
     if (m === "GET" && p === "/public/agent-cards/discover") return "/public/agent-cards/discover";
     if (m === "GET" && p === "/public/agent-cards/stream") return "/public/agent-cards/stream";
     if (m === "GET" && p === "/v1/public/agents/resolve") return "/v1/public/agents/resolve";
-    if (m === "GET" && p === "/v1/public/identity-log/entries") return "/v1/public/identity-log/entries";
-    if (m === "GET" && p === "/v1/public/identity-log/proof") return "/v1/public/identity-log/proof";
-    if (m === "GET" && p === "/v1/public/identity-log/checkpoint") return "/v1/public/identity-log/checkpoint";
     if (/^\/\.well-known\/agent-locator\/[^/]+$/.test(p)) return "/.well-known/agent-locator/:agentId";
     if (m === "POST" && p === "/sessions") return "/sessions";
     if (m === "GET" && p === "/sessions") return "/sessions";
     if (/^\/sessions\/[^/]+$/.test(p)) return "/sessions/:sessionId";
+    if (/^\/sessions\/[^/]+\/events\/checkpoint\/requeue$/.test(p)) return "/sessions/:sessionId/events/checkpoint/requeue";
+    if (/^\/sessions\/[^/]+\/events\/checkpoint$/.test(p)) return "/sessions/:sessionId/events/checkpoint";
     if (/^\/sessions\/[^/]+\/events\/stream$/.test(p)) return "/sessions/:sessionId/events/stream";
     if (/^\/sessions\/[^/]+\/events$/.test(p)) return "/sessions/:sessionId/events";
     if (/^\/sessions\/[^/]+\/replay-pack$/.test(p)) return "/sessions/:sessionId/replay-pack";
     if (/^\/sessions\/[^/]+\/transcript$/.test(p)) return "/sessions/:sessionId/transcript";
+    if (m === "GET" && p === "/intents") return "/intents";
+    if (m === "POST" && p === "/intents/propose") return "/intents/propose";
+    if (/^\/intents\/[^/]+\/counter$/.test(p)) return "/intents/:intentId/counter";
+    if (/^\/intents\/[^/]+\/accept$/.test(p)) return "/intents/:intentId/accept";
+    if (/^\/intents\/[^/]+$/.test(p)) return "/intents/:intentId";
     if (/^\/agent-cards\/[^/]+\/abuse-reports\/[^/]+\/status$/.test(p)) return "/agent-cards/:agentId/abuse-reports/:reportId/status";
     if (/^\/agent-cards\/[^/]+\/abuse-reports$/.test(p)) return "/agent-cards/:agentId/abuse-reports";
     if (/^\/public\/agents\/[^/]+\/reputation-summary$/.test(p)) return "/public/agents/:agentId/reputation-summary";
@@ -34514,15 +34669,12 @@ export function createApi({
           path === "/ops/finance/reconciliation/workspace" ||
           path === "/ops/kernel/workspace" ||
           path === "/ops/marketplace/workspace" ||
+          path === "/ops/router/workspace" ||
           path === "/ops/policy/workspace"
         ) {
           const queryTenantId = url.searchParams.get("tenantId");
-          const queryOpsToken = url.searchParams.get("opsToken");
           if (!req.headers?.["x-proxy-tenant-id"] && typeof queryTenantId === "string" && queryTenantId.trim() !== "") {
             req.headers["x-proxy-tenant-id"] = queryTenantId.trim();
-          }
-          if (!req.headers?.["x-proxy-ops-token"] && typeof queryOpsToken === "string" && queryOpsToken.trim() !== "") {
-            req.headers["x-proxy-ops-token"] = queryOpsToken.trim();
           }
         }
         try {
@@ -34558,9 +34710,6 @@ export function createApi({
           (req.method === "GET" && path === "/public/agent-cards/discover") ||
           (req.method === "GET" && path === "/public/agent-cards/stream") ||
           (req.method === "GET" && path === "/v1/public/agents/resolve") ||
-          (req.method === "GET" && path === "/v1/public/identity-log/entries") ||
-          (req.method === "GET" && path === "/v1/public/identity-log/proof") ||
-          (req.method === "GET" && path === "/v1/public/identity-log/checkpoint") ||
           (req.method === "GET" && /^\/public\/agents\/[^/]+\/reputation-summary$/.test(path)) ||
           (req.method === "GET" && /^\/\.well-known\/agent-locator\/[^/]+$/.test(path)) ||
           (req.method === "GET" && path === "/.well-known/agent.json") ||
@@ -34804,6 +34953,895 @@ export function createApi({
           return { idempotencyKey, idemStoreKey, idemRequestHash };
         }
 
+        function makeRouteError(statusCode, message, { code = "SCHEMA_INVALID", details = null } = {}) {
+          const err = makeHttpStatusError(statusCode, message, { code });
+          if (details !== null && details !== undefined) err.details = details;
+          return err;
+        }
+
+        function parseRouterLaunchId(rawValue, { fieldPath = "launchId", allowNull = false } = {}) {
+          if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+            if (allowNull) return null;
+            throw new TypeError(`${fieldPath} is required`);
+          }
+          const value = String(rawValue).trim();
+          if (value.length > 200) throw new TypeError(`${fieldPath} must be <= 200 chars`);
+          if (!/^[A-Za-z0-9._:-]+$/.test(value)) throw new TypeError(`${fieldPath} must match [A-Za-z0-9._:-]+`);
+          return value;
+        }
+
+        function parseRouterLaunchTaskOverrides(rawValue, { fieldPath = "taskOverrides" } = {}) {
+          if (rawValue === null || rawValue === undefined) return new Map();
+          if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+            throw new TypeError(`${fieldPath} must be an object keyed by taskId`);
+          }
+
+          const overrides = new Map();
+          for (const [taskIdRaw, overrideRaw] of Object.entries(rawValue)) {
+            const taskId = parseRouterLaunchId(taskIdRaw, { fieldPath: `${fieldPath} taskId`, allowNull: false });
+            if (!overrideRaw || typeof overrideRaw !== "object" || Array.isArray(overrideRaw)) {
+              throw new TypeError(`${fieldPath}.${taskId} must be an object`);
+            }
+
+            const rfqId =
+              overrideRaw.rfqId === null || overrideRaw.rfqId === undefined || String(overrideRaw.rfqId).trim() === ""
+                ? null
+                : parseRouterLaunchId(overrideRaw.rfqId, { fieldPath: `${fieldPath}.${taskId}.rfqId`, allowNull: false });
+            const title =
+              overrideRaw.title === null || overrideRaw.title === undefined || String(overrideRaw.title).trim() === ""
+                ? null
+                : String(overrideRaw.title).trim();
+            const description =
+              overrideRaw.description === null || overrideRaw.description === undefined || String(overrideRaw.description).trim() === ""
+                ? null
+                : String(overrideRaw.description).trim();
+
+            let budgetCents = null;
+            if (overrideRaw.budgetCents !== undefined && overrideRaw.budgetCents !== null && overrideRaw.budgetCents !== "") {
+              const parsedBudget = Number(overrideRaw.budgetCents);
+              if (!Number.isSafeInteger(parsedBudget) || parsedBudget <= 0) {
+                throw new TypeError(`${fieldPath}.${taskId}.budgetCents must be a positive safe integer`);
+              }
+              budgetCents = parsedBudget;
+            }
+
+            const currency =
+              overrideRaw.currency === null || overrideRaw.currency === undefined || String(overrideRaw.currency).trim() === ""
+                ? null
+                : String(overrideRaw.currency).trim().toUpperCase();
+            if (currency !== null && !/^[A-Z0-9_]{2,8}$/.test(currency)) {
+              throw new TypeError(`${fieldPath}.${taskId}.currency must match ^[A-Z0-9_]{2,8}$`);
+            }
+
+            let deadlineAt = null;
+            if (overrideRaw.deadlineAt !== undefined && overrideRaw.deadlineAt !== null && overrideRaw.deadlineAt !== "") {
+              if (typeof overrideRaw.deadlineAt !== "string" || !Number.isFinite(Date.parse(overrideRaw.deadlineAt))) {
+                throw new TypeError(`${fieldPath}.${taskId}.deadlineAt must be an ISO date-time`);
+              }
+              deadlineAt = new Date(Date.parse(overrideRaw.deadlineAt)).toISOString();
+            }
+
+            const metadata =
+              overrideRaw.metadata === undefined
+                ? null
+                : overrideRaw.metadata === null
+                  ? null
+                  : typeof overrideRaw.metadata === "object" && !Array.isArray(overrideRaw.metadata)
+                    ? cloneJsonLike(overrideRaw.metadata)
+                    : (() => {
+                        throw new TypeError(`${fieldPath}.${taskId}.metadata must be an object or null`);
+                      })();
+
+            overrides.set(taskId, {
+              rfqId,
+              title,
+              description,
+              budgetCents,
+              currency,
+              deadlineAt,
+              metadata
+            });
+          }
+
+          return overrides;
+        }
+
+        async function buildRouterPlanFromBody(body) {
+          if (!body || typeof body !== "object" || Array.isArray(body)) {
+            throw makeRouteError(400, "invalid router plan request");
+          }
+
+          const text = typeof body?.text === "string" ? body.text : typeof body?.request === "string" ? body.request : "";
+          if (!text.trim()) throw makeRouteError(400, "text is required");
+          if (text.length > 20_000) throw makeRouteError(400, "text must be <= 20000 characters");
+
+          let scope = ROUTER_PLAN_SCOPE.TENANT;
+          if (typeof body?.scope === "string" && body.scope.trim() !== "") {
+            scope = String(body.scope).trim().toLowerCase();
+          }
+          if (scope !== ROUTER_PLAN_SCOPE.TENANT && scope !== ROUTER_PLAN_SCOPE.PUBLIC) {
+            throw makeRouteError(400, "invalid router plan request", {
+              details: { message: "scope must be tenant|public" }
+            });
+          }
+
+          const maxCandidatesRaw = body?.maxCandidates ?? body?.limit ?? null;
+          const maxCandidates =
+            maxCandidatesRaw === null || maxCandidatesRaw === undefined || String(maxCandidatesRaw).trim() === ""
+              ? 5
+              : Number(maxCandidatesRaw);
+          if (!Number.isSafeInteger(maxCandidates) || maxCandidates < 1 || maxCandidates > 25) {
+            throw makeRouteError(400, "maxCandidates must be an integer in range 1..25");
+          }
+
+          const includeReputation = body?.includeReputation === undefined ? true : body.includeReputation === true;
+          const includeRoutingFactors = body?.includeRoutingFactors === undefined ? true : body.includeRoutingFactors === true;
+          const scoreStrategy = typeof body?.scoreStrategy === "string" && body.scoreStrategy.trim() !== "" ? body.scoreStrategy.trim() : "balanced";
+          const asOf =
+            typeof body?.asOf === "string" && body.asOf.trim() !== ""
+              ? body.asOf.trim()
+              : typeof body?.requestAsOf === "string" && body.requestAsOf.trim() !== ""
+                ? body.requestAsOf.trim()
+                : nowIso();
+          const requesterAgentId =
+            typeof body?.requesterAgentId === "string" && body.requesterAgentId.trim() !== "" ? body.requesterAgentId.trim() : null;
+
+          let draft = null;
+          try {
+            draft = deriveRouterDraftFromText({ text });
+          } catch (err) {
+            throw makeRouteError(400, "invalid router request", {
+              details: { message: err?.message ?? "unable to derive router draft" }
+            });
+          }
+
+          const issues = Array.isArray(draft?.issues) ? [...draft.issues] : [];
+          const plannedTasks = Array.isArray(draft?.tasks) ? draft.tasks : [];
+          const tasksWithCandidates = [];
+          for (const task of plannedTasks) {
+            const requiredCapability = typeof task?.requiredCapability === "string" ? task.requiredCapability : null;
+            let candidates = [];
+            if (requiredCapability) {
+              try {
+                const discovery = await discoverAgentCards({
+                  tenantId,
+                  scope,
+                  capability: requiredCapability,
+                  limit: maxCandidates,
+                  offset: 0,
+                  includeReputation,
+                  includeRoutingFactors,
+                  requesterAgentId,
+                  scoreStrategy,
+                  asOf
+                });
+                const rows = Array.isArray(discovery?.results) ? discovery.results : [];
+                candidates = rows
+                  .map((row) => {
+                    const agentCard =
+                      row?.agentCard && typeof row.agentCard === "object" && !Array.isArray(row.agentCard) ? row.agentCard : null;
+                    const reputation =
+                      row?.reputation && typeof row.reputation === "object" && !Array.isArray(row.reputation) ? row.reputation : null;
+                    return {
+                      rank: row?.rank ?? null,
+                      rankingScore: row?.rankingScore ?? null,
+                      riskTier: row?.riskTier ?? null,
+                      agentId: agentCard?.agentId ?? null,
+                      tenantId: agentCard?.tenantId ?? null,
+                      displayName: agentCard?.displayName ?? null,
+                      trustScore: reputation?.trustScore ?? null,
+                      priceHint: agentCard?.priceHint ?? null,
+                      routingFactors: includeRoutingFactors ? row?.routingFactors ?? null : null
+                    };
+                  })
+                  .filter((row) => row.agentId && row.tenantId);
+              } catch (err) {
+                throw makeRouteError(400, "router discovery failed", {
+                  details: { message: err?.message ?? "agent-card discovery failed" }
+                });
+              }
+            }
+
+            if (requiredCapability && candidates.length === 0) {
+              issues.push({
+                severity: ROUTER_PLAN_ISSUE_SEVERITY.BLOCKING,
+                code: ROUTER_PLAN_ISSUE_CODE.CAPABILITY_NO_CANDIDATES,
+                message: "no candidates found for required capability",
+                details: { requiredCapability, scope }
+              });
+            }
+
+            tasksWithCandidates.push({
+              taskId: task?.taskId ?? null,
+              title: task?.title ?? null,
+              requiredCapability,
+              dependsOnTaskIds: task?.dependsOnTaskIds ?? [],
+              candidates
+            });
+          }
+
+          let plan = null;
+          try {
+            plan = buildRouterPlanV1({
+              planId: createId("rplan"),
+              tenantId,
+              scope,
+              request: { text, asOf },
+              intent: draft?.intent ?? { intentId: "intent.unknown", label: "Unknown", score: 0 },
+              tasks: tasksWithCandidates,
+              issues,
+              generatedAt: nowIso()
+            });
+          } catch (err) {
+            throw makeRouteError(400, "invalid router plan", {
+              details: { message: err?.message ?? "invalid router plan" }
+            });
+          }
+
+          return {
+            text,
+            scope,
+            maxCandidates,
+            includeReputation,
+            includeRoutingFactors,
+            scoreStrategy,
+            asOf,
+            requesterAgentId,
+            draft,
+            plan
+          };
+        }
+
+        async function acceptMarketplaceRfqBidForRfq({
+          rfq,
+          rfqId = rfq?.rfqId ?? null,
+          body,
+          idemStoreKey = null,
+          idemRequestHash = null,
+          responseBodyTransform = (value) => value
+        } = {}) {
+          if (!rfq || typeof rfq !== "object" || Array.isArray(rfq)) throw makeRouteError(404, "marketplace rfq not found", { code: "NOT_FOUND" });
+          const resolvedRfqId =
+            typeof rfqId === "string" && rfqId.trim() !== ""
+              ? rfqId.trim()
+              : typeof rfq?.rfqId === "string" && rfq.rfqId.trim() !== ""
+                ? rfq.rfqId.trim()
+                : null;
+          if (!resolvedRfqId) throw makeRouteError(404, "marketplace rfq not found", { code: "NOT_FOUND" });
+          if (String(rfq.status ?? "open").toLowerCase() !== "open") throw makeRouteError(409, "marketplace rfq is not open");
+
+          const bidId = body?.bidId && String(body.bidId).trim() !== "" ? String(body.bidId).trim() : null;
+          if (!bidId) throw makeRouteError(400, "bidId is required");
+
+          const acceptedByAgentId = body?.acceptedByAgentId && String(body.acceptedByAgentId).trim() !== "" ? String(body.acceptedByAgentId).trim() : null;
+          const acceptanceSignatureInput =
+            body?.acceptanceSignature && typeof body.acceptanceSignature === "object" && !Array.isArray(body.acceptanceSignature)
+              ? body.acceptanceSignature
+              : null;
+          if (body?.acceptanceSignature !== undefined && acceptanceSignatureInput === null) {
+            throw makeRouteError(400, "acceptanceSignature must be an object");
+          }
+          if (acceptanceSignatureInput && !acceptedByAgentId) {
+            throw makeRouteError(400, "acceptedByAgentId is required when acceptanceSignature is provided");
+          }
+          let acceptedByIdentity = null;
+          if (acceptedByAgentId) {
+            try {
+              acceptedByIdentity = await getAgentIdentityRecord({ tenantId, agentId: acceptedByAgentId });
+            } catch (err) {
+              throw makeRouteError(400, "invalid acceptedByAgentId", { details: { message: err?.message } });
+            }
+            if (!acceptedByIdentity) throw makeRouteError(404, "accepting agent identity not found", { code: "NOT_FOUND" });
+          }
+
+          const existingBids = listMarketplaceRfqBids({ tenantId, rfqId: resolvedRfqId, status: "all" });
+          const selectedBid = existingBids.find((candidate) => String(candidate?.bidId ?? "") === bidId) ?? null;
+          if (!selectedBid) throw makeRouteError(404, "marketplace bid not found", { code: "NOT_FOUND" });
+          if (String(selectedBid.status ?? "pending").toLowerCase() !== "pending") {
+            throw makeRouteError(409, "marketplace bid is not pending");
+          }
+
+          let rfqDirection = null;
+          let bidDirection = null;
+          try {
+            rfqDirection = parseInteractionDirection({ fromTypeRaw: rfq?.fromType, toTypeRaw: rfq?.toType });
+            bidDirection = parseInteractionDirection({
+              fromTypeRaw: selectedBid?.fromType,
+              toTypeRaw: selectedBid?.toType,
+              defaultFromType: rfqDirection.fromType,
+              defaultToType: rfqDirection.toType
+            });
+          } catch (err) {
+            throw makeRouteError(400, "invalid interaction direction", { details: { message: err?.message } });
+          }
+          if (bidDirection.fromType !== rfqDirection.fromType || bidDirection.toType !== rfqDirection.toType) {
+            throw makeRouteError(409, "accepted bid interaction direction must match rfq direction");
+          }
+
+          const payeeAgentId = selectedBid?.bidderAgentId ? String(selectedBid.bidderAgentId) : null;
+          if (!payeeAgentId) throw makeRouteError(409, "selected bid is missing bidderAgentId");
+          let payeeIdentity = null;
+          try {
+            payeeIdentity = await getAgentIdentityRecord({ tenantId, agentId: payeeAgentId });
+          } catch (err) {
+            throw makeRouteError(400, "invalid bidderAgentId", { details: { message: err?.message } });
+          }
+          if (!payeeIdentity) throw makeRouteError(404, "bidder agent identity not found", { code: "NOT_FOUND" });
+
+          const settlementInput = body?.settlement && typeof body.settlement === "object" ? body.settlement : {};
+          let acceptDirection = null;
+          try {
+            acceptDirection = parseInteractionDirection({
+              fromTypeRaw: body?.fromType ?? settlementInput?.fromType,
+              toTypeRaw: body?.toType ?? settlementInput?.toType,
+              defaultFromType: rfqDirection.fromType,
+              defaultToType: rfqDirection.toType
+            });
+          } catch (err) {
+            throw makeRouteError(400, "invalid interaction direction", { details: { message: err?.message } });
+          }
+          if (acceptDirection.fromType !== rfqDirection.fromType || acceptDirection.toType !== rfqDirection.toType) {
+            throw makeRouteError(409, "settlement interaction direction must match rfq direction");
+          }
+          const payerAgentIdRaw =
+            settlementInput.payerAgentId ??
+            body?.payerAgentId ??
+            rfq?.posterAgentId ??
+            null;
+          if (typeof payerAgentIdRaw !== "string" || payerAgentIdRaw.trim() === "") {
+            throw makeRouteError(400, "payerAgentId is required (rfq poster or settlement.payerAgentId)");
+          }
+          const acceptedAt = nowIso();
+          let counterOfferPolicy = resolveMarketplaceCounterOfferPolicy({ rfq: rfq, bid: selectedBid });
+          let selectedBidNegotiation =
+            selectedBid?.negotiation && typeof selectedBid.negotiation === "object" && !Array.isArray(selectedBid.negotiation)
+              ? selectedBid.negotiation
+              : null;
+          if (!selectedBidNegotiation) {
+            try {
+              selectedBidNegotiation = bootstrapMarketplaceBidNegotiation({
+                rfq: rfq,
+                bid: selectedBid,
+                counterOfferPolicy,
+                at: acceptedAt
+              });
+            } catch (err) {
+              throw makeRouteError(409, "unable to bootstrap bid negotiation", { details: { message: err?.message } });
+            }
+          }
+          const selectedPolicyApplied = applyMarketplaceBidNegotiationPolicy({
+            negotiation: selectedBidNegotiation,
+            counterOfferPolicy,
+            at: acceptedAt,
+            expireIfTimedOut: true
+          });
+          selectedBidNegotiation = selectedPolicyApplied.negotiation;
+          counterOfferPolicy = selectedPolicyApplied.counterOfferPolicy;
+          if (selectedPolicyApplied.justExpired) {
+            const latestExpiredProposal = getLatestMarketplaceBidProposal(selectedBidNegotiation);
+            const expiredBid = {
+              ...selectedBid,
+              negotiation: selectedBidNegotiation,
+              counterOfferPolicy,
+              updatedAt: acceptedAt
+            };
+            const expiredBids = existingBids.map((candidate) => {
+              if (!candidate || typeof candidate !== "object") return candidate;
+              if (String(candidate.bidId ?? "") !== bidId) return candidate;
+              return expiredBid;
+            });
+            const expiredRfq = {
+              ...rfq,
+              updatedAt: acceptedAt
+            };
+            await commitTx([
+              { kind: "MARKETPLACE_RFQ_UPSERT", tenantId, rfq: expiredRfq },
+              { kind: "MARKETPLACE_RFQ_BIDS_SET", tenantId, rfqId: resolvedRfqId, bids: expiredBids }
+            ]);
+            try {
+              await emitMarketplaceLifecycleArtifact({
+                tenantId,
+                eventType: "proposal.expired",
+                rfqId: resolvedRfqId,
+                sourceEventId: latestExpiredProposal?.proposalId ?? null,
+                actorAgentId: acceptedByAgentId ?? String(payerAgentIdRaw).trim(),
+                details: {
+                  bidId,
+                  expiresAt: selectedPolicyApplied.expiresAt ?? null,
+                  negotiation: selectedBidNegotiation
+                }
+              });
+            } catch {
+              // Best-effort lifecycle delivery.
+            }
+            throw makeRouteError(409, "marketplace bid negotiation expired", {
+              details: { expiresAt: selectedPolicyApplied.expiresAt ?? null }
+            });
+          }
+          const selectedNegotiationState = String(selectedBidNegotiation?.state ?? "open").toLowerCase();
+          if (selectedNegotiationState === "expired") {
+            throw makeRouteError(409, "marketplace bid negotiation expired", {
+              details: { expiresAt: selectedPolicyApplied.expiresAt ?? selectedBidNegotiation?.expiresAt ?? null }
+            });
+          }
+          if (selectedNegotiationState !== "open") {
+            throw makeRouteError(409, "marketplace bid negotiation is not open");
+          }
+          const selectedLatestProposal = getLatestMarketplaceBidProposal(selectedBidNegotiation);
+          if (!selectedLatestProposal) throw makeRouteError(409, "marketplace bid negotiation has no proposals");
+          selectedBidNegotiation = updateMarketplaceBidNegotiationState({
+            negotiation: selectedBidNegotiation,
+            state: "accepted",
+            at: acceptedAt,
+            acceptedByAgentId: acceptedByAgentId ?? null,
+            acceptedProposalId: selectedLatestProposal?.proposalId ?? null,
+            acceptedRevision: selectedLatestProposal?.revision ?? null
+          });
+          const selectedBidAccepted = {
+            ...selectedBid,
+            amountCents: selectedLatestProposal?.amountCents ?? selectedBid?.amountCents,
+            currency: selectedLatestProposal?.currency ?? selectedBid?.currency,
+            etaSeconds: selectedLatestProposal?.etaSeconds ?? null,
+            note: selectedLatestProposal?.note ?? null,
+            verificationMethod: selectedLatestProposal?.verificationMethod ?? selectedBid?.verificationMethod ?? null,
+            policy: selectedLatestProposal?.policy ?? selectedBid?.policy ?? null,
+            policyRef: selectedLatestProposal?.policyRef ?? selectedBid?.policyRef ?? null,
+            policyRefHash: selectedLatestProposal?.policyRefHash ?? null,
+            metadata: selectedLatestProposal?.metadata ?? null,
+            negotiation: selectedBidNegotiation,
+            counterOfferPolicy,
+            status: "accepted",
+            acceptedAt,
+            rejectedAt: null,
+            updatedAt: acceptedAt
+          };
+          const defaultAmountCents = Number(selectedBidAccepted?.amountCents);
+          const fallbackCurrency =
+            typeof selectedBidAccepted?.currency === "string" && selectedBidAccepted.currency.trim() !== ""
+              ? selectedBidAccepted.currency
+              : rfq?.currency ?? "USD";
+          let settlementRequest = null;
+          try {
+            settlementRequest = validateAgentRunSettlementRequest({
+              payerAgentId: String(payerAgentIdRaw).trim(),
+              amountCents: settlementInput.amountCents ?? defaultAmountCents,
+              currency: settlementInput.currency ?? fallbackCurrency
+            });
+          } catch (err) {
+            throw makeRouteError(400, "invalid settlement payload", { details: { message: err?.message } });
+          }
+
+          let payerIdentity = null;
+          try {
+            payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: settlementRequest.payerAgentId });
+          } catch (err) {
+            throw makeRouteError(400, "invalid payerAgentId", { details: { message: err?.message } });
+          }
+          if (!payerIdentity) throw makeRouteError(404, "payer agent identity not found", { code: "NOT_FOUND" });
+
+          const acceptLifecycleGuard = await enforceMarketplaceParticipantLifecycleGuards({
+            tenantId,
+            participants: [
+              { role: "payer", agentId: settlementRequest.payerAgentId },
+              { role: "payee", agentId: payeeAgentId },
+              ...(
+                acceptedByAgentId && !acceptanceSignatureInput
+                  ? [{ role: "accepted_by", agentId: acceptedByAgentId }]
+                  : []
+              )
+            ],
+            operation: "marketplace_bid.accept",
+            at: acceptedAt,
+            enforceSignerLifecycle: true
+          });
+          if (acceptLifecycleGuard?.blocked) {
+            throw makeRouteError(
+              acceptLifecycleGuard.httpStatus ?? 409,
+              acceptLifecycleGuard.message,
+              {
+                code: acceptLifecycleGuard.code ?? "X402_AGENT_LIFECYCLE_INVALID",
+                details: acceptLifecycleGuard.details ?? null
+              }
+            );
+          }
+
+          try {
+            await assertSettlementWithinWalletPolicy({
+              tenantId,
+              agentIdentity: payerIdentity,
+              amountCents: settlementRequest.amountCents,
+              at: acceptedAt
+            });
+          } catch (err) {
+            throw makeRouteError(409, "wallet policy blocked settlement", {
+              details: { message: err?.message, code: err?.code ?? null }
+            });
+          }
+
+          const runId = body?.runId && String(body.runId).trim() !== "" ? String(body.runId).trim() : `run_${resolvedRfqId}_${bidId}`;
+          if (typeof runId !== "string" || runId.trim() === "") throw makeRouteError(400, "runId must be a non-empty string");
+          let existingRun = null;
+          if (typeof store.getAgentRun === "function") {
+            existingRun = await store.getAgentRun({ tenantId, runId });
+          } else if (store.agentRuns instanceof Map) {
+            existingRun = store.agentRuns.get(runStoreKey(tenantId, runId)) ?? null;
+          } else {
+            throw makeRouteError(501, "agent runs not supported for this store");
+          }
+          if (existingRun && !idemStoreKey) throw makeRouteError(409, "run already exists");
+
+          const runCreatedPayload = {
+            runId,
+            agentId: payeeAgentId,
+            tenantId,
+            taskType:
+              body?.taskType && String(body.taskType).trim() !== ""
+                ? String(body.taskType).trim()
+                : rfq?.capability ?? rfq?.title ?? "marketplace-rfq",
+            inputRef:
+              body?.inputRef && String(body.inputRef).trim() !== ""
+                ? String(body.inputRef).trim()
+                : `marketplace://rfqs/${encodeURIComponent(resolvedRfqId)}`
+          };
+          try {
+            validateRunCreatedPayload(runCreatedPayload);
+          } catch (err) {
+            throw makeRouteError(400, "invalid run payload", { details: { message: err?.message } });
+          }
+          const createdEvent = createChainedEvent({
+            streamId: runId,
+            type: AGENT_RUN_EVENT_TYPE.RUN_CREATED,
+            actor: { type: "agent", id: payeeAgentId },
+            payload: runCreatedPayload,
+            at: acceptedAt
+          });
+          const runEvents = normalizeAgentRunEventRecords(appendChainedEvent({ events: [], event: createdEvent, signer: serverSigner }));
+          let run = null;
+          try {
+            run = reduceAgentRun(runEvents);
+          } catch (err) {
+            throw makeRouteError(400, "run creation rejected", { details: { message: err?.message } });
+          }
+
+          let payerWallet = null;
+          try {
+            const existingPayerWallet = await getAgentWalletRecord({ tenantId, agentId: settlementRequest.payerAgentId });
+            const basePayerWallet = ensureAgentWallet({
+              wallet: existingPayerWallet,
+              tenantId,
+              agentId: settlementRequest.payerAgentId,
+              currency: settlementRequest.currency,
+              at: acceptedAt
+            });
+            payerWallet = lockAgentWalletEscrow({ wallet: basePayerWallet, amountCents: settlementRequest.amountCents, at: acceptedAt });
+            projectEscrowLedgerOperation({
+              tenantId,
+              settlement: {
+                payerAgentId: settlementRequest.payerAgentId,
+                agentId: payeeAgentId,
+                currency: settlementRequest.currency
+              },
+              operationId: `escrow_hold_${runId}`,
+              type: ESCROW_OPERATION_TYPE.HOLD,
+              amountCents: settlementRequest.amountCents,
+              at: acceptedAt,
+              payerWalletBefore: basePayerWallet,
+              payerWalletAfter: payerWallet,
+              memo: `run:${runId}:hold`
+            });
+          } catch (err) {
+            throw makeRouteError(409, "unable to lock settlement escrow", {
+              details: { message: err?.message, code: err?.code ?? null }
+            });
+          }
+
+          const disputeWindowDaysRaw = body?.disputeWindowDays ?? settlementInput?.disputeWindowDays ?? 3;
+          const disputeWindowDays =
+            Number.isSafeInteger(Number(disputeWindowDaysRaw)) && Number(disputeWindowDaysRaw) >= 0 ? Number(disputeWindowDaysRaw) : 3;
+          let policySelection = null;
+          try {
+            policySelection = resolveMarketplaceSettlementPolicySelection({
+              tenantId,
+              policyRefInput: body?.policyRef ?? settlementInput?.policyRef ?? selectedBidAccepted?.policyRef ?? null,
+              verificationMethodInput:
+                body?.verificationMethod ?? settlementInput?.verificationMethod ?? selectedBidAccepted?.verificationMethod ?? undefined,
+              settlementPolicyInput: body?.policy ?? settlementInput?.policy ?? selectedBidAccepted?.policy ?? undefined
+            });
+          } catch (err) {
+            if (err?.code === "TENANT_SETTLEMENT_POLICY_NOT_FOUND") {
+              throw makeRouteError(404, "policyRef not found");
+            }
+            if (err?.code === "TENANT_SETTLEMENT_POLICY_REF_MISMATCH") {
+              throw makeRouteError(409, "policyRef does not match verificationMethod/policy", { details: { message: err?.message } });
+            }
+            if (err?.code === "INVALID_VERIFICATION_METHOD") {
+              throw makeRouteError(400, "invalid verificationMethod", { details: { message: err?.message } });
+            }
+            if (err?.code === "INVALID_SETTLEMENT_POLICY") {
+              throw makeRouteError(400, "invalid policy", { details: { message: err?.message } });
+            }
+            throw makeRouteError(400, "invalid agreement policy selection", { details: { message: err?.message } });
+          }
+
+          const verificationMethodInput = policySelection.verificationMethod;
+          const settlementPolicyInput = policySelection.policy;
+          const policyRefInput = policySelection.policyRef;
+          const agreementTermsInput = body?.agreementTerms ?? settlementInput?.agreementTerms ?? null;
+          let agreement = null;
+          try {
+            agreement = buildMarketplaceRfqAgreement({
+              tenantId,
+              rfq: rfq,
+              bid: selectedBidAccepted,
+              runId,
+              acceptedAt,
+              acceptedByAgentId,
+              payerAgentId: settlementRequest.payerAgentId,
+              fromType: acceptDirection.fromType,
+              toType: acceptDirection.toType,
+              disputeWindowDays,
+              verificationMethodInput,
+              settlementPolicyInput,
+              policyRefInput,
+              agreementTermsInput
+            });
+          } catch (err) {
+            throw makeRouteError(400, "invalid agreement terms", { details: { message: err?.message } });
+          }
+          if (acceptanceSignatureInput) {
+            try {
+              const acceptanceSignature = await parseSignedMarketplaceAgreementAcceptance({
+                tenantId,
+                agreement,
+                acceptedByAgentId,
+                acceptedByIdentity,
+                acceptanceSignatureInput
+              });
+              agreement = {
+                ...agreement,
+                acceptanceSignature
+              };
+            } catch (err) {
+              const details =
+                err?.details && typeof err.details === "object" && !Array.isArray(err.details)
+                  ? { ...err.details, message: err?.message }
+                  : { message: err?.message };
+              throw makeRouteError(400, "invalid acceptance signature", { code: err?.code ?? null, details });
+            }
+          }
+          let settlement = createAgentRunSettlement({
+            tenantId,
+            runId,
+            agentId: payeeAgentId,
+            payerAgentId: settlementRequest.payerAgentId,
+            amountCents: settlementRequest.amountCents,
+            currency: settlementRequest.currency,
+            disputeWindowDays,
+            at: acceptedAt
+          });
+          const pendingVerifierRef = resolveAgreementVerifierRef(agreement?.verificationMethod ?? null);
+          const pendingKernelRefs = buildSettlementKernelRefs({
+            settlement,
+            run,
+            agreementId: agreement?.agreementId ?? null,
+            decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.PENDING,
+            decisionMode: agreement?.policy?.mode ?? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC,
+            decisionReason: null,
+            verificationStatus: null,
+            policyHash: agreement?.policyHash ?? null,
+            verificationMethodHash: agreement?.verificationMethodHash ?? null,
+            verificationMethodMode: pendingVerifierRef?.modality ?? agreement?.verificationMethod?.mode ?? null,
+            verifierId: pendingVerifierRef?.verifierId ?? "nooterra.policy-engine",
+            verifierVersion: pendingVerifierRef?.verifierVersion ?? "v1",
+            verifierHash: pendingVerifierRef?.verifierHash ?? null,
+            finalityState: SETTLEMENT_FINALITY_STATE.PENDING,
+            settledAt: null,
+            createdAt: acceptedAt
+          });
+          settlement = updateAgentRunSettlementDecision({
+            settlement,
+            decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.PENDING,
+            decisionMode: agreement?.policy?.mode ?? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC,
+            decisionPolicyHash: agreement?.policyHash ?? null,
+            decisionReason: null,
+            decisionTrace: {
+              phase: "agreement.accepted",
+              verificationMethod: agreement?.verificationMethod ?? null,
+              policy: agreement?.policy ?? null,
+              decisionRecord: pendingKernelRefs.decisionRecord,
+              settlementReceipt: pendingKernelRefs.settlementReceipt
+            },
+            at: acceptedAt
+          });
+          const nextRfq = {
+            ...rfq,
+            fromType: rfqDirection.fromType,
+            toType: rfqDirection.toType,
+            status: "assigned",
+            acceptedBidId: bidId,
+            acceptedBidderAgentId: selectedBidAccepted.bidderAgentId ?? null,
+            acceptedAt,
+            acceptedByAgentId: acceptedByAgentId ?? null,
+            runId,
+            agreementId: agreement.agreementId,
+            agreement,
+            settlementId: settlement.settlementId,
+            settlementDecisionStatus: settlement.decisionStatus ?? null,
+            updatedAt: acceptedAt
+          };
+          const nextBids = existingBids.map((candidate) => {
+            if (!candidate || typeof candidate !== "object") return candidate;
+            if (String(candidate.bidId ?? "") === bidId) {
+              return selectedBidAccepted;
+            }
+            const status = String(candidate.status ?? "pending").toLowerCase();
+            if (status === "pending") {
+              let rejectedNegotiation =
+                candidate?.negotiation && typeof candidate.negotiation === "object" && !Array.isArray(candidate.negotiation)
+                  ? candidate.negotiation
+                  : null;
+              try {
+                if (rejectedNegotiation) {
+                  rejectedNegotiation = updateMarketplaceBidNegotiationState({
+                    negotiation: rejectedNegotiation,
+                    state: "rejected",
+                    at: acceptedAt
+                  });
+                }
+              } catch {
+                rejectedNegotiation = null;
+              }
+              return {
+                ...candidate,
+                status: "rejected",
+                rejectedAt: acceptedAt,
+                updatedAt: acceptedAt,
+                negotiation: rejectedNegotiation ?? candidate?.negotiation ?? null
+              };
+            }
+            return candidate;
+          });
+
+          const acceptedBid = nextBids.find((candidate) => String(candidate?.bidId ?? "") === bidId) ?? null;
+          const responseBody = responseBodyTransform({
+            rfq: toMarketplaceRfqResponse(nextRfq),
+            acceptedBid: toMarketplaceBidResponse(acceptedBid),
+            run,
+            settlement,
+            agreement,
+            offer: agreement?.offer ?? null,
+            offerAcceptance: agreement?.offerAcceptance ?? null,
+            decisionRecord: pendingKernelRefs.decisionRecord,
+            settlementReceipt: pendingKernelRefs.settlementReceipt
+          });
+          const ops = [
+            { kind: "MARKETPLACE_RFQ_UPSERT", tenantId, rfq: nextRfq },
+            { kind: "MARKETPLACE_RFQ_BIDS_SET", tenantId, rfqId: resolvedRfqId, bids: nextBids },
+            { kind: "AGENT_RUN_EVENTS_APPENDED", tenantId, runId, events: runEvents },
+            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
+            { kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement }
+          ];
+          if (idemStoreKey) {
+            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
+          }
+          await commitTx(ops);
+          try {
+            await emitMarketplaceLifecycleArtifact({
+              tenantId,
+              eventType: "marketplace.rfq.accepted",
+              rfqId: resolvedRfqId,
+              runId,
+              sourceEventId: run?.lastEventId ?? null,
+              actorAgentId: acceptedByAgentId ?? settlementRequest.payerAgentId,
+              agreement,
+              settlement,
+              details: {
+                bidId,
+                acceptedBidderAgentId: acceptedBid?.bidderAgentId ?? null
+              }
+            });
+          } catch {
+            // Lifecycle deliveries are best-effort and retried by delivery workers when destinations are configured.
+          }
+          try {
+            await emitMarketplaceLifecycleArtifact({
+              tenantId,
+              eventType: "proposal.accepted",
+              rfqId: resolvedRfqId,
+              runId,
+              sourceEventId: selectedLatestProposal?.proposalId ?? null,
+              actorAgentId: acceptedByAgentId ?? settlementRequest.payerAgentId,
+              agreement,
+              settlement,
+              details: {
+                bidId,
+                proposal: selectedLatestProposal,
+                negotiation: selectedBidNegotiation
+              }
+            });
+          } catch {
+            // Lifecycle deliveries are best-effort and retried by delivery workers when destinations are configured.
+          }
+          return responseBody;
+        }
+
+        async function autoAcceptMarketplaceRfqBidForRfq({
+          rfq,
+          rfqId = rfq?.rfqId ?? null,
+          body,
+          idemStoreKey = null,
+          idemRequestHash = null
+        } = {}) {
+          if (!rfq || typeof rfq !== "object" || Array.isArray(rfq)) throw makeRouteError(404, "marketplace rfq not found", { code: "NOT_FOUND" });
+          const resolvedRfqId =
+            typeof rfqId === "string" && rfqId.trim() !== ""
+              ? rfqId.trim()
+              : typeof rfq?.rfqId === "string" && rfq.rfqId.trim() !== ""
+                ? rfq.rfqId.trim()
+                : null;
+          if (!resolvedRfqId) throw makeRouteError(404, "marketplace rfq not found", { code: "NOT_FOUND" });
+          const requestBody =
+            body && typeof body === "object" && !Array.isArray(body)
+              ? body
+              : {};
+          const selectionStrategyRaw = requestBody.selectionStrategy ?? requestBody.strategy ?? null;
+          if (
+            selectionStrategyRaw !== null &&
+            selectionStrategyRaw !== undefined &&
+            (typeof selectionStrategyRaw !== "string" || selectionStrategyRaw.trim() === "")
+          ) {
+            throw makeRouteError(400, "selectionStrategy must be a non-empty string", { code: "SCHEMA_INVALID" });
+          }
+          if (
+            requestBody.allowOverBudget !== undefined &&
+            requestBody.allowOverBudget !== null &&
+            typeof requestBody.allowOverBudget !== "boolean"
+          ) {
+            throw makeRouteError(400, "allowOverBudget must be a boolean", { code: "SCHEMA_INVALID" });
+          }
+
+          let decisionResult = null;
+          try {
+            decisionResult = selectMarketplaceAutoAwardBidV1({
+              rfq,
+              bids: listMarketplaceRfqBids({ tenantId, rfqId: resolvedRfqId, status: "all" }),
+              strategy: selectionStrategyRaw,
+              allowOverBudget: requestBody.allowOverBudget === true,
+              decidedAt: nowIso()
+            });
+          } catch (err) {
+            throw makeRouteError(400, "invalid marketplace auto-award request", {
+              code: "SCHEMA_INVALID",
+              details: { message: err?.message ?? "invalid auto-award request" }
+            });
+          }
+
+          if (!decisionResult?.selectedBid) {
+            throw makeRouteError(409, "marketplace auto-award blocked", {
+              code: decisionResult?.decision?.reasonCode ?? "MARKETPLACE_AUTO_AWARD_BLOCKED",
+              details: { decision: decisionResult?.decision ?? null }
+            });
+          }
+
+          const acceptBody = { ...requestBody, bidId: decisionResult.selectedBid.bidId };
+          delete acceptBody.selectionStrategy;
+          delete acceptBody.strategy;
+          delete acceptBody.allowOverBudget;
+          return acceptMarketplaceRfqBidForRfq({
+            rfq,
+            rfqId: resolvedRfqId,
+            body: acceptBody,
+            idemStoreKey,
+            idemRequestHash,
+            responseBodyTransform(responseBody) {
+              return {
+                ...responseBody,
+                decision: decisionResult.decision
+              };
+            }
+          });
+        }
+
         if (req.method === "GET" && path === "/health") {
           return sendJson(res, 200, { ok: true });
         }
@@ -34854,6 +35892,907 @@ export function createApi({
           return sendJson(res, 200, buildOpenApiSpec());
         }
 
+        if (req.method === "POST" && path === "/router/plan") {
+          const body = await readJsonBody(req);
+          try {
+            const { plan } = await buildRouterPlanFromBody(body);
+            return sendJson(res, 200, { ok: true, plan });
+          } catch (err) {
+            return sendError(
+              res,
+              Number.isSafeInteger(Number(err?.statusCode)) ? Number(err.statusCode) : 400,
+              err?.message ?? "invalid router plan request",
+              err?.details ?? null,
+              { code: typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "SCHEMA_INVALID" }
+            );
+          }
+        }
+
+        if (req.method === "POST" && path === "/router/launch") {
+          if (!(store.marketplaceRfqs instanceof Map)) store.marketplaceRfqs = new Map();
+          if (!(store.marketplaceRfqBids instanceof Map)) store.marketplaceRfqBids = new Map();
+
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          let routed = null;
+          try {
+            routed = await buildRouterPlanFromBody(body);
+          } catch (err) {
+            return sendError(
+              res,
+              Number.isSafeInteger(Number(err?.statusCode)) ? Number(err.statusCode) : 400,
+              err?.message ?? "invalid router launch request",
+              err?.details ?? null,
+              { code: typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "SCHEMA_INVALID" }
+            );
+          }
+
+          const plan = routed.plan;
+          const plannedTasks = Array.isArray(plan?.tasks) ? plan.tasks : [];
+          if (!plannedTasks.length) {
+            return sendError(
+              res,
+              409,
+              "router launch requires at least one routed task",
+              { plan },
+              { code: "ROUTER_LAUNCH_NO_TASKS" }
+            );
+          }
+
+          const posterAgentId =
+            typeof body?.posterAgentId === "string" && body.posterAgentId.trim() !== "" ? body.posterAgentId.trim() : null;
+          if (!posterAgentId) return sendError(res, 400, "posterAgentId is required", null, { code: "SCHEMA_INVALID" });
+
+          let posterIdentity = null;
+          try {
+            posterIdentity = await getAgentIdentityRecord({ tenantId, agentId: posterAgentId });
+          } catch (err) {
+            return sendError(res, 400, "invalid posterAgentId", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+          if (!posterIdentity) return sendError(res, 404, "poster agent identity not found", null, { code: "NOT_FOUND" });
+
+          const rfqLifecycleGuard = await enforceMarketplaceParticipantLifecycleGuards({
+            tenantId,
+            participants: [{ role: "poster", agentId: posterAgentId }],
+            operation: "marketplace_rfq.issue"
+          });
+          if (rfqLifecycleGuard?.blocked) {
+            return sendError(
+              res,
+              rfqLifecycleGuard.httpStatus ?? 409,
+              rfqLifecycleGuard.message,
+              rfqLifecycleGuard.details ?? null,
+              { code: rfqLifecycleGuard.code ?? "X402_AGENT_LIFECYCLE_INVALID" }
+            );
+          }
+
+          let taskDirection = null;
+          try {
+            taskDirection = parseInteractionDirection({ fromTypeRaw: body?.fromType, toTypeRaw: body?.toType });
+          } catch (err) {
+            return sendError(res, 400, "invalid interaction direction", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          let defaultBudgetCents = null;
+          if (body?.budgetCents !== undefined && body?.budgetCents !== null && body?.budgetCents !== "") {
+            const parsedBudget = Number(body.budgetCents);
+            if (!Number.isSafeInteger(parsedBudget) || parsedBudget <= 0) {
+              return sendError(res, 400, "budgetCents must be a positive safe integer", null, { code: "SCHEMA_INVALID" });
+            }
+            defaultBudgetCents = parsedBudget;
+          }
+
+          const defaultCurrency = body?.currency ? String(body.currency).trim().toUpperCase() : "USD";
+          if (!defaultCurrency || !/^[A-Z0-9_]{2,8}$/.test(defaultCurrency)) {
+            return sendError(res, 400, "currency must be a non-empty string", null, { code: "SCHEMA_INVALID" });
+          }
+
+          let defaultDeadlineAt = null;
+          if (body?.deadlineAt !== undefined && body?.deadlineAt !== null && body?.deadlineAt !== "") {
+            if (typeof body.deadlineAt !== "string" || !Number.isFinite(Date.parse(body.deadlineAt))) {
+              return sendError(res, 400, "deadlineAt must be an ISO date-time", null, { code: "SCHEMA_INVALID" });
+            }
+            defaultDeadlineAt = new Date(Date.parse(body.deadlineAt)).toISOString();
+          }
+
+          const launchMetadata =
+            body?.metadata === undefined
+              ? null
+              : body.metadata === null
+                ? null
+                : typeof body.metadata === "object" && !Array.isArray(body.metadata)
+                  ? cloneJsonLike(body.metadata)
+                  : null;
+          if (body?.metadata !== undefined && launchMetadata === null && body.metadata !== null) {
+            return sendError(res, 400, "metadata must be an object or null", null, { code: "SCHEMA_INVALID" });
+          }
+
+          let counterOfferPolicy = null;
+          try {
+            counterOfferPolicy = normalizeMarketplaceCounterOfferPolicyInput(body?.counterOfferPolicy ?? null, {
+              fieldPath: "counterOfferPolicy"
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid counterOfferPolicy", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          let taskOverrides = null;
+          try {
+            taskOverrides = parseRouterLaunchTaskOverrides(body?.taskOverrides ?? null);
+          } catch (err) {
+            return sendError(res, 400, "invalid taskOverrides", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const knownTaskIds = new Set(plannedTasks.map((task) => String(task?.taskId ?? "")).filter(Boolean));
+          for (const taskId of taskOverrides.keys()) {
+            if (!knownTaskIds.has(taskId)) {
+              return sendError(
+                res,
+                409,
+                "taskOverrides contains unknown taskId",
+                { taskId, knownTaskIds: Array.from(knownTaskIds.values()) },
+                { code: "ROUTER_LAUNCH_TASK_OVERRIDE_UNKNOWN" }
+              );
+            }
+          }
+
+          let launchId = null;
+          try {
+            launchId = parseRouterLaunchId(body?.launchId ?? null, { allowNull: true }) ?? createId("rlaunch");
+          } catch (err) {
+            return sendError(res, 400, "invalid launchId", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const defaultDescription =
+            typeof body?.description === "string" && body.description.trim() !== "" ? body.description.trim() : routed.text;
+          const nowAt = nowIso();
+          const requestTextSha256 = sha256Hex(routed.text);
+          const seenRfqIds = new Set();
+          const rfqs = [];
+          const launchTasks = [];
+          const ops = [];
+
+          for (let index = 0; index < plannedTasks.length; index += 1) {
+            const task = plannedTasks[index];
+            const taskId = typeof task?.taskId === "string" && task.taskId.trim() !== "" ? task.taskId.trim() : null;
+            const requiredCapability =
+              typeof task?.requiredCapability === "string" && task.requiredCapability.trim() !== ""
+                ? task.requiredCapability.trim()
+                : null;
+            if (!taskId || !requiredCapability) {
+              return sendError(
+                res,
+                409,
+                "router launch blocked by invalid task",
+                { taskIndex: index, task },
+                { code: "ROUTER_LAUNCH_INVALID_TASK" }
+              );
+            }
+
+            const override = taskOverrides.get(taskId) ?? {};
+            const rfqId = override.rfqId ?? createId("rfq");
+            if (seenRfqIds.has(rfqId)) {
+              return sendError(
+                res,
+                409,
+                "router launch contains duplicate rfqId",
+                { taskId, rfqId },
+                { code: "ROUTER_LAUNCH_DUPLICATE_RFQ_ID" }
+              );
+            }
+            seenRfqIds.add(rfqId);
+
+            const existingRfq = getMarketplaceRfq({ tenantId, rfqId });
+            if (existingRfq) {
+              return sendError(
+                res,
+                409,
+                "marketplace rfq already exists",
+                { taskId, rfqId },
+                { code: "CONFLICT" }
+              );
+            }
+
+            const candidateAgentIds = Array.isArray(task?.candidates)
+              ? task.candidates
+                  .map((candidate) => (typeof candidate?.agentId === "string" && candidate.agentId.trim() !== "" ? candidate.agentId.trim() : null))
+                  .filter(Boolean)
+              : [];
+            const budgetCents = override.budgetCents ?? defaultBudgetCents;
+            const currency = override.currency ?? defaultCurrency;
+            const deadlineAt = override.deadlineAt ?? defaultDeadlineAt;
+            const taskMetadata = normalizeForCanonicalJson(
+              {
+                ...(launchMetadata ?? {}),
+                ...(override.metadata ?? {}),
+                routerLaunch: {
+                  schemaVersion: "RouterLaunchMetadata.v1",
+                  launchId,
+                  requestTextSha256,
+                  planId: plan.planId ?? null,
+                  planHash: plan.planHash ?? null,
+                  taskId,
+                  taskIndex: index + 1,
+                  scope: routed.scope,
+                  dependsOnTaskIds: Array.isArray(task?.dependsOnTaskIds) ? task.dependsOnTaskIds : [],
+                  candidateCount: candidateAgentIds.length,
+                  candidateAgentIds
+                }
+              },
+              { path: "$.metadata" }
+            );
+
+            const rfq = {
+              schemaVersion: "MarketplaceRfq.v1",
+              rfqId,
+              tenantId,
+              title:
+                typeof override.title === "string" && override.title.trim() !== ""
+                  ? override.title.trim()
+                  : typeof task?.title === "string" && task.title.trim() !== ""
+                    ? task.title.trim()
+                    : requiredCapability,
+              description:
+                typeof override.description === "string" && override.description.trim() !== ""
+                  ? override.description.trim()
+                  : defaultDescription,
+              capability: requiredCapability,
+              fromType: taskDirection.fromType,
+              toType: taskDirection.toType,
+              posterAgentId,
+              status: "open",
+              budgetCents,
+              currency,
+              deadlineAt,
+              acceptedBidId: null,
+              acceptedBidderAgentId: null,
+              acceptedAt: null,
+              counterOfferPolicy,
+              metadata: taskMetadata,
+              createdAt: nowAt,
+              updatedAt: nowAt
+            };
+            rfqs.push(rfq);
+            launchTasks.push({
+              taskId,
+              title: rfq.title,
+              requiredCapability,
+              rfqId,
+              dependsOnTaskIds: Array.isArray(task?.dependsOnTaskIds) ? task.dependsOnTaskIds : [],
+              budgetCents,
+              currency,
+              deadlineAt,
+              candidateCount: candidateAgentIds.length,
+              candidateAgentIds
+            });
+            ops.push({ kind: "MARKETPLACE_RFQ_UPSERT", tenantId, rfq });
+            ops.push({ kind: "MARKETPLACE_RFQ_BIDS_SET", tenantId, rfqId, bids: [] });
+          }
+
+          let launch = null;
+          try {
+            launch = buildRouterMarketplaceLaunchV1({
+              launchId,
+              tenantId,
+              posterAgentId,
+              scope: routed.scope,
+              request: {
+                text: routed.text,
+                asOf: routed.asOf
+              },
+              planRef: {
+                planId: plan.planId,
+                planHash: plan.planHash
+              },
+              tasks: launchTasks,
+              metadata: launchMetadata,
+              createdAt: nowAt
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid router launch", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const rfqsWithLaunchHash = rfqs.map((rfq) => {
+            const metadata =
+              rfq?.metadata && typeof rfq.metadata === "object" && !Array.isArray(rfq.metadata) ? rfq.metadata : null;
+            const routerLaunch =
+              metadata?.routerLaunch && typeof metadata.routerLaunch === "object" && !Array.isArray(metadata.routerLaunch)
+                ? metadata.routerLaunch
+                : null;
+            if (!metadata || !routerLaunch) return rfq;
+            return {
+              ...rfq,
+              metadata: normalizeForCanonicalJson(
+                {
+                  ...metadata,
+                  routerLaunch: {
+                    ...routerLaunch,
+                    launchHash: launch.launchHash
+                  }
+                },
+                { path: "$.metadata" }
+              )
+            };
+          });
+          const rfqById = new Map(rfqsWithLaunchHash.map((rfq) => [String(rfq.rfqId ?? ""), rfq]));
+          for (const op of ops) {
+            if (op?.kind !== "MARKETPLACE_RFQ_UPSERT") continue;
+            const nextRfq = rfqById.get(String(op?.rfq?.rfqId ?? ""));
+            if (nextRfq) op.rfq = nextRfq;
+          }
+
+          const responseBody = {
+            ok: true,
+            launch,
+            plan,
+            rfqs: rfqsWithLaunchHash.map((rfq) => toMarketplaceRfqResponse(rfq))
+          };
+          if (idemStoreKey) {
+            ops.push({
+              kind: "IDEMPOTENCY_PUT",
+              key: idemStoreKey,
+              value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody }
+            });
+          }
+          await commitTx(ops);
+          return sendJson(res, 201, responseBody);
+        }
+
+        const routerLaunchStatusMatch = req.method === "GET" ? /^\/router\/launches\/([^/]+)\/status$/.exec(path) : null;
+        if (req.method === "GET" && routerLaunchStatusMatch) {
+          let launchId = null;
+          try {
+            launchId = parseRouterLaunchId(decodeURIComponent(routerLaunchStatusMatch[1] ?? ""), { allowNull: false });
+          } catch (err) {
+            return sendError(res, 400, "invalid router launch status request", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const launchRfqs = listMarketplaceRfqsByRouterLaunchId({ tenantId, launchId });
+          if (!launchRfqs.length) {
+            return sendError(res, 404, "router launch not found", { launchId }, { code: "ROUTER_LAUNCH_NOT_FOUND" });
+          }
+
+          const byTaskId = new Map();
+          const launchHashes = new Set();
+          const planIds = new Set();
+          const planHashes = new Set();
+          const requestTextHashes = new Set();
+          const posterAgentIds = new Set();
+          for (const rfq of launchRfqs) {
+            const launch = readRouterLaunchMetadataFromRfq(rfq);
+            if (!launch) {
+              return sendError(
+                res,
+                409,
+                "router launch metadata is invalid",
+                { launchId, rfqId: rfq?.rfqId ?? null },
+                { code: "ROUTER_LAUNCH_INVALID" }
+              );
+            }
+            if (byTaskId.has(launch.taskId)) {
+              return sendError(
+                res,
+                409,
+                "router launch contains duplicate taskIds",
+                { launchId, taskId: launch.taskId },
+                { code: "ROUTER_LAUNCH_INVALID" }
+              );
+            }
+            byTaskId.set(launch.taskId, { rfq, launch });
+            if (launch.launchHash) launchHashes.add(launch.launchHash);
+            if (launch.planId) planIds.add(launch.planId);
+            if (launch.planHash) planHashes.add(launch.planHash);
+            if (launch.requestTextSha256) requestTextHashes.add(launch.requestTextSha256);
+            if (typeof rfq?.posterAgentId === "string" && rfq.posterAgentId.trim() !== "") {
+              posterAgentIds.add(rfq.posterAgentId.trim());
+            }
+          }
+
+          if (posterAgentIds.size !== 1 || planIds.size > 1 || planHashes.size > 1 || launchHashes.size > 1 || requestTextHashes.size > 1) {
+            return sendError(
+              res,
+              409,
+              "router launch metadata is inconsistent",
+              {
+                launchId,
+                posterAgentIds: Array.from(posterAgentIds.values()),
+                planIds: Array.from(planIds.values()),
+                planHashes: Array.from(planHashes.values()),
+                launchHashes: Array.from(launchHashes.values()),
+                requestTextHashes: Array.from(requestTextHashes.values())
+              },
+              { code: "ROUTER_LAUNCH_INVALID" }
+            );
+          }
+
+          const tasks = [];
+          for (const rfq of launchRfqs) {
+            const launch = readRouterLaunchMetadataFromRfq(rfq);
+            const taskId = launch?.taskId ?? null;
+            const taskIndex = launch?.taskIndex ?? null;
+            const dependsOnTaskIds = Array.isArray(launch?.dependsOnTaskIds) ? launch.dependsOnTaskIds : [];
+            const missingDependencies = dependsOnTaskIds.filter((dependencyTaskId) => !byTaskId.has(dependencyTaskId));
+            const cancelledDependencies = [];
+            const pendingDependencies = [];
+            if (missingDependencies.length === 0) {
+              for (const dependencyTaskId of dependsOnTaskIds) {
+                const dependency = byTaskId.get(dependencyTaskId);
+                const dependencyStatus = String(dependency?.rfq?.status ?? "open").toLowerCase();
+                if (dependencyStatus === "cancelled") {
+                  cancelledDependencies.push(dependencyTaskId);
+                  continue;
+                }
+                if (dependencyStatus !== "closed") pendingDependencies.push(dependencyTaskId);
+              }
+            }
+
+            const bids = listMarketplaceRfqBids({ tenantId, rfqId: rfq.rfqId, status: "all" }).map((bid) => toMarketplaceBidResponse(bid));
+            const acceptedBidId =
+              typeof rfq?.acceptedBidId === "string" && rfq.acceptedBidId.trim() !== "" ? rfq.acceptedBidId.trim() : null;
+            const acceptedBid = acceptedBidId ? bids.find((bid) => String(bid?.bidId ?? "") === acceptedBidId) ?? null : null;
+            const runId = typeof rfq?.runId === "string" && rfq.runId.trim() !== "" ? rfq.runId.trim() : null;
+            let run = null;
+            if (runId && typeof store.getAgentRun === "function") run = await store.getAgentRun({ tenantId, runId });
+            const settlement = runId ? await getAgentRunSettlementRecord({ tenantId, runId }) : null;
+            const snapshot = deriveRouterLaunchStatusTaskSnapshot({
+              rfqStatus: rfq?.status ?? "open",
+              missingDependencies,
+              cancelledDependencies,
+              pendingDependencies,
+              bidCount: bids.length
+            });
+            tasks.push({
+              taskId,
+              taskIndex,
+              rfqId: rfq?.rfqId ?? null,
+              title: typeof rfq?.title === "string" && rfq.title.trim() !== "" ? rfq.title.trim() : String(rfq?.capability ?? taskId ?? "task"),
+              requiredCapability:
+                typeof rfq?.capability === "string" && rfq.capability.trim() !== "" ? rfq.capability.trim() : String(taskId ?? ""),
+              dependsOnTaskIds,
+              candidateAgentIds: Array.isArray(launch?.candidateAgentIds) ? launch.candidateAgentIds : [],
+              candidateCount: Array.isArray(launch?.candidateAgentIds) ? launch.candidateAgentIds.length : 0,
+              state: snapshot.state,
+              blockedByTaskIds: snapshot.blockedByTaskIds,
+              rfqStatus: typeof rfq?.status === "string" && rfq.status.trim() !== "" ? rfq.status.trim().toLowerCase() : "open",
+              bidCount: bids.length,
+              acceptedBidId,
+              runId,
+              settlementStatus:
+                typeof settlement?.status === "string" && settlement.status.trim() !== "" ? settlement.status.trim().toLowerCase() : null,
+              disputeStatus:
+                typeof settlement?.disputeStatus === "string" && settlement.disputeStatus.trim() !== ""
+                  ? settlement.disputeStatus.trim().toLowerCase()
+                  : null,
+              rfq: toMarketplaceRfqResponse(rfq),
+              bids,
+              acceptedBid,
+              run,
+              settlement
+            });
+          }
+
+          let status = null;
+          try {
+            status = buildRouterLaunchStatusV1({
+              launchRef: {
+                launchId,
+                launchHash: Array.from(launchHashes.values())[0] ?? null,
+                planId: Array.from(planIds.values())[0] ?? null,
+                planHash: Array.from(planHashes.values())[0] ?? null,
+                requestTextSha256: Array.from(requestTextHashes.values())[0] ?? null
+              },
+              tenantId,
+              posterAgentId: Array.from(posterAgentIds.values())[0],
+              tasks,
+              generatedAt: nowIso()
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid router launch status", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          return sendJson(res, 200, { ok: true, status });
+        }
+
+        if (req.method === "POST" && path === "/router/dispatch") {
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          if (!body || typeof body !== "object" || Array.isArray(body)) {
+            return sendError(res, 400, "invalid router dispatch request", null, { code: "SCHEMA_INVALID" });
+          }
+
+          const allowedFields = new Set([
+            "launchId",
+            "dispatchId",
+            "taskIds",
+            "acceptedByAgentId",
+            "payerAgentId",
+            "selectionStrategy",
+            "strategy",
+            "allowOverBudget"
+          ]);
+          const unsupportedFields = Object.keys(body).filter((key) => !allowedFields.has(key));
+          if (unsupportedFields.length > 0) {
+            return sendError(
+              res,
+              400,
+              "router dispatch contains unsupported fields",
+              { unsupportedFields },
+              { code: "SCHEMA_INVALID" }
+            );
+          }
+
+          let launchId = null;
+          let dispatchId = null;
+          try {
+            launchId = parseRouterLaunchId(body?.launchId ?? null, { allowNull: false });
+            dispatchId = parseRouterLaunchId(body?.dispatchId ?? null, { fieldPath: "dispatchId", allowNull: true }) ?? createId("rdispatch");
+          } catch (err) {
+            return sendError(res, 400, "invalid router dispatch request", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const acceptedByAgentId =
+            body?.acceptedByAgentId === undefined || body?.acceptedByAgentId === null || String(body.acceptedByAgentId).trim() === ""
+              ? null
+              : typeof body.acceptedByAgentId === "string"
+                ? body.acceptedByAgentId.trim()
+                : null;
+          if (body?.acceptedByAgentId !== undefined && body?.acceptedByAgentId !== null && acceptedByAgentId === null) {
+            return sendError(res, 400, "acceptedByAgentId must be a non-empty string", null, { code: "SCHEMA_INVALID" });
+          }
+
+          const payerAgentId =
+            body?.payerAgentId === undefined || body?.payerAgentId === null || String(body.payerAgentId).trim() === ""
+              ? null
+              : typeof body.payerAgentId === "string"
+                ? body.payerAgentId.trim()
+                : null;
+          if (body?.payerAgentId !== undefined && body?.payerAgentId !== null && payerAgentId === null) {
+            return sendError(res, 400, "payerAgentId must be a non-empty string", null, { code: "SCHEMA_INVALID" });
+          }
+
+          const selectionStrategyRaw = body?.selectionStrategy ?? body?.strategy ?? null;
+          if (
+            selectionStrategyRaw !== null &&
+            selectionStrategyRaw !== undefined &&
+            (typeof selectionStrategyRaw !== "string" || selectionStrategyRaw.trim() === "")
+          ) {
+            return sendError(res, 400, "selectionStrategy must be a non-empty string", null, { code: "SCHEMA_INVALID" });
+          }
+
+          if (
+            body?.allowOverBudget !== undefined &&
+            body?.allowOverBudget !== null &&
+            typeof body.allowOverBudget !== "boolean"
+          ) {
+            return sendError(res, 400, "allowOverBudget must be a boolean", null, { code: "SCHEMA_INVALID" });
+          }
+
+          let requestedTaskIds = null;
+          if (body?.taskIds !== undefined && body?.taskIds !== null) {
+            if (!Array.isArray(body.taskIds)) {
+              return sendError(res, 400, "taskIds must be an array", null, { code: "SCHEMA_INVALID" });
+            }
+            try {
+              requestedTaskIds = [...new Set(body.taskIds.map((row, index) => parseRouterLaunchId(row, { fieldPath: `taskIds[${index}]` })))];
+            } catch (err) {
+              return sendError(res, 400, "invalid router dispatch request", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+            if (requestedTaskIds.length === 0) {
+              return sendError(res, 400, "taskIds must include at least one taskId", null, { code: "SCHEMA_INVALID" });
+            }
+            requestedTaskIds.sort((left, right) => left.localeCompare(right));
+          }
+
+          const launchRfqs = listMarketplaceRfqsByRouterLaunchId({ tenantId, launchId });
+          if (!launchRfqs.length) {
+            return sendError(res, 404, "router launch not found", { launchId }, { code: "ROUTER_DISPATCH_LAUNCH_NOT_FOUND" });
+          }
+
+          const byTaskId = new Map();
+          const launchHashes = new Set();
+          const planIds = new Set();
+          const planHashes = new Set();
+          const requestTextHashes = new Set();
+          const posterAgentIds = new Set();
+          for (const rfq of launchRfqs) {
+            const launch = readRouterLaunchMetadataFromRfq(rfq);
+            if (!launch) {
+              return sendError(
+                res,
+                409,
+                "router dispatch launch metadata is invalid",
+                { launchId, rfqId: rfq?.rfqId ?? null },
+                { code: "ROUTER_DISPATCH_LAUNCH_INVALID" }
+              );
+            }
+            if (byTaskId.has(launch.taskId)) {
+              return sendError(
+                res,
+                409,
+                "router dispatch launch contains duplicate taskIds",
+                { launchId, taskId: launch.taskId },
+                { code: "ROUTER_DISPATCH_LAUNCH_INVALID" }
+              );
+            }
+            byTaskId.set(launch.taskId, { rfq, launch });
+            if (launch.launchHash) launchHashes.add(launch.launchHash);
+            if (launch.planId) planIds.add(launch.planId);
+            if (launch.planHash) planHashes.add(launch.planHash);
+            if (launch.requestTextSha256) requestTextHashes.add(launch.requestTextSha256);
+            if (typeof rfq?.posterAgentId === "string" && rfq.posterAgentId.trim() !== "") posterAgentIds.add(rfq.posterAgentId.trim());
+          }
+
+          if (posterAgentIds.size !== 1 || planIds.size > 1 || planHashes.size > 1 || launchHashes.size > 1 || requestTextHashes.size > 1) {
+            return sendError(
+              res,
+              409,
+              "router dispatch launch metadata is inconsistent",
+              {
+                launchId,
+                posterAgentIds: Array.from(posterAgentIds.values()),
+                planIds: Array.from(planIds.values()),
+                planHashes: Array.from(planHashes.values()),
+                launchHashes: Array.from(launchHashes.values()),
+                requestTextHashes: Array.from(requestTextHashes.values())
+              },
+              { code: "ROUTER_DISPATCH_LAUNCH_INVALID" }
+            );
+          }
+
+          if (requestedTaskIds) {
+            const missingTaskIds = requestedTaskIds.filter((taskId) => !byTaskId.has(taskId));
+            if (missingTaskIds.length > 0) {
+              return sendError(
+                res,
+                409,
+                "router dispatch references unknown taskIds",
+                { launchId, missingTaskIds, knownTaskIds: Array.from(byTaskId.keys()).sort((left, right) => left.localeCompare(right)) },
+                { code: "ROUTER_DISPATCH_TASK_NOT_FOUND" }
+              );
+            }
+          }
+
+          const dispatchAt = nowIso();
+          const selectionStrategy = selectionStrategyRaw ? String(selectionStrategyRaw).trim().toLowerCase() : "lowest_amount_then_eta";
+          const allowOverBudget = body.allowOverBudget === true;
+          const selectedTaskSet = requestedTaskIds ? new Set(requestedTaskIds) : null;
+          const selectedLaunchRows = launchRfqs.filter((rfq) => {
+            if (!selectedTaskSet) return true;
+            const launch = readRouterLaunchMetadataFromRfq(rfq);
+            return Boolean(launch && selectedTaskSet.has(launch.taskId));
+          });
+          const posterAgentId = Array.from(posterAgentIds.values())[0];
+
+          const dispatchTasks = [];
+          const results = [];
+          const autoAwardStateByCode = new Map([
+            ["MARKETPLACE_AUTO_AWARD_NO_PENDING_BIDS", ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_NO_PENDING_BIDS],
+            ["MARKETPLACE_AUTO_AWARD_AMBIGUOUS", ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_AMBIGUOUS],
+            ["MARKETPLACE_AUTO_AWARD_OVER_BUDGET", ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_OVER_BUDGET]
+          ]);
+
+          for (const rfq of selectedLaunchRows) {
+            const launch = readRouterLaunchMetadataFromRfq(rfq);
+            const taskId = launch?.taskId ?? null;
+            const taskIndex = launch?.taskIndex ?? null;
+            const dependsOnTaskIds = Array.isArray(launch?.dependsOnTaskIds) ? launch.dependsOnTaskIds : [];
+            const blockingTaskIds = [];
+            let state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_RFQ_INVALID;
+            let reasonCode = "ROUTER_DISPATCH_RFQ_INVALID";
+            let decisionHash = null;
+            let acceptedBidId = typeof rfq?.acceptedBidId === "string" && rfq.acceptedBidId.trim() !== "" ? rfq.acceptedBidId.trim() : null;
+            let runId = typeof rfq?.runId === "string" && rfq.runId.trim() !== "" ? rfq.runId.trim() : null;
+            let responseDetail = {
+              taskId,
+              taskIndex,
+              rfqId: rfq?.rfqId ?? null
+            };
+            let rfqStatus = String(rfq?.status ?? "open").toLowerCase();
+
+            if (!launch || !taskId || !Number.isSafeInteger(Number(taskIndex)) || !rfq?.rfqId) {
+              state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_RFQ_INVALID;
+              reasonCode = "ROUTER_DISPATCH_RFQ_INVALID";
+            } else if (rfqStatus === "assigned") {
+              state = ROUTER_MARKETPLACE_DISPATCH_STATE.ALREADY_ASSIGNED;
+              reasonCode = null;
+            } else if (rfqStatus === "closed") {
+              state = ROUTER_MARKETPLACE_DISPATCH_STATE.ALREADY_CLOSED;
+              reasonCode = null;
+            } else if (rfqStatus === "cancelled") {
+              state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_RFQ_CANCELLED;
+              reasonCode = "ROUTER_DISPATCH_RFQ_CANCELLED";
+            } else if (rfqStatus !== "open") {
+              state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_RFQ_INVALID;
+              reasonCode = "ROUTER_DISPATCH_RFQ_STATUS_INVALID";
+            } else {
+              const missingDependencies = dependsOnTaskIds.filter((dependencyTaskId) => !byTaskId.has(dependencyTaskId));
+              if (missingDependencies.length > 0) {
+                blockingTaskIds.push(...missingDependencies);
+                state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_DEPENDENCY_MISSING;
+                reasonCode = "ROUTER_DISPATCH_DEPENDENCY_MISSING";
+              } else {
+                const cancelledDependencies = [];
+                const pendingDependencies = [];
+                for (const dependencyTaskId of dependsOnTaskIds) {
+                  const dependency = byTaskId.get(dependencyTaskId);
+                  const dependencyStatus = String(dependency?.rfq?.status ?? "open").toLowerCase();
+                  if (dependencyStatus === "cancelled") {
+                    cancelledDependencies.push(dependencyTaskId);
+                    continue;
+                  }
+                  if (dependencyStatus !== "closed") pendingDependencies.push(dependencyTaskId);
+                }
+                if (cancelledDependencies.length > 0) {
+                  blockingTaskIds.push(...cancelledDependencies);
+                  state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_DEPENDENCY_CANCELLED;
+                  reasonCode = "ROUTER_DISPATCH_DEPENDENCY_CANCELLED";
+                } else if (pendingDependencies.length > 0) {
+                  blockingTaskIds.push(...pendingDependencies);
+                  state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_DEPENDENCIES_PENDING;
+                  reasonCode = "ROUTER_DISPATCH_DEPENDENCIES_PENDING";
+                } else {
+                  try {
+                    const accepted = await autoAcceptMarketplaceRfqBidForRfq({
+                      rfq,
+                      rfqId: rfq.rfqId,
+                      body: {
+                        ...(acceptedByAgentId ? { acceptedByAgentId } : {}),
+                        ...(payerAgentId ? { payerAgentId } : {}),
+                        selectionStrategy,
+                        allowOverBudget
+                      }
+                    });
+                    state = ROUTER_MARKETPLACE_DISPATCH_STATE.ACCEPTED;
+                    reasonCode = null;
+                    decisionHash = accepted?.decision?.decisionHash ?? null;
+                    acceptedBidId = accepted?.acceptedBid?.bidId ?? accepted?.rfq?.acceptedBidId ?? acceptedBidId;
+                    runId = accepted?.run?.runId ?? accepted?.rfq?.runId ?? runId;
+                    rfqStatus = String(accepted?.rfq?.status ?? "assigned").toLowerCase();
+                    responseDetail = {
+                      ...responseDetail,
+                      decision: accepted?.decision ?? null,
+                      rfq: accepted?.rfq ?? null,
+                      acceptedBid: accepted?.acceptedBid ?? null,
+                      run: accepted?.run ?? null,
+                      settlement: accepted?.settlement ?? null,
+                      agreement: accepted?.agreement ?? null,
+                      offer: accepted?.offer ?? null,
+                      offerAcceptance: accepted?.offerAcceptance ?? null,
+                      decisionRecord: accepted?.decisionRecord ?? null,
+                      settlementReceipt: accepted?.settlementReceipt ?? null
+                    };
+                  } catch (err) {
+                    const mappedState = autoAwardStateByCode.get(err?.code ?? "");
+                    if (mappedState) {
+                      state = mappedState;
+                      reasonCode = err?.code ?? null;
+                      decisionHash =
+                        err?.details?.decision && typeof err.details.decision === "object" ? err.details.decision.decisionHash ?? null : null;
+                      responseDetail = {
+                        ...responseDetail,
+                        decision:
+                          err?.details?.decision && typeof err.details.decision === "object" ? err.details.decision : null
+                      };
+                    } else {
+                      state = ROUTER_MARKETPLACE_DISPATCH_STATE.BLOCKED_ACCEPT_FAILED;
+                      reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "ROUTER_DISPATCH_ACCEPT_FAILED";
+                      responseDetail = {
+                        ...responseDetail,
+                        error: {
+                          message: err?.message ?? "router dispatch accept failed",
+                          code: typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : null,
+                          details: err?.details ?? null
+                        }
+                      };
+                    }
+                  }
+                }
+              }
+            }
+
+            dispatchTasks.push({
+              taskId,
+              taskIndex,
+              rfqId: rfq?.rfqId ?? null,
+              dependsOnTaskIds,
+              state,
+              reasonCode,
+              rfqStatus,
+              acceptedBidId,
+              runId,
+              decisionHash,
+              blockingTaskIds
+            });
+            results.push(
+              normalizeForCanonicalJson(
+                {
+                  ...responseDetail,
+                  state,
+                  reasonCode,
+                  dependsOnTaskIds,
+                  blockingTaskIds,
+                  rfqStatus,
+                  acceptedBidId,
+                  runId,
+                  decisionHash
+                },
+                { path: `$.results[${results.length}]` }
+              )
+            );
+          }
+
+          let dispatch = null;
+          try {
+            dispatch = buildRouterMarketplaceDispatchV1({
+              dispatchId,
+              launchRef: {
+                launchId,
+                launchHash: Array.from(launchHashes.values())[0] ?? null,
+                planId: Array.from(planIds.values())[0] ?? null,
+                planHash: Array.from(planHashes.values())[0] ?? null,
+                requestTextSha256: Array.from(requestTextHashes.values())[0] ?? null
+              },
+              tenantId,
+              posterAgentId,
+              selectionStrategy,
+              allowOverBudget,
+              tasks: dispatchTasks,
+              metadata: requestedTaskIds ? { requestedTaskIds } : null,
+              dispatchedAt: dispatchAt
+            });
+          } catch (err) {
+            return sendError(res, 400, "invalid router dispatch", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const responseBody = {
+            ok: true,
+            dispatch,
+            results
+          };
+          if (idemStoreKey) {
+            await commitTx([
+              {
+                kind: "IDEMPOTENCY_PUT",
+                key: idemStoreKey,
+                value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody }
+              }
+            ]);
+          }
+          return sendJson(res, 200, responseBody);
+        }
+
         if (req.method === "GET" && path === "/v1/public/agents/resolve") {
           const agentRefRaw = url.searchParams.get("agent");
           const agentRef = typeof agentRefRaw === "string" ? agentRefRaw.trim() : "";
@@ -34899,159 +36838,6 @@ export function createApi({
           }
 
           return sendJson(res, 200, { ok: true, locator: resolution.locator });
-        }
-
-        if (req.method === "GET" && path === "/v1/public/identity-log/entries") {
-          const agentIdRaw = url.searchParams.get("agentId");
-          const eventTypeRaw = url.searchParams.get("eventType");
-          const entryIdRaw = url.searchParams.get("entryId");
-          const limitRaw = url.searchParams.get("limit");
-          const offsetRaw = url.searchParams.get("offset");
-          const agentId = typeof agentIdRaw === "string" && agentIdRaw.trim() !== "" ? agentIdRaw.trim() : null;
-          const eventType = typeof eventTypeRaw === "string" && eventTypeRaw.trim() !== "" ? eventTypeRaw.trim().toLowerCase() : null;
-          const entryId = typeof entryIdRaw === "string" && entryIdRaw.trim() !== "" ? entryIdRaw.trim() : null;
-          const limit = limitRaw ? Number(limitRaw) : 200;
-          const offset = offsetRaw ? Number(offsetRaw) : 0;
-          if (!Number.isSafeInteger(limit) || limit <= 0) return sendError(res, 400, "limit must be a positive safe integer");
-          if (!Number.isSafeInteger(offset) || offset < 0) return sendError(res, 400, "offset must be a non-negative safe integer");
-          const safeLimit = Math.min(1000, limit);
-          const safeOffset = offset;
-
-          let entries = [];
-          let checkpoint = null;
-          try {
-            entries = await listIdentityLogEntriesRecords({
-              tenantId,
-              agentId,
-              eventType,
-              entryId,
-              limit: safeLimit,
-              offset: safeOffset
-            });
-            checkpoint = await getIdentityLogCheckpointRecord({ tenantId });
-          } catch (err) {
-            if (String(err?.code ?? "") === "IDENTITY_LOG_EQUIVOCATION" || String(err?.code ?? "") === "IDENTITY_LOG_CHECKPOINT_ROLLBACK") {
-              return sendError(res, 409, "identity log equivocation detected", { message: err?.message, details: err?.details ?? null }, { code: err.code });
-            }
-            if (String(err?.message ?? "").includes("identity log not supported")) {
-              return sendError(res, 501, "identity log is not supported for this store");
-            }
-            return sendError(res, 400, "invalid identity log query", { message: err?.message ?? String(err) }, { code: "SCHEMA_INVALID" });
-          }
-
-          return sendJson(res, 200, {
-            ok: true,
-            entries,
-            limit: safeLimit,
-            offset: safeOffset,
-            checkpoint
-          });
-        }
-
-        if (req.method === "GET" && path === "/v1/public/identity-log/checkpoint") {
-          const trustedCheckpointHashRaw = url.searchParams.get("trustedCheckpointHash");
-          const trustedTreeSizeRaw = url.searchParams.get("trustedTreeSize");
-          const trustedCheckpointHash =
-            typeof trustedCheckpointHashRaw === "string" && trustedCheckpointHashRaw.trim() !== ""
-              ? trustedCheckpointHashRaw.trim().toLowerCase()
-              : null;
-          const trustedTreeSize =
-            typeof trustedTreeSizeRaw === "string" && trustedTreeSizeRaw.trim() !== ""
-              ? Number(trustedTreeSizeRaw)
-              : null;
-          if ((trustedCheckpointHash === null) !== (trustedTreeSize === null)) {
-            return sendError(res, 400, "trustedCheckpointHash and trustedTreeSize must be provided together");
-          }
-          if (trustedCheckpointHash !== null && !/^[0-9a-f]{64}$/.test(trustedCheckpointHash)) {
-            return sendError(res, 400, "trustedCheckpointHash must be a sha256 hex string");
-          }
-          if (trustedTreeSize !== null && (!Number.isSafeInteger(trustedTreeSize) || trustedTreeSize < 0)) {
-            return sendError(res, 400, "trustedTreeSize must be a non-negative safe integer");
-          }
-
-          let checkpoint = null;
-          try {
-            checkpoint = await getIdentityLogCheckpointRecord({ tenantId });
-            if (trustedCheckpointHash !== null && trustedTreeSize !== null) {
-              assertIdentityLogNoEquivocation({
-                trustedCheckpoint: {
-                  treeSize: trustedTreeSize,
-                  checkpointHash: trustedCheckpointHash
-                },
-                observedCheckpoint: checkpoint
-              });
-            }
-          } catch (err) {
-            if (String(err?.code ?? "") === "IDENTITY_LOG_EQUIVOCATION" || String(err?.code ?? "") === "IDENTITY_LOG_CHECKPOINT_ROLLBACK") {
-              return sendError(res, 409, "identity log equivocation detected", { message: err?.message, details: err?.details ?? null }, { code: err.code });
-            }
-            if (String(err?.message ?? "").includes("identity log not supported")) {
-              return sendError(res, 501, "identity log is not supported for this store");
-            }
-            return sendError(res, 400, "invalid identity log checkpoint query", { message: err?.message ?? String(err) }, { code: "SCHEMA_INVALID" });
-          }
-
-          return sendJson(res, 200, { ok: true, checkpoint });
-        }
-
-        if (req.method === "GET" && path === "/v1/public/identity-log/proof") {
-          const entryIdRaw = url.searchParams.get("entry") ?? url.searchParams.get("entryId");
-          const trustedCheckpointHashRaw = url.searchParams.get("trustedCheckpointHash");
-          const trustedTreeSizeRaw = url.searchParams.get("trustedTreeSize");
-          const entryId = typeof entryIdRaw === "string" && entryIdRaw.trim() !== "" ? entryIdRaw.trim() : null;
-          if (!entryId) return sendError(res, 400, "entry query parameter is required");
-
-          const trustedCheckpointHash =
-            typeof trustedCheckpointHashRaw === "string" && trustedCheckpointHashRaw.trim() !== ""
-              ? trustedCheckpointHashRaw.trim().toLowerCase()
-              : null;
-          const trustedTreeSize =
-            typeof trustedTreeSizeRaw === "string" && trustedTreeSizeRaw.trim() !== ""
-              ? Number(trustedTreeSizeRaw)
-              : null;
-          if ((trustedCheckpointHash === null) !== (trustedTreeSize === null)) {
-            return sendError(res, 400, "trustedCheckpointHash and trustedTreeSize must be provided together");
-          }
-          if (trustedCheckpointHash !== null && !/^[0-9a-f]{64}$/.test(trustedCheckpointHash)) {
-            return sendError(res, 400, "trustedCheckpointHash must be a sha256 hex string");
-          }
-          if (trustedTreeSize !== null && (!Number.isSafeInteger(trustedTreeSize) || trustedTreeSize < 0)) {
-            return sendError(res, 400, "trustedTreeSize must be a non-negative safe integer");
-          }
-
-          let entry = null;
-          let rows = [];
-          let proof = null;
-          try {
-            entry = await getIdentityLogEntryRecord({ tenantId, entryId });
-            if (!entry) return sendError(res, 404, "identity log entry not found", null, { code: "NOT_FOUND" });
-            rows = await listIdentityLogEntriesRecords({ tenantId, limit: 10_000, offset: 0 });
-            if (!rows.length) return sendError(res, 404, "identity log is empty", null, { code: "NOT_FOUND" });
-            proof = buildIdentityLogProof({
-              entries: rows,
-              entryId,
-              trustedCheckpoint:
-                trustedCheckpointHash !== null && trustedTreeSize !== null
-                  ? {
-                      treeSize: trustedTreeSize,
-                      checkpointHash: trustedCheckpointHash
-                    }
-                  : null
-            });
-          } catch (err) {
-            if (String(err?.code ?? "") === "IDENTITY_LOG_ENTRY_NOT_FOUND") {
-              return sendError(res, 404, "identity log entry not found", null, { code: "NOT_FOUND" });
-            }
-            if (String(err?.code ?? "") === "IDENTITY_LOG_EQUIVOCATION" || String(err?.code ?? "") === "IDENTITY_LOG_CHECKPOINT_ROLLBACK") {
-              return sendError(res, 409, "identity log equivocation detected", { message: err?.message, details: err?.details ?? null }, { code: err.code });
-            }
-            if (String(err?.message ?? "").includes("identity log not supported")) {
-              return sendError(res, 501, "identity log is not supported for this store");
-            }
-            return sendError(res, 400, "invalid identity log proof query", { message: err?.message ?? String(err) }, { code: "SCHEMA_INVALID" });
-          }
-
-          return sendJson(res, 200, { ok: true, proof });
         }
 
         {
@@ -37764,7 +39550,7 @@ export function createApi({
             requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE) ||
             requireScope(auth.scopes, OPS_SCOPES.OPS_READ);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialStatus = typeof url.searchParams.get("status") === "string" ? url.searchParams.get("status") : "under_review";
           const initialPriority = typeof url.searchParams.get("priority") === "string" ? url.searchParams.get("priority") : "";
           const initialRunId = typeof url.searchParams.get("runId") === "string" ? url.searchParams.get("runId") : "";
@@ -37996,7 +39782,7 @@ export function createApi({
         if (parts[1] === "marketplace" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialRfqStatus = typeof url.searchParams.get("rfqStatus") === "string" ? url.searchParams.get("rfqStatus") : "open";
           const initialCapability = typeof url.searchParams.get("capability") === "string" ? url.searchParams.get("capability") : "";
           const html = [
@@ -38176,10 +39962,154 @@ export function createApi({
           return sendText(res, 200, html, { contentType: "text/html; charset=utf-8" });
         }
 
+        if (parts[1] === "router" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
+          const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
+          if (!hasScope) return sendError(res, 403, "forbidden");
+          const initialOpsToken = "";
+          const initialScope = typeof url.searchParams.get("scope") === "string" ? url.searchParams.get("scope") : "tenant";
+          const initialScoreStrategy = typeof url.searchParams.get("scoreStrategy") === "string" ? url.searchParams.get("scoreStrategy") : "balanced";
+          const html = [
+            "<!doctype html>",
+            "<html><head><meta charset=\"utf-8\"/>",
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>",
+            "<title>Nooterra Router</title>",
+            "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"/>",
+            "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin/>",
+            "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=IBM+Plex+Mono:wght@400;600&display=swap\" rel=\"stylesheet\"/>",
+            "<style>",
+            ":root{--bg0:#070A12;--bg1:#0b1222;--card:rgba(255,255,255,.06);--card2:rgba(255,255,255,.04);--line:rgba(255,255,255,.12);--ink:#eef3ff;--muted:rgba(238,243,255,.68);--accent:#ffb86b;--accent2:#53f1d3;--bad:#ff5c7a;--good:#4ef2a4;--warn:#ffd37a;--shadow:0 18px 55px rgba(0,0,0,.45)}",
+            "*{box-sizing:border-box} html,body{height:100%}",
+            "body{margin:0;color:var(--ink);background:radial-gradient(900px 500px at 15% 10%,rgba(83,241,211,.12),transparent 55%),radial-gradient(700px 460px at 80% 0%,rgba(255,184,107,.14),transparent 60%),linear-gradient(160deg,var(--bg0),var(--bg1));font:14px/1.55 \"IBM Plex Mono\",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;letter-spacing:.1px}",
+            ".wrap{max-width:1260px;margin:0 auto;padding:22px}",
+            ".top{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}",
+            ".brand{flex:1;min-width:260px}",
+            ".brand h1{margin:0;font:700 34px/1.05 \"Cormorant Garamond\",ui-serif,Georgia,serif;letter-spacing:.6px}",
+            ".brand .sub{color:var(--muted);margin-top:6px;max-width:72ch}",
+            ".pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);font-size:12px}",
+            ".grid{display:grid;grid-template-columns:1.05fr .95fr;gap:14px;margin-top:14px}",
+            "@media (max-width: 980px){.grid{grid-template-columns:1fr}}",
+            ".card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:var(--shadow);backdrop-filter:blur(10px)}",
+            ".row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}",
+            ".field{display:flex;flex-direction:column;gap:6px;min-width:180px;flex:1}",
+            ".field.small{max-width:200px;flex:0 0 200px}",
+            "label{color:var(--muted);font-size:12px}",
+            "input,select,textarea,button{font:inherit}",
+            "input,select,textarea{width:100%;padding:10px 11px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(8,12,20,.7);color:var(--ink);outline:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}",
+            "textarea{min-height:170px;resize:vertical}",
+            "input:focus,select:focus,textarea:focus{border-color:rgba(83,241,211,.5);box-shadow:0 0 0 4px rgba(83,241,211,.12),inset 0 1px 0 rgba(255,255,255,.06)}",
+            "button{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:linear-gradient(180deg,rgba(255,184,107,.26),rgba(255,184,107,.12));color:var(--ink);cursor:pointer;transition:transform .08s ease,filter .12s ease}",
+            "button.secondary{background:linear-gradient(180deg,rgba(83,241,211,.2),rgba(83,241,211,.08));border-color:rgba(83,241,211,.22)}",
+            "button.ghost{background:rgba(255,255,255,.06)}",
+            "button:active{transform:translateY(1px)}",
+            "button:disabled{opacity:.55;cursor:not-allowed}",
+            ".status{margin-top:10px;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted)}",
+            ".status.good{border-color:rgba(78,242,164,.35);background:rgba(78,242,164,.08);color:rgba(190,255,224,.95)}",
+            ".status.bad{border-color:rgba(255,92,122,.35);background:rgba(255,92,122,.08);color:rgba(255,205,214,.95)}",
+            ".status.warn{border-color:rgba(255,211,122,.35);background:rgba(255,211,122,.08);color:rgba(255,243,215,.95)}",
+            ".mono{font-family:\"IBM Plex Mono\",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}",
+            "pre{margin:0;white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px}",
+            ".graph{display:flex;flex-direction:column;gap:10px;margin-top:10px}",
+            ".node{position:relative;padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.14);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.025));cursor:pointer}",
+            ".node:hover{border-color:rgba(255,184,107,.38)}",
+            ".node.selected{border-color:rgba(83,241,211,.55);box-shadow:0 0 0 4px rgba(83,241,211,.10)}",
+            ".node.blocked{border-color:rgba(255,92,122,.48)}",
+            ".node h3{margin:0;font:700 16px/1.1 \"Cormorant Garamond\",ui-serif,Georgia,serif;letter-spacing:.3px}",
+            ".node .meta{margin-top:6px;color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}",
+            ".node .cap{color:rgba(238,243,255,.86)}",
+            ".node .badge{display:inline-flex;align-items:center;gap:7px;padding:3px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.18)}",
+            ".node .badge.good{border-color:rgba(78,242,164,.35)}",
+            ".node .badge.bad{border-color:rgba(255,92,122,.35)}",
+            "table{width:100%;border-collapse:collapse;margin-top:10px}",
+            "th,td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.10);vertical-align:top;text-align:left}",
+            "th{color:var(--muted);font-weight:600;font-size:12px}",
+            "tbody tr:hover{background:rgba(255,255,255,.03)}",
+            ".k{color:var(--muted)}",
+            ".small{font-size:12px;color:var(--muted)}",
+            ".right{margin-left:auto}",
+            "</style></head><body><div class=\"wrap\">",
+            "<div class=\"top\">",
+            "<div class=\"brand\">",
+            "<h1>Semantic Router</h1>",
+            "<div class=\"sub\">Text → intent → capability graph → ranked candidates. This is the missing “front door” that routes demand onto Nooterra’s negotiation, work-order, and settlement rails.</div>",
+            "</div>",
+            "<div class=\"pill\"><span style=\"color:var(--accent)\">◆</span> RouterPlan.v1 <span class=\"k\">+ sha256 planHash</span></div>",
+            "</div>",
+            "<div class=\"grid\">",
+            "<section class=\"card\">",
+            "<div class=\"row\">",
+            "<div class=\"field\"><label>Tenant ID</label><input id=\"tenantIdInput\"/></div>",
+            "<div class=\"field\"><label>Ops token</label><input id=\"opsTokenInput\" type=\"password\" placeholder=\"tok_opsr or tok_opsw\"/></div>",
+            "<div class=\"field small\"><label>Protocol</label><input id=\"protocolInput\"/></div>",
+            "</div>",
+            "<div class=\"row\" style=\"margin-top:10px\">",
+            "<div class=\"field small\"><label>Discovery scope</label><select id=\"scopeInput\"><option value=\"tenant\">tenant</option><option value=\"public\">public</option></select></div>",
+            "<div class=\"field small\"><label>Score strategy</label><select id=\"scoreStrategyInput\"><option value=\"balanced\">balanced</option><option value=\"trust_weighted\">trust_weighted</option></select></div>",
+            "<div class=\"field\"><label>Requester agentId (optional)</label><input id=\"requesterAgentIdInput\" placeholder=\"agt_...\"/></div>",
+            "<div class=\"field small\"><label>Max candidates</label><input id=\"maxCandidatesInput\" type=\"number\" min=\"1\" max=\"25\" value=\"5\"/></div>",
+            "</div>",
+            "<div style=\"margin-top:10px\">",
+            "<label>Request text</label>",
+            "<textarea id=\"requestTextInput\" placeholder=\"e.g. Implement feature X, open a PR, make tests pass, and do a security review.\"></textarea>",
+            "</div>",
+            "<div class=\"row\" style=\"margin-top:10px\">",
+            "<button id=\"planBtn\">Generate plan</button>",
+            "<button class=\"ghost\" id=\"copyHashBtn\" disabled>Copy planHash</button>",
+            "<button class=\"secondary\" id=\"copyJsonBtn\" disabled>Copy JSON</button>",
+            "<div class=\"right small\">Tip: include an explicit <span class=\"mono\">capability://...</span> in the text to force routing.</div>",
+            "</div>",
+            "<div id=\"status\" class=\"status\">Ready.</div>",
+            "</section>",
+            "<section class=\"card\">",
+            "<div class=\"row\"><div class=\"field\"><label>Plan summary</label><pre id=\"summary\" class=\"mono\">{}</pre></div></div>",
+            "<div class=\"row\" style=\"margin-top:10px\"><div class=\"field\"><label>Issues</label><pre id=\"issues\" class=\"mono\">[]</pre></div></div>",
+            "</section>",
+            "</div>",
+            "<div class=\"grid\" style=\"margin-top:14px\">",
+            "<section class=\"card\">",
+            "<div class=\"row\"><div class=\"field\"><label>Capability graph</label><div id=\"graph\" class=\"graph\"></div></div></div>",
+            "</section>",
+            "<section class=\"card\">",
+            "<div class=\"row\"><div class=\"field\"><label>Candidates</label><div id=\"candidatesEmpty\" class=\"small\">Select a node to see ranked candidates.</div><div id=\"candidates\"></div></div></div>",
+            "</section>",
+            "</div>",
+            "<script>",
+            `const INITIAL = ${JSON.stringify({
+              tenantId,
+              opsToken: initialOpsToken,
+              protocol: protocolPolicy.current,
+              scope: initialScope,
+              scoreStrategy: initialScoreStrategy
+            })};`,
+            "const state = { plan: null, selectedTaskId: null };",
+            "function byId(id){ return document.getElementById(id); }",
+            "function setStatus(text, kind){ const el = byId('status'); el.className = 'status' + (kind ? (' ' + kind) : ''); el.textContent = String(text ?? ''); }",
+            "function headers({ write=false, json=false } = {}){ const h = { 'x-proxy-tenant-id': String(byId('tenantIdInput').value || '').trim() }; const tok = String(byId('opsTokenInput').value || '').trim(); if(tok) h['x-proxy-ops-token'] = tok; if(write) h['x-nooterra-protocol'] = String(byId('protocolInput').value || '').trim() || INITIAL.protocol; if(json) h['content-type'] = 'application/json'; return h; }",
+            "async function requestJson(path, { method='GET', body=null, write=false } = {}){ const res = await fetch(path, { method, headers: headers({ write, json: body !== null }), body: body === null ? undefined : JSON.stringify(body) }); const txt = await res.text(); let j = null; try { j = txt ? JSON.parse(txt) : null; } catch {} if(!res.ok){ throw new Error((j && (j.message || j.error)) ? (j.message || j.error) : (txt || ('HTTP ' + res.status))); } return j; }",
+            "function copy(text){ return navigator.clipboard && typeof navigator.clipboard.writeText === 'function' ? navigator.clipboard.writeText(String(text ?? '')) : Promise.reject(new Error('clipboard unavailable')); }",
+            "function safeJson(value){ try { return JSON.stringify(value, null, 2); } catch { return String(value ?? ''); } }",
+            "function render(){ const plan = state.plan; byId('copyHashBtn').disabled = !plan; byId('copyJsonBtn').disabled = !plan; byId('summary').textContent = plan ? safeJson({ planId: plan.planId, planHash: plan.planHash, scope: plan.scope, intent: plan.intent, taskCount: plan.taskCount, generatedAt: plan.generatedAt }) : '{}'; byId('issues').textContent = plan ? safeJson(plan.issues || []) : '[]'; renderGraph(); renderCandidates(); }",
+            "function renderGraph(){ const root = byId('graph'); root.innerHTML = ''; const plan = state.plan; if(!plan || !Array.isArray(plan.tasks) || plan.tasks.length===0){ root.innerHTML = '<div class=\"small\">No tasks. (Try a request mentioning PR/GitHub, or embed capability://...)</div>'; return; } for(const t of plan.tasks){ const node = document.createElement('div'); node.className = 'node' + (String(state.selectedTaskId||'')===String(t.taskId||'') ? ' selected' : '') + ((Array.isArray(t.candidates)&&t.candidates.length===0) ? ' blocked' : ''); const cap = String(t.requiredCapability||''); const candCount = Array.isArray(t.candidates)?t.candidates.length:0; const badgeKind = candCount>0 ? 'good' : 'bad'; node.innerHTML = `<h3>${t.title || t.taskId}</h3><div class=\\\"meta\\\"><span class=\\\"badge\\\"><span class=\\\"k\\\">task</span> <span class=\\\"mono\\\">${t.taskId||''}</span></span><span class=\\\"badge\\\"><span class=\\\"k\\\">cap</span> <span class=\\\"cap mono\\\">${cap}</span></span><span class=\\\"badge ${badgeKind}\\\"><span class=\\\"k\\\">candidates</span> <span class=\\\"mono\\\">${candCount}</span></span></div>`; node.addEventListener('click', ()=>{ state.selectedTaskId = String(t.taskId||''); render(); }); root.appendChild(node); } if(!state.selectedTaskId){ state.selectedTaskId = String(plan.tasks[0]?.taskId||''); } }",
+            "function selectedTask(){ const plan = state.plan; if(!plan) return null; const id = String(state.selectedTaskId||''); return (Array.isArray(plan.tasks)?plan.tasks:[]).find((t)=>String(t.taskId||'')===id) || null; }",
+            "function renderCandidates(){ const wrap = byId('candidates'); const empty = byId('candidatesEmpty'); wrap.innerHTML = ''; const task = selectedTask(); if(!task){ empty.style.display='block'; return; } empty.style.display='none'; const rows = Array.isArray(task.candidates) ? task.candidates : []; if(rows.length===0){ wrap.innerHTML = '<div class=\"small\">No candidates for this capability under current scope.</div>'; return; } const table = document.createElement('table'); table.innerHTML = `<thead><tr><th>Rank</th><th>Agent</th><th>Trust</th><th>Risk</th><th>Price hint</th><th>Score</th></tr></thead>`; const body = document.createElement('tbody'); for(const c of rows){ const tr = document.createElement('tr'); const price = c.priceHint && typeof c.priceHint==='object' ? `${c.priceHint.amountCents ?? 'n/a'} ${c.priceHint.currency ?? ''}` : 'n/a'; tr.innerHTML = `<td class=\\\"mono\\\">${c.rank ?? ''}</td><td><div class=\\\"mono\\\">${c.agentId}</div><div class=\\\"small\\\">${c.displayName || ''}</div></td><td class=\\\"mono\\\">${c.trustScore ?? 'n/a'}</td><td class=\\\"mono\\\">${c.riskTier ?? 'n/a'}</td><td class=\\\"mono\\\">${price}</td><td class=\\\"mono\\\">${(c.rankingScore ?? '').toString()}</td>`; body.appendChild(tr); } table.appendChild(body); wrap.appendChild(table); }",
+            "async function generatePlan(){ const text = String(byId('requestTextInput').value || '').trim(); if(!text){ setStatus('Enter a request first.', 'bad'); return; } const scope = String(byId('scopeInput').value || 'tenant').trim(); const scoreStrategy = String(byId('scoreStrategyInput').value || 'balanced').trim(); const requesterAgentId = String(byId('requesterAgentIdInput').value || '').trim(); const maxCandidates = Number(byId('maxCandidatesInput').value || 5); setStatus('Planning...', ''); try { const out = await requestJson('/router/plan', { method:'POST', body: { text, scope, scoreStrategy, requesterAgentId: requesterAgentId || null, maxCandidates, includeReputation: true, includeRoutingFactors: true } }); state.plan = out && out.plan ? out.plan : null; state.selectedTaskId = null; const issueCount = Array.isArray(state.plan?.issues) ? state.plan.issues.length : 0; setStatus(`Plan ready. tasks=${state.plan?.taskCount ?? 0} issues=${issueCount}. planHash=${String(state.plan?.planHash||'').slice(0,12)}…`, issueCount>0 ? 'warn' : 'good'); render(); } catch (err){ state.plan = null; state.selectedTaskId = null; render(); setStatus(`Plan failed: ${err.message}`, 'bad'); } }",
+            "byId('tenantIdInput').value = String(INITIAL.tenantId || 'tenant_default');",
+            "byId('opsTokenInput').value = String(INITIAL.opsToken || '');",
+            "byId('protocolInput').value = String(INITIAL.protocol || '');",
+            "byId('scopeInput').value = String(INITIAL.scope || 'tenant');",
+            "byId('scoreStrategyInput').value = String(INITIAL.scoreStrategy || 'balanced');",
+            "byId('planBtn').addEventListener('click', generatePlan);",
+            "byId('copyHashBtn').addEventListener('click', async()=>{ if(!state.plan) return; try { await copy(state.plan.planHash || ''); setStatus('Copied planHash to clipboard.', 'good'); } catch (err){ setStatus(`Copy failed: ${err.message}`, 'bad'); } });",
+            "byId('copyJsonBtn').addEventListener('click', async()=>{ if(!state.plan) return; try { await copy(safeJson(state.plan)); setStatus('Copied plan JSON to clipboard.', 'good'); } catch (err){ setStatus(`Copy failed: ${err.message}`, 'bad'); } });",
+            "render();",
+            "</script></div></body></html>"
+          ].join("\n");
+          return sendText(res, 200, html, { contentType: "text/html; charset=utf-8" });
+        }
+
         if (parts[1] === "kernel" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialRunId = typeof url.searchParams.get("runId") === "string" ? url.searchParams.get("runId") : "";
           const initialAgreementHash = typeof url.searchParams.get("agreementHash") === "string" ? url.searchParams.get("agreementHash") : "";
           const initialAgreementId = typeof url.searchParams.get("agreementId") === "string" ? url.searchParams.get("agreementId") : "";
@@ -38318,7 +40248,7 @@ export function createApi({
         if (parts[1] === "finance" && parts[2] === "reconciliation" && parts[3] === "workspace" && parts.length === 4 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialPeriod = normalizeBillingPeriodInput(url.searchParams.get("period"), { defaultToNow: true });
           const initialProviderId = normalizeNonEmptyStringOrNull(url.searchParams.get("providerId")) ?? "stub_default";
           const html = [
@@ -38857,7 +40787,7 @@ export function createApi({
         if (parts[1] === "policy" && parts[2] === "workspace" && parts.length === 3 && req.method === "GET") {
           const hasScope = requireScope(auth.scopes, OPS_SCOPES.OPS_READ) || requireScope(auth.scopes, OPS_SCOPES.OPS_WRITE);
           if (!hasScope) return sendError(res, 403, "forbidden");
-          const initialOpsToken = typeof url.searchParams.get("opsToken") === "string" ? url.searchParams.get("opsToken") : "";
+          const initialOpsToken = "";
           const initialPolicyId = typeof url.searchParams.get("policyId") === "string" ? url.searchParams.get("policyId") : "";
           const initialRunId = typeof url.searchParams.get("runId") === "string" ? url.searchParams.get("runId") : "";
           const html = [
@@ -39622,6 +41552,44 @@ export function createApi({
               { code: "MONEY_RAIL_PROVIDER_NOT_ALLOWED" }
             );
           }
+          const degradedEnqueueGuard = evaluateMoneyRailDegradedModeGuard({
+            moneyRailControls,
+            providerId: providerIdInput,
+            action: MONEY_RAIL_DEGRADED_ACTION.ENQUEUE_PAYOUT
+          });
+          if (degradedEnqueueGuard.blocked) {
+            if (typeof store.appendOpsAudit === "function") {
+              try {
+                await store.appendOpsAudit({
+                  tenantId,
+                  audit: makeOpsAudit({
+                    action: "MONEY_RAIL_DEGRADED_MODE_REJECTED",
+                    targetType: "money_rail_provider",
+                    targetId: providerIdInput,
+                    details: {
+                      providerId: providerIdInput,
+                      outageAction: degradedEnqueueGuard.outageAction,
+                      outageReasonCode: degradedEnqueueGuard.outageReasonCode,
+                      code: degradedEnqueueGuard.code
+                    }
+                  })
+                });
+              } catch {
+                // best-effort
+              }
+            }
+            return sendError(
+              res,
+              409,
+              "money rail provider is in degraded mode; payout enqueue denied",
+              {
+                providerId: providerIdInput,
+                outageAction: degradedEnqueueGuard.outageAction,
+                outageReasonCode: degradedEnqueueGuard.outageReasonCode
+              },
+              { code: degradedEnqueueGuard.code }
+            );
+          }
           let providerOperationsForChecks = null;
           let payoutAmountCents = payoutAmountCentsGross;
           let chargebackContext = {
@@ -39960,6 +41928,48 @@ export function createApi({
             if (!adapter) return sendError(res, 404, "money rail provider not found");
             const providerConfig = getMoneyRailProviderConfig(providerId);
             if (!providerConfig) return sendError(res, 404, "money rail provider not found");
+            const billingCfg = await getTenantBillingConfig(tenantId);
+            const moneyRailControls = resolveTenantMoneyRailControls({ billingCfg });
+            const degradedSubmitGuard = evaluateMoneyRailDegradedModeGuard({
+              moneyRailControls,
+              providerId,
+              action: MONEY_RAIL_DEGRADED_ACTION.SUBMIT_PAYOUT
+            });
+            if (degradedSubmitGuard.blocked) {
+              if (typeof store.appendOpsAudit === "function") {
+                try {
+                  await store.appendOpsAudit({
+                    tenantId,
+                    audit: makeOpsAudit({
+                      action: "MONEY_RAIL_DEGRADED_MODE_REJECTED",
+                      targetType: "money_rail_provider",
+                      targetId: providerId,
+                      details: {
+                        providerId,
+                        operationId,
+                        outageAction: degradedSubmitGuard.outageAction,
+                        outageReasonCode: degradedSubmitGuard.outageReasonCode,
+                        code: degradedSubmitGuard.code
+                      }
+                    })
+                  });
+                } catch {
+                  // best-effort
+                }
+              }
+              return sendError(
+                res,
+                409,
+                "money rail provider is in degraded mode; payout submit denied",
+                {
+                  providerId,
+                  operationId,
+                  outageAction: degradedSubmitGuard.outageAction,
+                  outageReasonCode: degradedSubmitGuard.outageReasonCode
+                },
+                { code: degradedSubmitGuard.code }
+              );
+            }
 
             const body = (await readJsonBody(req)) ?? {};
             if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -41139,6 +43149,9 @@ export function createApi({
             if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
               return sendError(res, 403, "forbidden");
             }
+            if (store.kind === "pg" && typeof store.listFinanceReconciliationTriages !== "function") {
+              return sendError(res, 501, "finance reconciliation triage listing is not supported for this store");
+            }
 
             const period = url.searchParams.get("period") ?? url.searchParams.get("month");
             if (!period) return sendError(res, 400, "period is required");
@@ -41167,7 +43180,13 @@ export function createApi({
               return sendJson(res, 200, report);
             } catch (err) {
               if (Number.isSafeInteger(err?.statusCode)) {
-                return sendError(res, err.statusCode, err?.message ?? "money rail reconcile failed", { code: err?.code ?? null });
+                return sendError(
+                  res,
+                  err.statusCode,
+                  err?.message ?? "money rail reconcile failed",
+                  null,
+                  { code: err?.code ?? null }
+                );
               }
               throw err;
             }
@@ -42456,6 +44475,9 @@ export function createApi({
             if (!(requireScope(auth.scopes, OPS_SCOPES.FINANCE_READ) || requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE))) {
               return sendError(res, 403, "forbidden");
             }
+            if (store.kind === "pg" && typeof store.listFinanceReconciliationTriages !== "function") {
+              return sendError(res, 501, "finance reconciliation triage listing is not supported for this store");
+            }
             let period = null;
             let status = null;
             let sourceType = null;
@@ -42514,6 +44536,12 @@ export function createApi({
 
           if (parts[1] === "finance" && parts[2] === "reconciliation" && parts[3] === "triage" && parts.length === 4 && req.method === "POST") {
             if (!requireScope(auth.scopes, OPS_SCOPES.FINANCE_WRITE)) return sendError(res, 403, "forbidden");
+            if (
+              store.kind === "pg" &&
+              (typeof store.getFinanceReconciliationTriage !== "function" || typeof store.putFinanceReconciliationTriage !== "function")
+            ) {
+              return sendError(res, 501, "finance reconciliation triage persistence is not supported for this store");
+            }
             const body = (await readJsonBody(req)) ?? {};
             let idemStoreKey = null;
             let idemRequestHash = null;
@@ -44090,49 +46118,6 @@ export function createApi({
                 updatedAt: nowAt
               };
               await commitTx([{ kind: "AGENT_IDENTITY_UPSERT", tenantId, agentIdentity: nextIdentity }]);
-              try {
-                await appendIdentityLogEventsForIdentityTransition({
-                  tenantId,
-                  beforeIdentity: existingIdentity,
-                  afterIdentity: nextIdentity,
-                  reasonCode: "DELEGATION_EMERGENCY_REVOKE",
-                  reason,
-                  metadata: {
-                    source: "ops.delegation.emergency-revoke",
-                    selectors: {
-                      runId,
-                      chainHash,
-                      delegationId,
-                      signerKeyId: signerKeyIdInput,
-                      signerAgentId: signerAgentIdInput,
-                      authKeyId: authKeyIdInput,
-                      agentId: agentIdInput
-                    }
-                  },
-                  audit: makeOpsAudit({
-                    action: "DELEGATION_EMERGENCY_REVOKE",
-                    targetType: "agent_identity",
-                    targetId: targetAgentId,
-                    details: {
-                      source: "ops.delegation.emergency-revoke"
-                    }
-                  })
-                });
-              } catch (err) {
-                if (String(err?.message ?? "").includes("identity log append not supported")) {
-                  return sendError(res, 501, "identity transparency log is not supported for this store");
-                }
-                if (String(err?.code ?? "") === "IDENTITY_LOG_EQUIVOCATION" || String(err?.code ?? "") === "IDENTITY_LOG_CHECKPOINT_ROLLBACK") {
-                  return sendError(
-                    res,
-                    409,
-                    "identity transparency log equivocation detected",
-                    { message: err?.message, details: err?.details ?? null },
-                    { code: err.code }
-                  );
-                }
-                return sendError(res, 409, "identity transparency log append failed", { message: err?.message ?? String(err) }, { code: "IDENTITY_LOG_APPEND_FAILED" });
-              }
               revoked.agents.push({
                 agentId: targetAgentId,
                 status: nextIdentity.status,
@@ -49397,6 +51382,36 @@ export function createApi({
         const rfq = getMarketplaceRfq({ tenantId, rfqId });
         if (!rfq) return sendError(res, 404, "marketplace rfq not found");
 
+        async function acceptMarketplaceRfqBid({
+          body,
+          idemStoreKey = null,
+          idemRequestHash = null,
+          responseBodyTransform = (value) => value
+        } = {}) {
+          return acceptMarketplaceRfqBidForRfq({
+            rfq,
+            rfqId,
+            body,
+            idemStoreKey,
+            idemRequestHash,
+            responseBodyTransform
+          });
+        }
+
+        async function autoAcceptMarketplaceRfqBid({
+          body,
+          idemStoreKey = null,
+          idemRequestHash = null
+        } = {}) {
+          return autoAcceptMarketplaceRfqBidForRfq({
+            rfq,
+            rfqId,
+            body,
+            idemStoreKey,
+            idemRequestHash
+          });
+        }
+
         if (req.method === "GET" && marketplaceParts.length === 4 && marketplaceParts[3] === "bids") {
           let status = "all";
           try {
@@ -49916,6 +51931,36 @@ export function createApi({
           return sendJson(res, 200, responseBody);
         }
 
+        if (req.method === "POST" && marketplaceParts.length === 4 && marketplaceParts[3] === "auto-accept") {
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existingIdem = store.idempotency.get(idemStoreKey);
+            if (existingIdem) {
+              if (existingIdem.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existingIdem.statusCode, existingIdem.body);
+            }
+          }
+
+          try {
+            const responseBody = await autoAcceptMarketplaceRfqBid({ body, idemStoreKey, idemRequestHash });
+            return sendJson(res, 200, responseBody);
+          } catch (err) {
+            const statusCode = Number.isSafeInteger(Number(err?.statusCode)) ? Number(err.statusCode) : 400;
+            return sendError(res, statusCode, err?.message ?? "marketplace auto-award failed", err?.details ?? null, {
+              code: err?.code ?? null
+            });
+          }
+        }
+
         if (req.method === "POST" && marketplaceParts.length === 4 && marketplaceParts[3] === "accept") {
           const body = await readJsonBody(req);
           let idemStoreKey = null;
@@ -49935,554 +51980,15 @@ export function createApi({
             }
           }
 
-          if (String(rfq.status ?? "open").toLowerCase() !== "open") return sendError(res, 409, "marketplace rfq is not open");
-
-          const bidId = body?.bidId && String(body.bidId).trim() !== "" ? String(body.bidId).trim() : null;
-          if (!bidId) return sendError(res, 400, "bidId is required");
-
-          const acceptedByAgentId = body?.acceptedByAgentId && String(body.acceptedByAgentId).trim() !== "" ? String(body.acceptedByAgentId).trim() : null;
-          const acceptanceSignatureInput =
-            body?.acceptanceSignature && typeof body.acceptanceSignature === "object" && !Array.isArray(body.acceptanceSignature)
-              ? body.acceptanceSignature
-              : null;
-          if (body?.acceptanceSignature !== undefined && acceptanceSignatureInput === null) {
-            return sendError(res, 400, "acceptanceSignature must be an object");
-          }
-          if (acceptanceSignatureInput && !acceptedByAgentId) {
-            return sendError(res, 400, "acceptedByAgentId is required when acceptanceSignature is provided");
-          }
-          let acceptedByIdentity = null;
-          if (acceptedByAgentId) {
-            try {
-              acceptedByIdentity = await getAgentIdentityRecord({ tenantId, agentId: acceptedByAgentId });
-            } catch (err) {
-              return sendError(res, 400, "invalid acceptedByAgentId", { message: err?.message });
-            }
-            if (!acceptedByIdentity) return sendError(res, 404, "accepting agent identity not found");
-          }
-
-          const existingBids = listMarketplaceRfqBids({ tenantId, rfqId, status: "all" });
-          const selectedBid = existingBids.find((candidate) => String(candidate?.bidId ?? "") === bidId) ?? null;
-          if (!selectedBid) return sendError(res, 404, "marketplace bid not found");
-          if (String(selectedBid.status ?? "pending").toLowerCase() !== "pending") return sendError(res, 409, "marketplace bid is not pending");
-
-          let rfqDirection = null;
-          let bidDirection = null;
           try {
-            rfqDirection = parseInteractionDirection({ fromTypeRaw: rfq?.fromType, toTypeRaw: rfq?.toType });
-            bidDirection = parseInteractionDirection({
-              fromTypeRaw: selectedBid?.fromType,
-              toTypeRaw: selectedBid?.toType,
-              defaultFromType: rfqDirection.fromType,
-              defaultToType: rfqDirection.toType
-            });
+            const responseBody = await acceptMarketplaceRfqBid({ body, idemStoreKey, idemRequestHash });
+            return sendJson(res, 200, responseBody);
           } catch (err) {
-            return sendError(res, 400, "invalid interaction direction", { message: err?.message });
-          }
-          if (bidDirection.fromType !== rfqDirection.fromType || bidDirection.toType !== rfqDirection.toType) {
-            return sendError(res, 409, "accepted bid interaction direction must match rfq direction");
-          }
-
-          const payeeAgentId = selectedBid?.bidderAgentId ? String(selectedBid.bidderAgentId) : null;
-          if (!payeeAgentId) return sendError(res, 409, "selected bid is missing bidderAgentId");
-          let payeeIdentity = null;
-          try {
-            payeeIdentity = await getAgentIdentityRecord({ tenantId, agentId: payeeAgentId });
-          } catch (err) {
-            return sendError(res, 400, "invalid bidderAgentId", { message: err?.message });
-          }
-          if (!payeeIdentity) return sendError(res, 404, "bidder agent identity not found");
-
-          const settlementInput = body?.settlement && typeof body.settlement === "object" ? body.settlement : {};
-          let acceptDirection = null;
-          try {
-            acceptDirection = parseInteractionDirection({
-              fromTypeRaw: body?.fromType ?? settlementInput?.fromType,
-              toTypeRaw: body?.toType ?? settlementInput?.toType,
-              defaultFromType: rfqDirection.fromType,
-              defaultToType: rfqDirection.toType
-            });
-          } catch (err) {
-            return sendError(res, 400, "invalid interaction direction", { message: err?.message });
-          }
-          if (acceptDirection.fromType !== rfqDirection.fromType || acceptDirection.toType !== rfqDirection.toType) {
-            return sendError(res, 409, "settlement interaction direction must match rfq direction");
-          }
-          const payerAgentIdRaw =
-            settlementInput.payerAgentId ??
-            body?.payerAgentId ??
-            rfq?.posterAgentId ??
-            null;
-          if (typeof payerAgentIdRaw !== "string" || payerAgentIdRaw.trim() === "") {
-            return sendError(res, 400, "payerAgentId is required (rfq poster or settlement.payerAgentId)");
-          }
-          const acceptedAt = nowIso();
-          let counterOfferPolicy = resolveMarketplaceCounterOfferPolicy({ rfq: rfq, bid: selectedBid });
-          let selectedBidNegotiation =
-            selectedBid?.negotiation && typeof selectedBid.negotiation === "object" && !Array.isArray(selectedBid.negotiation)
-              ? selectedBid.negotiation
-              : null;
-          if (!selectedBidNegotiation) {
-            try {
-              selectedBidNegotiation = bootstrapMarketplaceBidNegotiation({
-                rfq: rfq,
-                bid: selectedBid,
-                counterOfferPolicy,
-                at: acceptedAt
-              });
-            } catch (err) {
-              return sendError(res, 409, "unable to bootstrap bid negotiation", { message: err?.message });
-            }
-          }
-          const selectedPolicyApplied = applyMarketplaceBidNegotiationPolicy({
-            negotiation: selectedBidNegotiation,
-            counterOfferPolicy,
-            at: acceptedAt,
-            expireIfTimedOut: true
-          });
-          selectedBidNegotiation = selectedPolicyApplied.negotiation;
-          counterOfferPolicy = selectedPolicyApplied.counterOfferPolicy;
-          if (selectedPolicyApplied.justExpired) {
-            const latestExpiredProposal = getLatestMarketplaceBidProposal(selectedBidNegotiation);
-            const expiredBid = {
-              ...selectedBid,
-              negotiation: selectedBidNegotiation,
-              counterOfferPolicy,
-              updatedAt: acceptedAt
-            };
-            const expiredBids = existingBids.map((candidate) => {
-              if (!candidate || typeof candidate !== "object") return candidate;
-              if (String(candidate.bidId ?? "") !== bidId) return candidate;
-              return expiredBid;
-            });
-            const expiredRfq = {
-              ...rfq,
-              updatedAt: acceptedAt
-            };
-            await commitTx([
-              { kind: "MARKETPLACE_RFQ_UPSERT", tenantId, rfq: expiredRfq },
-              { kind: "MARKETPLACE_RFQ_BIDS_SET", tenantId, rfqId, bids: expiredBids }
-            ]);
-            try {
-              await emitMarketplaceLifecycleArtifact({
-                tenantId,
-                eventType: "proposal.expired",
-                rfqId: rfqId,
-                sourceEventId: latestExpiredProposal?.proposalId ?? null,
-                actorAgentId: acceptedByAgentId ?? String(payerAgentIdRaw).trim(),
-                details: {
-                  bidId,
-                  expiresAt: selectedPolicyApplied.expiresAt ?? null,
-                  negotiation: selectedBidNegotiation
-                }
-              });
-            } catch {
-              // Best-effort lifecycle delivery.
-            }
-            return sendError(res, 409, "marketplace bid negotiation expired", {
-              expiresAt: selectedPolicyApplied.expiresAt ?? null
+            const statusCode = Number.isSafeInteger(Number(err?.statusCode)) ? Number(err.statusCode) : 400;
+            return sendError(res, statusCode, err?.message ?? "marketplace bid accept failed", err?.details ?? null, {
+              code: err?.code ?? null
             });
           }
-          const selectedNegotiationState = String(selectedBidNegotiation?.state ?? "open").toLowerCase();
-          if (selectedNegotiationState === "expired") {
-            return sendError(res, 409, "marketplace bid negotiation expired", {
-              expiresAt: selectedPolicyApplied.expiresAt ?? selectedBidNegotiation?.expiresAt ?? null
-            });
-          }
-          if (selectedNegotiationState !== "open") {
-            return sendError(res, 409, "marketplace bid negotiation is not open");
-          }
-          const selectedLatestProposal = getLatestMarketplaceBidProposal(selectedBidNegotiation);
-          if (!selectedLatestProposal) return sendError(res, 409, "marketplace bid negotiation has no proposals");
-          selectedBidNegotiation = updateMarketplaceBidNegotiationState({
-            negotiation: selectedBidNegotiation,
-            state: "accepted",
-            at: acceptedAt,
-            acceptedByAgentId: acceptedByAgentId ?? null,
-            acceptedProposalId: selectedLatestProposal?.proposalId ?? null,
-            acceptedRevision: selectedLatestProposal?.revision ?? null
-          });
-          const selectedBidAccepted = {
-            ...selectedBid,
-            amountCents: selectedLatestProposal?.amountCents ?? selectedBid?.amountCents,
-            currency: selectedLatestProposal?.currency ?? selectedBid?.currency,
-            etaSeconds: selectedLatestProposal?.etaSeconds ?? null,
-            note: selectedLatestProposal?.note ?? null,
-            verificationMethod: selectedLatestProposal?.verificationMethod ?? selectedBid?.verificationMethod ?? null,
-            policy: selectedLatestProposal?.policy ?? selectedBid?.policy ?? null,
-            policyRef: selectedLatestProposal?.policyRef ?? selectedBid?.policyRef ?? null,
-            policyRefHash: selectedLatestProposal?.policyRefHash ?? null,
-            metadata: selectedLatestProposal?.metadata ?? null,
-            negotiation: selectedBidNegotiation,
-            counterOfferPolicy,
-            status: "accepted",
-            acceptedAt,
-            rejectedAt: null,
-            updatedAt: acceptedAt
-          };
-          const defaultAmountCents = Number(selectedBidAccepted?.amountCents);
-          const fallbackCurrency =
-            typeof selectedBidAccepted?.currency === "string" && selectedBidAccepted.currency.trim() !== ""
-              ? selectedBidAccepted.currency
-              : rfq?.currency ?? "USD";
-          let settlementRequest = null;
-          try {
-            settlementRequest = validateAgentRunSettlementRequest({
-              payerAgentId: String(payerAgentIdRaw).trim(),
-              amountCents: settlementInput.amountCents ?? defaultAmountCents,
-              currency: settlementInput.currency ?? fallbackCurrency
-            });
-          } catch (err) {
-            return sendError(res, 400, "invalid settlement payload", { message: err?.message });
-          }
-
-          let payerIdentity = null;
-          try {
-            payerIdentity = await getAgentIdentityRecord({ tenantId, agentId: settlementRequest.payerAgentId });
-          } catch (err) {
-            return sendError(res, 400, "invalid payerAgentId", { message: err?.message });
-          }
-          if (!payerIdentity) return sendError(res, 404, "payer agent identity not found");
-
-          const acceptLifecycleGuard = await enforceMarketplaceParticipantLifecycleGuards({
-            tenantId,
-            participants: [
-              { role: "payer", agentId: settlementRequest.payerAgentId },
-              { role: "payee", agentId: payeeAgentId },
-              ...(
-                acceptedByAgentId && !acceptanceSignatureInput
-                  ? [{ role: "accepted_by", agentId: acceptedByAgentId }]
-                  : []
-              )
-            ],
-            operation: "marketplace_bid.accept",
-            at: acceptedAt,
-            enforceSignerLifecycle: true
-          });
-          if (acceptLifecycleGuard?.blocked) {
-            return sendError(
-              res,
-              acceptLifecycleGuard.httpStatus ?? 409,
-              acceptLifecycleGuard.message,
-              acceptLifecycleGuard.details ?? null,
-              { code: acceptLifecycleGuard.code ?? "X402_AGENT_LIFECYCLE_INVALID" }
-            );
-          }
-
-          try {
-            await assertSettlementWithinWalletPolicy({
-              tenantId,
-              agentIdentity: payerIdentity,
-              amountCents: settlementRequest.amountCents,
-              at: acceptedAt
-            });
-          } catch (err) {
-            return sendError(res, 409, "wallet policy blocked settlement", { message: err?.message, code: err?.code ?? null });
-          }
-
-          const runId = body?.runId && String(body.runId).trim() !== "" ? String(body.runId).trim() : `run_${rfqId}_${bidId}`;
-          if (typeof runId !== "string" || runId.trim() === "") return sendError(res, 400, "runId must be a non-empty string");
-          let existingRun = null;
-          if (typeof store.getAgentRun === "function") {
-            existingRun = await store.getAgentRun({ tenantId, runId });
-          } else if (store.agentRuns instanceof Map) {
-            existingRun = store.agentRuns.get(runStoreKey(tenantId, runId)) ?? null;
-          } else {
-            return sendError(res, 501, "agent runs not supported for this store");
-          }
-          if (existingRun && !idemStoreKey) return sendError(res, 409, "run already exists");
-
-          const runCreatedPayload = {
-            runId,
-            agentId: payeeAgentId,
-            tenantId,
-            taskType:
-              body?.taskType && String(body.taskType).trim() !== ""
-                ? String(body.taskType).trim()
-                : rfq?.capability ?? rfq?.title ?? "marketplace-rfq",
-            inputRef:
-              body?.inputRef && String(body.inputRef).trim() !== ""
-                ? String(body.inputRef).trim()
-                : `marketplace://rfqs/${encodeURIComponent(rfqId)}`
-          };
-          try {
-            validateRunCreatedPayload(runCreatedPayload);
-          } catch (err) {
-            return sendError(res, 400, "invalid run payload", { message: err?.message });
-          }
-          const createdEvent = createChainedEvent({
-            streamId: runId,
-            type: AGENT_RUN_EVENT_TYPE.RUN_CREATED,
-            actor: { type: "agent", id: payeeAgentId },
-            payload: runCreatedPayload,
-            at: acceptedAt
-          });
-          const runEvents = normalizeAgentRunEventRecords(appendChainedEvent({ events: [], event: createdEvent, signer: serverSigner }));
-          let run = null;
-          try {
-            run = reduceAgentRun(runEvents);
-          } catch (err) {
-            return sendError(res, 400, "run creation rejected", { message: err?.message });
-          }
-
-          let payerWallet = null;
-          try {
-            const existingPayerWallet = await getAgentWalletRecord({ tenantId, agentId: settlementRequest.payerAgentId });
-            const basePayerWallet = ensureAgentWallet({
-              wallet: existingPayerWallet,
-              tenantId,
-              agentId: settlementRequest.payerAgentId,
-              currency: settlementRequest.currency,
-              at: acceptedAt
-            });
-            payerWallet = lockAgentWalletEscrow({ wallet: basePayerWallet, amountCents: settlementRequest.amountCents, at: acceptedAt });
-            projectEscrowLedgerOperation({
-              tenantId,
-              settlement: {
-                payerAgentId: settlementRequest.payerAgentId,
-                agentId: payeeAgentId,
-                currency: settlementRequest.currency
-              },
-              operationId: `escrow_hold_${runId}`,
-              type: ESCROW_OPERATION_TYPE.HOLD,
-              amountCents: settlementRequest.amountCents,
-              at: acceptedAt,
-              payerWalletBefore: basePayerWallet,
-              payerWalletAfter: payerWallet,
-              memo: `run:${runId}:hold`
-            });
-          } catch (err) {
-            return sendError(res, 409, "unable to lock settlement escrow", { message: err?.message, code: err?.code ?? null });
-          }
-
-          const disputeWindowDaysRaw = body?.disputeWindowDays ?? settlementInput?.disputeWindowDays ?? 3;
-          const disputeWindowDays =
-            Number.isSafeInteger(Number(disputeWindowDaysRaw)) && Number(disputeWindowDaysRaw) >= 0 ? Number(disputeWindowDaysRaw) : 3;
-          let policySelection = null;
-          try {
-            policySelection = resolveMarketplaceSettlementPolicySelection({
-              tenantId,
-              policyRefInput: body?.policyRef ?? settlementInput?.policyRef ?? selectedBidAccepted?.policyRef ?? null,
-              verificationMethodInput:
-                body?.verificationMethod ?? settlementInput?.verificationMethod ?? selectedBidAccepted?.verificationMethod ?? undefined,
-              settlementPolicyInput: body?.policy ?? settlementInput?.policy ?? selectedBidAccepted?.policy ?? undefined
-            });
-          } catch (err) {
-            if (err?.code === "TENANT_SETTLEMENT_POLICY_NOT_FOUND") {
-              return sendError(res, 404, "policyRef not found");
-            }
-            if (err?.code === "TENANT_SETTLEMENT_POLICY_REF_MISMATCH") {
-              return sendError(res, 409, "policyRef does not match verificationMethod/policy", { message: err?.message });
-            }
-            if (err?.code === "INVALID_VERIFICATION_METHOD") {
-              return sendError(res, 400, "invalid verificationMethod", { message: err?.message });
-            }
-            if (err?.code === "INVALID_SETTLEMENT_POLICY") {
-              return sendError(res, 400, "invalid policy", { message: err?.message });
-            }
-            return sendError(res, 400, "invalid agreement policy selection", { message: err?.message });
-          }
-
-          const verificationMethodInput = policySelection.verificationMethod;
-          const settlementPolicyInput = policySelection.policy;
-          const policyRefInput = policySelection.policyRef;
-          const agreementTermsInput = body?.agreementTerms ?? settlementInput?.agreementTerms ?? null;
-          let agreement = null;
-          try {
-            agreement = buildMarketplaceRfqAgreement({
-              tenantId,
-              rfq: rfq,
-              bid: selectedBidAccepted,
-              runId,
-              acceptedAt,
-              acceptedByAgentId,
-              payerAgentId: settlementRequest.payerAgentId,
-              fromType: acceptDirection.fromType,
-              toType: acceptDirection.toType,
-              disputeWindowDays,
-              verificationMethodInput,
-              settlementPolicyInput,
-              policyRefInput,
-              agreementTermsInput
-            });
-          } catch (err) {
-            return sendError(res, 400, "invalid agreement terms", { message: err?.message });
-          }
-          if (acceptanceSignatureInput) {
-            try {
-              const acceptanceSignature = await parseSignedMarketplaceAgreementAcceptance({
-                tenantId,
-                agreement,
-                acceptedByAgentId,
-                acceptedByIdentity,
-                acceptanceSignatureInput
-              });
-              agreement = {
-                ...agreement,
-                acceptanceSignature
-              };
-            } catch (err) {
-              const details =
-                err?.details && typeof err.details === "object" && !Array.isArray(err.details)
-                  ? { ...err.details, message: err?.message }
-                  : { message: err?.message };
-              return sendError(res, 400, "invalid acceptance signature", details, { code: err?.code ?? null });
-            }
-          }
-          let settlement = createAgentRunSettlement({
-            tenantId,
-            runId,
-            agentId: payeeAgentId,
-            payerAgentId: settlementRequest.payerAgentId,
-            amountCents: settlementRequest.amountCents,
-            currency: settlementRequest.currency,
-            disputeWindowDays,
-            at: acceptedAt
-          });
-          const pendingVerifierRef = resolveAgreementVerifierRef(agreement?.verificationMethod ?? null);
-          const pendingKernelRefs = buildSettlementKernelRefs({
-            settlement,
-            run,
-            agreementId: agreement?.agreementId ?? null,
-            decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.PENDING,
-            decisionMode: agreement?.policy?.mode ?? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC,
-            decisionReason: null,
-            verificationStatus: null,
-            policyHash: agreement?.policyHash ?? null,
-            verificationMethodHash: agreement?.verificationMethodHash ?? null,
-            verificationMethodMode: pendingVerifierRef?.modality ?? agreement?.verificationMethod?.mode ?? null,
-            verifierId: pendingVerifierRef?.verifierId ?? "nooterra.policy-engine",
-            verifierVersion: pendingVerifierRef?.verifierVersion ?? "v1",
-            verifierHash: pendingVerifierRef?.verifierHash ?? null,
-            finalityState: SETTLEMENT_FINALITY_STATE.PENDING,
-            settledAt: null,
-            createdAt: acceptedAt
-          });
-          settlement = updateAgentRunSettlementDecision({
-            settlement,
-            decisionStatus: AGENT_RUN_SETTLEMENT_DECISION_STATUS.PENDING,
-            decisionMode: agreement?.policy?.mode ?? AGENT_RUN_SETTLEMENT_DECISION_MODE.AUTOMATIC,
-            decisionPolicyHash: agreement?.policyHash ?? null,
-            decisionReason: null,
-            decisionTrace: {
-              phase: "agreement.accepted",
-              verificationMethod: agreement?.verificationMethod ?? null,
-              policy: agreement?.policy ?? null,
-              decisionRecord: pendingKernelRefs.decisionRecord,
-              settlementReceipt: pendingKernelRefs.settlementReceipt
-            },
-            at: acceptedAt
-          });
-          const nextRfq = {
-            ...rfq,
-            fromType: rfqDirection.fromType,
-            toType: rfqDirection.toType,
-            status: "assigned",
-            acceptedBidId: bidId,
-            acceptedBidderAgentId: selectedBidAccepted.bidderAgentId ?? null,
-            acceptedAt,
-            acceptedByAgentId: acceptedByAgentId ?? null,
-            runId,
-            agreementId: agreement.agreementId,
-            agreement,
-            settlementId: settlement.settlementId,
-            settlementDecisionStatus: settlement.decisionStatus ?? null,
-            updatedAt: acceptedAt
-          };
-          const nextBids = existingBids.map((candidate) => {
-            if (!candidate || typeof candidate !== "object") return candidate;
-            if (String(candidate.bidId ?? "") === bidId) {
-              return selectedBidAccepted;
-            }
-            const status = String(candidate.status ?? "pending").toLowerCase();
-            if (status === "pending") {
-              let rejectedNegotiation =
-                candidate?.negotiation && typeof candidate.negotiation === "object" && !Array.isArray(candidate.negotiation)
-                  ? candidate.negotiation
-                  : null;
-              try {
-                if (rejectedNegotiation) {
-                  rejectedNegotiation = updateMarketplaceBidNegotiationState({
-                    negotiation: rejectedNegotiation,
-                    state: "rejected",
-                    at: acceptedAt
-                  });
-                }
-              } catch {
-                rejectedNegotiation = null;
-              }
-              return {
-                ...candidate,
-                status: "rejected",
-                rejectedAt: acceptedAt,
-                updatedAt: acceptedAt,
-                negotiation: rejectedNegotiation ?? candidate?.negotiation ?? null
-              };
-            }
-            return candidate;
-          });
-
-          const acceptedBid = nextBids.find((candidate) => String(candidate?.bidId ?? "") === bidId) ?? null;
-          const responseBody = {
-            rfq: toMarketplaceRfqResponse(nextRfq),
-            acceptedBid: toMarketplaceBidResponse(acceptedBid),
-            run,
-            settlement,
-            agreement,
-            offer: agreement?.offer ?? null,
-            offerAcceptance: agreement?.offerAcceptance ?? null,
-            decisionRecord: pendingKernelRefs.decisionRecord,
-            settlementReceipt: pendingKernelRefs.settlementReceipt
-          };
-          const ops = [
-            { kind: "MARKETPLACE_RFQ_UPSERT", tenantId, rfq: nextRfq },
-            { kind: "MARKETPLACE_RFQ_BIDS_SET", tenantId, rfqId, bids: nextBids },
-            { kind: "AGENT_RUN_EVENTS_APPENDED", tenantId, runId, events: runEvents },
-            { kind: "AGENT_WALLET_UPSERT", tenantId, wallet: payerWallet },
-            { kind: "AGENT_RUN_SETTLEMENT_UPSERT", tenantId, runId, settlement }
-          ];
-          if (idemStoreKey) {
-            ops.push({ kind: "IDEMPOTENCY_PUT", key: idemStoreKey, value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody } });
-          }
-          await commitTx(ops);
-          try {
-            await emitMarketplaceLifecycleArtifact({
-              tenantId,
-              eventType: "marketplace.rfq.accepted",
-              rfqId: rfqId,
-              runId,
-              sourceEventId: run?.lastEventId ?? null,
-              actorAgentId: acceptedByAgentId ?? settlementRequest.payerAgentId,
-              agreement,
-              settlement,
-              details: {
-                bidId,
-                acceptedBidderAgentId: acceptedBid?.bidderAgentId ?? null
-              }
-            });
-          } catch {
-            // Lifecycle deliveries are best-effort and retried by delivery workers when destinations are configured.
-          }
-          try {
-            await emitMarketplaceLifecycleArtifact({
-              tenantId,
-              eventType: "proposal.accepted",
-              rfqId: rfqId,
-              runId,
-              sourceEventId: selectedLatestProposal?.proposalId ?? null,
-              actorAgentId: acceptedByAgentId ?? settlementRequest.payerAgentId,
-              agreement,
-              settlement,
-              details: {
-                bidId,
-                proposal: selectedLatestProposal,
-                negotiation: selectedBidNegotiation
-              }
-            });
-          } catch {
-            // Lifecycle deliveries are best-effort and retried by delivery workers when destinations are configured.
-          }
-          return sendJson(res, 200, responseBody);
         }
 
         return sendError(res, 404, "not found");
@@ -57803,18 +59309,11 @@ export function createApi({
           if (!body || typeof body !== "object" || Array.isArray(body)) {
             return sendError(res, 400, "invalid replay verification request", null, { code: "SCHEMA_INVALID" });
           }
-          const signerRegistry = await buildReplayVerificationSignerRegistry({
-            tenantId,
-            replayPack: body?.replayPack ?? null,
-            transcript: body?.transcript ?? null
-          });
           const verification = verifySessionReplayRequestV1({
             memoryExport: body?.memoryExport,
             replayPack: body?.replayPack,
             transcript: body?.transcript ?? null,
             memoryExportRef: body?.memoryExportRef ?? null,
-            signerRegistry,
-            signerLifecycleNow: nowIso(),
             expectedTenantId: body?.expectedTenantId ?? null,
             expectedSessionId: body?.expectedSessionId ?? null,
             expectedPreviousHeadChainHash: body?.expectedPreviousHeadChainHash ?? null,
@@ -59112,9 +60611,7 @@ export function createApi({
             tenantId,
             signerKeyId: serverSigner?.keyId ?? null,
             at: payload.at,
-            now: nowIso(),
-            requireRegistered: false,
-            enforceCurrentValidity: true
+            requireRegistered: false
           });
           if (!signerLifecycle.ok) {
             return sendError(
@@ -59128,10 +60625,7 @@ export function createApi({
                 signerStatus: signerLifecycle.signerStatus ?? null,
                 validFrom: signerLifecycle.validFrom ?? null,
                 validTo: signerLifecycle.validTo ?? null,
-                rotatedAt: signerLifecycle.rotatedAt ?? null,
-                revokedAt: signerLifecycle.revokedAt ?? null,
-                validAt: signerLifecycle.validAt ?? null,
-                validNow: signerLifecycle.validNow ?? null
+                revokedAt: signerLifecycle.revokedAt ?? null
               },
               { code: "SESSION_EVENT_SIGNER_KEY_INVALID" }
             );
@@ -60647,58 +62141,6 @@ export function createApi({
         }
         const currency =
           typeof body?.pricing?.currency === "string" && body.pricing.currency.trim() !== "" ? body.pricing.currency.trim() : "USD";
-        let quoteIntentNegotiationBinding = null;
-        if (body?.intentContract !== undefined && body?.intentContract !== null) {
-          try {
-            quoteIntentNegotiationBinding = buildTaskIntentNegotiationBinding({
-              eventType: INTENT_NEGOTIATION_EVENT_TYPE.PROPOSE,
-              tenantId,
-              intentContract: body.intentContract,
-              actorAgentId:
-                typeof body?.intentActorAgentId === "string" && body.intentActorAgentId.trim() !== ""
-                  ? body.intentActorAgentId.trim()
-                  : buyerAgentId,
-              eventId: typeof body?.intentEventId === "string" && body.intentEventId.trim() !== "" ? body.intentEventId.trim() : null,
-              at: typeof body?.intentEventAt === "string" && body.intentEventAt.trim() !== "" ? body.intentEventAt.trim() : null,
-              eventMetadata:
-                body?.intentEventMetadata && typeof body.intentEventMetadata === "object" && !Array.isArray(body.intentEventMetadata)
-                  ? body.intentEventMetadata
-                  : null
-            });
-          } catch (err) {
-            return sendError(res, 400, "invalid task quote intent negotiation", { message: err?.message }, { code: "SCHEMA_INVALID" });
-          }
-          const quoteIntentContract = quoteIntentNegotiationBinding.intentContract;
-          if (
-            String(quoteIntentContract.proposerAgentId ?? "") !== buyerAgentId ||
-            String(quoteIntentContract.responderAgentId ?? "") !== sellerAgentId
-          ) {
-            return sendError(
-              res,
-              409,
-              "task quote intent negotiation participants mismatch",
-              {
-                proposerAgentId: quoteIntentContract.proposerAgentId ?? null,
-                responderAgentId: quoteIntentContract.responderAgentId ?? null,
-                buyerAgentId,
-                sellerAgentId
-              },
-              { code: "TASK_INTENT_PARTICIPANT_MISMATCH" }
-            );
-          }
-          if (String(quoteIntentContract.intent?.capabilityId ?? "") !== requiredCapability) {
-            return sendError(
-              res,
-              409,
-              "task quote intent capability mismatch",
-              {
-                requiredCapability,
-                intentCapabilityId: quoteIntentContract.intent?.capabilityId ?? null
-              },
-              { code: "TASK_INTENT_CAPABILITY_MISMATCH" }
-            );
-          }
-        }
 
         const buyerIdentity = await getAgentIdentityRecord({ tenantId, agentId: buyerAgentId });
         if (!buyerIdentity) return sendError(res, 404, "buyer agent identity not found", null, { code: "NOT_FOUND" });
@@ -60715,10 +62157,6 @@ export function createApi({
 
         let taskQuote = null;
         try {
-          const quoteMetadata = mergeTaskIntentNegotiationMetadata({
-            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null,
-            intentNegotiationBinding: quoteIntentNegotiationBinding
-          });
           taskQuote = buildTaskQuoteV1({
             quoteId,
             tenantId,
@@ -60738,7 +62176,7 @@ export function createApi({
                 ? body.attestationRequirement
                 : null,
             expiresAt: typeof body?.expiresAt === "string" && body.expiresAt.trim() !== "" ? body.expiresAt.trim() : null,
-            metadata: quoteMetadata,
+            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null,
             createdAt: nowIso()
           });
           validateTaskQuoteV1(taskQuote);
@@ -60886,8 +62324,6 @@ export function createApi({
         if (existingTaskOffer) return sendError(res, 409, "task offer already exists", null, { code: "CONFLICT" });
 
         let quoteRef = null;
-        let quoteIntentNegotiationBinding = null;
-        let quoteRecordForOfferIntent = null;
         if (body?.quoteRef !== undefined && body?.quoteRef !== null) {
           if (!body.quoteRef || typeof body.quoteRef !== "object" || Array.isArray(body.quoteRef)) {
             return sendError(res, 400, "quoteRef must be an object", null, { code: "SCHEMA_INVALID" });
@@ -60900,20 +62336,6 @@ export function createApi({
             validateTaskQuoteV1(quote);
           } catch (err) {
             return sendError(res, 409, "task quote is invalid", { message: err?.message }, { code: "TASK_QUOTE_INVALID" });
-          }
-          quoteRecordForOfferIntent = quote;
-          try {
-            quoteIntentNegotiationBinding = extractTaskIntentNegotiationBinding(quote, {
-              fieldPath: "taskQuote"
-            });
-          } catch (err) {
-            return sendError(
-              res,
-              409,
-              "task quote intent negotiation invalid",
-              { message: err?.message },
-              { code: "TASK_QUOTE_INTENT_NEGOTIATION_INVALID" }
-            );
           }
           if (String(quote.buyerAgentId ?? "") !== buyerAgentId || String(quote.sellerAgentId ?? "") !== sellerAgentId) {
             return sendError(
@@ -60951,74 +62373,9 @@ export function createApi({
             );
           }
         }
-        let offerIntentNegotiationBinding = null;
-        const offerIntentContractInput =
-          body?.intentContract !== undefined && body?.intentContract !== null
-            ? body.intentContract
-            : quoteIntentNegotiationBinding?.intentContract ?? null;
-        if (offerIntentContractInput !== null && offerIntentContractInput !== undefined) {
-          try {
-            offerIntentNegotiationBinding = buildTaskIntentNegotiationBinding({
-              eventType: INTENT_NEGOTIATION_EVENT_TYPE.COUNTER,
-              tenantId,
-              intentContract: offerIntentContractInput,
-              actorAgentId:
-                typeof body?.intentActorAgentId === "string" && body.intentActorAgentId.trim() !== ""
-                  ? body.intentActorAgentId.trim()
-                  : sellerAgentId,
-              eventId: typeof body?.intentEventId === "string" && body.intentEventId.trim() !== "" ? body.intentEventId.trim() : null,
-              at: typeof body?.intentEventAt === "string" && body.intentEventAt.trim() !== "" ? body.intentEventAt.trim() : null,
-              eventMetadata:
-                body?.intentEventMetadata && typeof body.intentEventMetadata === "object" && !Array.isArray(body.intentEventMetadata)
-                  ? body.intentEventMetadata
-                  : null,
-              prevEventHash:
-                typeof body?.intentPrevEventHash === "string" && body.intentPrevEventHash.trim() !== ""
-                  ? body.intentPrevEventHash.trim()
-                  : null,
-              priorBindings: quoteIntentNegotiationBinding ? [quoteIntentNegotiationBinding] : []
-            });
-          } catch (err) {
-            return sendError(res, 409, "task offer intent negotiation blocked", { message: err?.message }, { code: "TASK_INTENT_NEGOTIATION_BLOCKED" });
-          }
-          const offerIntentContract = offerIntentNegotiationBinding.intentContract;
-          if (
-            String(offerIntentContract.proposerAgentId ?? "") !== buyerAgentId ||
-            String(offerIntentContract.responderAgentId ?? "") !== sellerAgentId
-          ) {
-            return sendError(
-              res,
-              409,
-              "task offer intent negotiation participants mismatch",
-              {
-                proposerAgentId: offerIntentContract.proposerAgentId ?? null,
-                responderAgentId: offerIntentContract.responderAgentId ?? null,
-                buyerAgentId,
-                sellerAgentId
-              },
-              { code: "TASK_INTENT_PARTICIPANT_MISMATCH" }
-            );
-          }
-          if (quoteRecordForOfferIntent && String(offerIntentContract.intent?.capabilityId ?? "") !== String(quoteRecordForOfferIntent.requiredCapability ?? "")) {
-            return sendError(
-              res,
-              409,
-              "task offer intent capability mismatch",
-              {
-                quoteRequiredCapability: quoteRecordForOfferIntent.requiredCapability ?? null,
-                intentCapabilityId: offerIntentContract.intent?.capabilityId ?? null
-              },
-              { code: "TASK_INTENT_CAPABILITY_MISMATCH" }
-            );
-          }
-        }
 
         let taskOffer = null;
         try {
-          const offerMetadata = mergeTaskIntentNegotiationMetadata({
-            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null,
-            intentNegotiationBinding: offerIntentNegotiationBinding
-          });
           taskOffer = buildTaskOfferV1({
             offerId,
             tenantId,
@@ -61034,7 +62391,7 @@ export function createApi({
             constraints:
               body?.constraints && typeof body.constraints === "object" && !Array.isArray(body.constraints) ? body.constraints : null,
             expiresAt: typeof body?.expiresAt === "string" && body.expiresAt.trim() !== "" ? body.expiresAt.trim() : null,
-            metadata: offerMetadata,
+            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null,
             createdAt: nowIso()
           });
           validateTaskOfferV1(taskOffer);
@@ -61212,102 +62569,6 @@ export function createApi({
             { code: "TASK_TRACE_ID_MISMATCH" }
           );
         }
-        let quoteIntentNegotiationBinding = null;
-        let offerIntentNegotiationBinding = null;
-        try {
-          quoteIntentNegotiationBinding = extractTaskIntentNegotiationBinding(quote, {
-            fieldPath: "taskQuote"
-          });
-          offerIntentNegotiationBinding = extractTaskIntentNegotiationBinding(offer, {
-            fieldPath: "taskOffer"
-          });
-        } catch (err) {
-          return sendError(
-            res,
-            409,
-            "task acceptance intent negotiation invalid",
-            { message: err?.message },
-            { code: "TASK_INTENT_NEGOTIATION_INVALID" }
-          );
-        }
-        if (
-          quoteIntentNegotiationBinding &&
-          offerIntentNegotiationBinding &&
-          String(quoteIntentNegotiationBinding.intentContract?.negotiationId ?? "") !==
-            String(offerIntentNegotiationBinding.intentContract?.negotiationId ?? "")
-        ) {
-          return sendError(
-            res,
-            409,
-            "task acceptance intent negotiation mismatch",
-            {
-              quoteNegotiationId: quoteIntentNegotiationBinding.intentContract?.negotiationId ?? null,
-              offerNegotiationId: offerIntentNegotiationBinding.intentContract?.negotiationId ?? null
-            },
-            { code: "TASK_INTENT_NEGOTIATION_MISMATCH" }
-          );
-        }
-        let acceptanceIntentNegotiationBinding = null;
-        const acceptanceIntentContractInput =
-          body?.intentContract !== undefined && body?.intentContract !== null
-            ? body.intentContract
-            : offerIntentNegotiationBinding?.intentContract ?? quoteIntentNegotiationBinding?.intentContract ?? null;
-        if (acceptanceIntentContractInput !== null && acceptanceIntentContractInput !== undefined) {
-          try {
-            acceptanceIntentNegotiationBinding = buildTaskIntentNegotiationBinding({
-              eventType: INTENT_NEGOTIATION_EVENT_TYPE.ACCEPT,
-              tenantId,
-              intentContract: acceptanceIntentContractInput,
-              actorAgentId:
-                typeof body?.intentActorAgentId === "string" && body.intentActorAgentId.trim() !== ""
-                  ? body.intentActorAgentId.trim()
-                  : acceptedByAgentId,
-              eventId: typeof body?.intentEventId === "string" && body.intentEventId.trim() !== "" ? body.intentEventId.trim() : null,
-              at: typeof body?.intentEventAt === "string" && body.intentEventAt.trim() !== "" ? body.intentEventAt.trim() : null,
-              eventMetadata:
-                body?.intentEventMetadata && typeof body.intentEventMetadata === "object" && !Array.isArray(body.intentEventMetadata)
-                  ? body.intentEventMetadata
-                  : null,
-              prevEventHash:
-                typeof body?.intentPrevEventHash === "string" && body.intentPrevEventHash.trim() !== ""
-                  ? body.intentPrevEventHash.trim()
-                  : null,
-              priorBindings: [quoteIntentNegotiationBinding, offerIntentNegotiationBinding].filter(Boolean)
-            });
-          } catch (err) {
-            return sendError(res, 409, "task acceptance intent negotiation blocked", { message: err?.message }, { code: "TASK_INTENT_NEGOTIATION_BLOCKED" });
-          }
-          const acceptanceIntentContract = acceptanceIntentNegotiationBinding.intentContract;
-          if (
-            String(acceptanceIntentContract.proposerAgentId ?? "") !== String(quote.buyerAgentId ?? "") ||
-            String(acceptanceIntentContract.responderAgentId ?? "") !== String(quote.sellerAgentId ?? "")
-          ) {
-            return sendError(
-              res,
-              409,
-              "task acceptance intent negotiation participants mismatch",
-              {
-                proposerAgentId: acceptanceIntentContract.proposerAgentId ?? null,
-                responderAgentId: acceptanceIntentContract.responderAgentId ?? null,
-                buyerAgentId: quote.buyerAgentId ?? null,
-                sellerAgentId: quote.sellerAgentId ?? null
-              },
-              { code: "TASK_INTENT_PARTICIPANT_MISMATCH" }
-            );
-          }
-          if (String(acceptanceIntentContract.intent?.capabilityId ?? "") !== String(quote.requiredCapability ?? "")) {
-            return sendError(
-              res,
-              409,
-              "task acceptance intent capability mismatch",
-              {
-                quoteRequiredCapability: quote.requiredCapability ?? null,
-                intentCapabilityId: acceptanceIntentContract.intent?.capabilityId ?? null
-              },
-              { code: "TASK_INTENT_CAPABILITY_MISMATCH" }
-            );
-          }
-        }
         const acceptedByIdentity = await getAgentIdentityRecord({ tenantId, agentId: acceptedByAgentId });
         if (!acceptedByIdentity) return sendError(res, 404, "accepting agent identity not found", null, { code: "NOT_FOUND" });
         const acceptanceLifecycleGuard = await enforceTaskNegotiationParticipantLifecycleGuards({
@@ -61329,10 +62590,6 @@ export function createApi({
 
         let taskAcceptance = null;
         try {
-          const acceptanceMetadata = mergeTaskIntentNegotiationMetadata({
-            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null,
-            intentNegotiationBinding: acceptanceIntentNegotiationBinding
-          });
           taskAcceptance = buildTaskAcceptanceV1({
             acceptanceId,
             tenantId,
@@ -61349,7 +62606,7 @@ export function createApi({
             acceptedByAgentId,
             traceId: requestedTraceId ?? inheritedTraceId ?? null,
             acceptedAt: typeof body?.acceptedAt === "string" && body.acceptedAt.trim() !== "" ? body.acceptedAt.trim() : nowIso(),
-            metadata: acceptanceMetadata
+            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null
           });
           validateTaskAcceptanceV1(taskAcceptance);
         } catch (err) {
@@ -62107,6 +63364,376 @@ export function createApi({
         }
       }
 
+      if (req.method === "GET" && path === "/intents") {
+        let statusFilter = null;
+        try {
+          statusFilter = parseIntentContractStatus(url.searchParams.get("status"), {
+            allowNull: true,
+            fieldName: "status"
+          });
+        } catch (err) {
+          return sendError(res, 400, "invalid intent query", { message: err?.message }, { code: "SCHEMA_INVALID" });
+        }
+        const intentId =
+          typeof url.searchParams.get("intentId") === "string" && url.searchParams.get("intentId").trim() !== ""
+            ? url.searchParams.get("intentId").trim()
+            : null;
+        const proposerAgentId =
+          typeof url.searchParams.get("proposerAgentId") === "string" && url.searchParams.get("proposerAgentId").trim() !== ""
+            ? url.searchParams.get("proposerAgentId").trim()
+            : null;
+        const counterpartyAgentId =
+          typeof url.searchParams.get("counterpartyAgentId") === "string" && url.searchParams.get("counterpartyAgentId").trim() !== ""
+            ? url.searchParams.get("counterpartyAgentId").trim()
+            : null;
+        const limitRaw = url.searchParams.get("limit");
+        const offsetRaw = url.searchParams.get("offset");
+        const limit = limitRaw ? Number(limitRaw) : 200;
+        const offset = offsetRaw ? Number(offsetRaw) : 0;
+        const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(1000, limit) : 200;
+        const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+
+        let intents = [];
+        try {
+          intents = await listIntentContractRecords({
+            tenantId,
+            intentId,
+            proposerAgentId,
+            counterpartyAgentId,
+            status: statusFilter,
+            limit: safeLimit,
+            offset: safeOffset
+          });
+        } catch (err) {
+          return sendError(res, 501, "intent contracts not supported for this store", { message: err?.message });
+        }
+        return sendJson(res, 200, { ok: true, intents, limit: safeLimit, offset: safeOffset });
+      }
+
+      if (req.method === "POST" && path === "/intents/propose") {
+        if (typeof store.getIntentContract !== "function" && !(store.intentContracts instanceof Map)) {
+          return sendError(res, 501, "intent contracts not supported for this store");
+        }
+        if (!requireProtocolHeaderForWrite(req, res)) return;
+        const body = await readJsonBody(req);
+        let idemStoreKey = null;
+        let idemRequestHash = null;
+        try {
+          ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+        } catch (err) {
+          return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+        }
+        if (idemStoreKey) {
+          const existing = store.idempotency.get(idemStoreKey);
+          if (existing) {
+            if (existing.requestHash !== idemRequestHash) {
+              return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+            }
+            return sendJson(res, existing.statusCode, existing.body);
+          }
+        }
+
+        const nowAt = nowIso();
+        const intentId =
+          typeof body?.intentId === "string" && body.intentId.trim() !== "" ? body.intentId.trim() : createId("intent");
+        const proposerAgentId =
+          typeof body?.proposerAgentId === "string" && body.proposerAgentId.trim() !== "" ? body.proposerAgentId.trim() : null;
+        const counterpartyAgentId =
+          typeof body?.counterpartyAgentId === "string" && body.counterpartyAgentId.trim() !== "" ? body.counterpartyAgentId.trim() : null;
+        if (!proposerAgentId || !counterpartyAgentId) {
+          return sendError(res, 400, "proposerAgentId and counterpartyAgentId are required", null, { code: "SCHEMA_INVALID" });
+        }
+        if (body?.objective === null || body?.objective === undefined) {
+          return sendError(res, 400, "objective is required", null, { code: "SCHEMA_INVALID" });
+        }
+        if (!body?.budgetEnvelope || typeof body.budgetEnvelope !== "object" || Array.isArray(body.budgetEnvelope)) {
+          return sendError(res, 400, "budgetEnvelope is required", null, { code: "SCHEMA_INVALID" });
+        }
+        const existingIntent = await getIntentContractRecord({ tenantId, intentId });
+        if (existingIntent) return sendError(res, 409, "intent contract already exists", null, { code: "CONFLICT" });
+
+        const proposerIdentity = await getAgentIdentityRecord({ tenantId, agentId: proposerAgentId });
+        if (!proposerIdentity) return sendError(res, 404, "proposer agent identity not found", null, { code: "NOT_FOUND" });
+        const counterpartyIdentity = await getAgentIdentityRecord({ tenantId, agentId: counterpartyAgentId });
+        if (!counterpartyIdentity) return sendError(res, 404, "counterparty agent identity not found", null, { code: "NOT_FOUND" });
+
+        let intentContract = null;
+        try {
+          const proposedAt =
+            typeof body?.proposedAt === "string" && body.proposedAt.trim() !== ""
+              ? parseAsOfDateTime(body.proposedAt.trim(), { fieldName: "proposedAt" })
+              : nowAt;
+          intentContract = buildIntentContractV1({
+            intentId,
+            tenantId,
+            proposerAgentId,
+            counterpartyAgentId,
+            objective: body.objective,
+            constraints:
+              body?.constraints && typeof body.constraints === "object" && !Array.isArray(body.constraints) ? body.constraints : null,
+            budgetEnvelope: body.budgetEnvelope,
+            requiredApprovals: Array.isArray(body?.requiredApprovals) ? body.requiredApprovals : [],
+            successCriteria:
+              body?.successCriteria && typeof body.successCriteria === "object" && !Array.isArray(body.successCriteria)
+                ? body.successCriteria
+                : {},
+            terminationPolicy:
+              body?.terminationPolicy && typeof body.terminationPolicy === "object" && !Array.isArray(body.terminationPolicy)
+                ? body.terminationPolicy
+                : {},
+            proposedAt,
+            updatedAt: proposedAt,
+            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null
+          });
+          validateIntentContractV1(intentContract);
+        } catch (err) {
+          return sendError(res, 400, "invalid intent contract", { message: err?.message }, { code: "SCHEMA_INVALID" });
+        }
+
+        const responseBody = { ok: true, intentContract };
+        const ops = [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId, intentContract }];
+        if (idemStoreKey) {
+          ops.push({
+            kind: "IDEMPOTENCY_PUT",
+            key: idemStoreKey,
+            value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody }
+          });
+        }
+        await commitTx(ops);
+        return sendJson(res, 201, responseBody);
+      }
+
+      {
+        const parts = path.split("/").filter(Boolean);
+
+        if (parts[0] === "intents" && parts[1] && parts.length === 2 && req.method === "GET") {
+          const intentId = decodePathPart(parts[1]);
+          let intentContract = null;
+          try {
+            intentContract = await getIntentContractRecord({ tenantId, intentId });
+          } catch (err) {
+            return sendError(res, 501, "intent contracts not supported for this store", { message: err?.message });
+          }
+          if (!intentContract) return sendError(res, 404, "intent contract not found", null, { code: "NOT_FOUND" });
+          return sendJson(res, 200, { ok: true, intentContract });
+        }
+
+        if (parts[0] === "intents" && parts[1] && parts[2] === "counter" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+          const sourceIntentId = decodePathPart(parts[1]);
+          const sourceIntent = await getIntentContractRecord({ tenantId, intentId: sourceIntentId });
+          if (!sourceIntent) return sendError(res, 404, "source intent contract not found", null, { code: "NOT_FOUND" });
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const proposerAgentId =
+            typeof body?.proposerAgentId === "string" && body.proposerAgentId.trim() !== ""
+              ? body.proposerAgentId.trim()
+              : null;
+          if (!proposerAgentId) return sendError(res, 400, "proposerAgentId is required", null, { code: "SCHEMA_INVALID" });
+          const newIntentId =
+            typeof body?.intentId === "string" && body.intentId.trim() !== "" ? body.intentId.trim() : createId("intent");
+          const existingIntent = await getIntentContractRecord({ tenantId, intentId: newIntentId });
+          if (existingIntent) return sendError(res, 409, "intent contract already exists", null, { code: "CONFLICT" });
+          const expectedParentIntentHash =
+            typeof body?.parentIntentHash === "string" && body.parentIntentHash.trim() !== ""
+              ? normalizeSha256HashInput(body.parentIntentHash.trim(), "parentIntentHash", { allowNull: false })
+              : null;
+          const sourceIntentHash = normalizeSha256HashInput(sourceIntent?.intentHash, "sourceIntent.intentHash", { allowNull: false });
+          if (expectedParentIntentHash && expectedParentIntentHash !== sourceIntentHash) {
+            return sendError(
+              res,
+              409,
+              "intent contract parent hash mismatch",
+              { expectedParentIntentHash: sourceIntentHash, providedParentIntentHash: expectedParentIntentHash },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+
+          let counterIntent = null;
+          try {
+            const proposedAt =
+              typeof body?.proposedAt === "string" && body.proposedAt.trim() !== ""
+                ? parseAsOfDateTime(body.proposedAt.trim(), { fieldName: "proposedAt" })
+                : nowIso();
+            counterIntent = counterIntentContractV1({
+              sourceIntent,
+              intentId: newIntentId,
+              proposerAgentId,
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "objective") ? { objective: body.objective } : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "constraints")
+                ? {
+                    constraints:
+                      body?.constraints && typeof body.constraints === "object" && !Array.isArray(body.constraints)
+                        ? body.constraints
+                        : null
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "budgetEnvelope")
+                ? {
+                    budgetEnvelope:
+                      body?.budgetEnvelope && typeof body.budgetEnvelope === "object" && !Array.isArray(body.budgetEnvelope)
+                        ? body.budgetEnvelope
+                        : null
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "requiredApprovals")
+                ? { requiredApprovals: Array.isArray(body?.requiredApprovals) ? body.requiredApprovals : [] }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "successCriteria")
+                ? {
+                    successCriteria:
+                      body?.successCriteria && typeof body.successCriteria === "object" && !Array.isArray(body.successCriteria)
+                        ? body.successCriteria
+                        : null
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(body ?? {}, "terminationPolicy")
+                ? {
+                    terminationPolicy:
+                      body?.terminationPolicy && typeof body.terminationPolicy === "object" && !Array.isArray(body.terminationPolicy)
+                        ? body.terminationPolicy
+                        : null
+                  }
+                : {}),
+              proposedAt,
+              metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null
+            });
+            validateIntentContractV1(counterIntent);
+          } catch (err) {
+            return sendError(res, 400, "invalid intent counter proposal", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          }
+
+          const responseBody = { ok: true, intentContract: counterIntent };
+          const ops = [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId: newIntentId, intentContract: counterIntent }];
+          if (idemStoreKey) {
+            ops.push({
+              kind: "IDEMPOTENCY_PUT",
+              key: idemStoreKey,
+              value: { requestHash: idemRequestHash, statusCode: 201, body: responseBody }
+            });
+          }
+          await commitTx(ops);
+          return sendJson(res, 201, responseBody);
+        }
+
+        if (parts[0] === "intents" && parts[1] && parts[2] === "accept" && parts.length === 3 && req.method === "POST") {
+          if (!requireProtocolHeaderForWrite(req, res)) return;
+          const intentId = decodePathPart(parts[1]);
+          const body = await readJsonBody(req);
+          let idemStoreKey = null;
+          let idemRequestHash = null;
+          try {
+            ({ idemStoreKey, idemRequestHash } = readIdempotency({ method: "POST", requestPath: path, expectedPrevChainHash: null, body }));
+          } catch (err) {
+            return sendError(res, 400, "invalid idempotency key", { message: err?.message });
+          }
+          if (idemStoreKey) {
+            const existing = store.idempotency.get(idemStoreKey);
+            if (existing) {
+              if (existing.requestHash !== idemRequestHash) {
+                return sendError(res, 409, "idempotency key conflict", "request differs from initial use of this key");
+              }
+              return sendJson(res, existing.statusCode, existing.body);
+            }
+          }
+
+          const existingIntent = await getIntentContractRecord({ tenantId, intentId });
+          if (!existingIntent) return sendError(res, 404, "intent contract not found", null, { code: "NOT_FOUND" });
+          const acceptedByAgentId =
+            typeof body?.acceptedByAgentId === "string" && body.acceptedByAgentId.trim() !== ""
+              ? body.acceptedByAgentId.trim()
+              : null;
+          if (!acceptedByAgentId) return sendError(res, 400, "acceptedByAgentId is required", null, { code: "SCHEMA_INVALID" });
+          const acceptedAt =
+            typeof body?.acceptedAt === "string" && body.acceptedAt.trim() !== ""
+              ? parseAsOfDateTime(body.acceptedAt.trim(), { fieldName: "acceptedAt" })
+              : nowIso();
+          const expectedIntentHash =
+            typeof body?.intentHash === "string" && body.intentHash.trim() !== ""
+              ? normalizeSha256HashInput(body.intentHash.trim(), "intentHash", { allowNull: false })
+              : null;
+          const existingIntentHash = normalizeSha256HashInput(existingIntent?.intentHash, "intentContract.intentHash", { allowNull: false });
+          if (expectedIntentHash && expectedIntentHash !== existingIntentHash) {
+            return sendError(
+              res,
+              409,
+              "intent contract hash mismatch",
+              { expectedIntentHash: existingIntentHash, providedIntentHash: expectedIntentHash },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+
+          const existingStatus = String(existingIntent?.status ?? "").trim().toLowerCase();
+          if (existingStatus === INTENT_CONTRACT_STATUS.ACCEPTED) {
+            const existingAcceptedBy = String(existingIntent?.acceptedByAgentId ?? "").trim();
+            const existingAcceptedAt = String(existingIntent?.acceptedAt ?? "").trim();
+            if (existingAcceptedBy !== acceptedByAgentId || existingAcceptedAt !== acceptedAt) {
+              return sendError(
+                res,
+                409,
+                "intent contract already accepted with different acceptance fields",
+                {
+                  acceptedByAgentId: existingAcceptedBy || null,
+                  acceptedAt: existingAcceptedAt || null
+                },
+                { code: "INTENT_CONTRACT_ALREADY_ACCEPTED" }
+              );
+            }
+            const responseBody = { ok: true, intentContract: existingIntent };
+            if (idemStoreKey) {
+              await commitTx([
+                {
+                  kind: "IDEMPOTENCY_PUT",
+                  key: idemStoreKey,
+                  value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody }
+                }
+              ]);
+            }
+            return sendJson(res, 200, responseBody);
+          }
+
+          let acceptedIntent = null;
+          try {
+            acceptedIntent = acceptIntentContractV1({
+              intentContract: existingIntent,
+              acceptedByAgentId,
+              acceptedAt
+            });
+            validateIntentContractV1(acceptedIntent);
+          } catch (err) {
+            return sendError(res, 409, "intent contract accept blocked", { message: err?.message }, { code: "INTENT_CONTRACT_ACCEPT_BLOCKED" });
+          }
+
+          const responseBody = { ok: true, intentContract: acceptedIntent };
+          const ops = [{ kind: "INTENT_CONTRACT_UPSERT", tenantId, intentId, intentContract: acceptedIntent }];
+          if (idemStoreKey) {
+            ops.push({
+              kind: "IDEMPOTENCY_PUT",
+              key: idemStoreKey,
+              value: { requestHash: idemRequestHash, statusCode: 200, body: responseBody }
+            });
+          }
+          await commitTx(ops);
+          return sendJson(res, 200, responseBody);
+        }
+      }
+
       if (req.method === "POST" && path === "/work-orders") {
         if (typeof store.getSubAgentWorkOrder !== "function" && !(store.subAgentWorkOrders instanceof Map)) {
           return sendError(res, 501, "sub-agent work orders not supported for this store");
@@ -62410,7 +64037,6 @@ export function createApi({
         }
 
         let acceptanceBinding = null;
-        let acceptedIntentBinding = null;
         if (body?.acceptanceRef !== undefined && body?.acceptanceRef !== null) {
           if (!body.acceptanceRef || typeof body.acceptanceRef !== "object" || Array.isArray(body.acceptanceRef)) {
             return sendError(res, 400, "acceptanceRef must be an object", null, { code: "SCHEMA_INVALID" });
@@ -62426,19 +64052,6 @@ export function createApi({
             validateTaskAcceptanceV1(acceptance);
           } catch (err) {
             return sendError(res, 409, "task acceptance is invalid", { message: err?.message }, { code: "TASK_ACCEPTANCE_INVALID" });
-          }
-          try {
-            acceptedIntentBinding = deriveWorkOrderIntentBindingFromTaskAcceptance(acceptance, {
-              fieldPath: "taskAcceptance"
-            });
-          } catch (err) {
-            return sendError(
-              res,
-              409,
-              "task acceptance intent binding invalid",
-              { message: err?.message },
-              { code: "TASK_ACCEPTANCE_INTENT_BINDING_INVALID" }
-            );
           }
           const providedAcceptanceHash =
             typeof body.acceptanceRef.acceptanceHash === "string" && body.acceptanceRef.acceptanceHash.trim() !== ""
@@ -62550,63 +64163,42 @@ export function createApi({
             { path: "$.acceptanceBinding" }
           );
         }
-        let requestedIntentRef = null;
+
+        let resolvedIntentBinding = null;
         try {
-          requestedIntentRef = normalizeWorkOrderIntentRefInput(body?.intentRef ?? null, {
-            fieldPath: "intentRef",
-            allowNull: true
+          const intentResolution = await resolveAcceptedIntentBindingForWorkOrder({
+            tenantId,
+            intentBindingInput: body?.intentBinding ?? null,
+            principalAgentId,
+            subAgentId,
+            boundAt: nowAt,
+            requireBinding: workOrderRequireIntentBindingValue,
+            fieldName: "intentBinding"
           });
+          resolvedIntentBinding = intentResolution?.intentBinding ?? null;
         } catch (err) {
-          return sendError(res, 400, "invalid intentRef", { message: err?.message }, { code: "SCHEMA_INVALID" });
-        }
-        if (requestedIntentRef && !acceptedIntentBinding) {
+          const errorCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "WORK_ORDER_INTENT_BINDING_BLOCKED";
+          const statusCode =
+            Number.isSafeInteger(Number(err?.statusCode)) && Number(err.statusCode) >= 400 && Number(err.statusCode) < 600
+              ? Number(err.statusCode)
+              : err instanceof TypeError
+                ? 400
+                : 409;
+          const details = err instanceof TypeError
+            ? { message: err?.message ?? "invalid work order intent binding" }
+            : {
+                reasonCode: errorCode,
+                message: err?.message ?? null,
+                ...(err?.details && typeof err.details === "object" ? err.details : {})
+              };
           return sendError(
             res,
-            409,
-            "work order intent binding blocked",
-            {
-              reasonCode: "WORK_ORDER_INTENT_BINDING_MISSING_ACCEPTED_NEGOTIATION",
-              message: "intentRef requires acceptanceRef with accepted intent negotiation binding"
-            },
-            { code: "WORK_ORDER_INTENT_BINDING_BLOCKED" }
+            statusCode,
+            statusCode >= 500 ? "work order intent binding unavailable" : "work order intent binding blocked",
+            details,
+            { code: errorCode }
           );
         }
-        if (requestedIntentRef && acceptedIntentBinding) {
-          if (
-            String(requestedIntentRef.negotiationId ?? "") !== String(acceptedIntentBinding.negotiationId ?? "") ||
-            String(requestedIntentRef.intentId ?? "") !== String(acceptedIntentBinding.intentId ?? "") ||
-            String(requestedIntentRef.intentHash ?? "").toLowerCase() !== String(acceptedIntentBinding.intentHash ?? "").toLowerCase() ||
-            (requestedIntentRef.acceptedEventHash &&
-              String(requestedIntentRef.acceptedEventHash).toLowerCase() !== String(acceptedIntentBinding.acceptedEventHash ?? "").toLowerCase())
-          ) {
-            return sendError(
-              res,
-              409,
-              "work order intent binding conflict",
-              {
-                reasonCode: "WORK_ORDER_INTENT_BINDING_MISMATCH",
-                requestedIntentRef,
-                acceptedIntentBinding
-              },
-              { code: "WORK_ORDER_INTENT_BINDING_CONFLICT" }
-            );
-          }
-        }
-        const requireAcceptedIntentHash = body?.requireAcceptedIntentHash === true;
-        if (requireAcceptedIntentHash && !acceptedIntentBinding) {
-          return sendError(
-            res,
-            409,
-            "work order intent binding blocked",
-            {
-              reasonCode: "WORK_ORDER_INTENT_BINDING_REQUIRED",
-              message: "accepted intent hash binding is required before work-order creation",
-              workOrderId
-            },
-            { code: "WORK_ORDER_INTENT_BINDING_BLOCKED" }
-          );
-        }
-        const effectiveIntentBinding = acceptedIntentBinding ?? null;
 
         let workOrder = null;
         try {
@@ -62632,6 +64224,7 @@ export function createApi({
             evidencePolicy: workOrderEvidencePolicy,
             delegationGrantRef,
             authorityGrantRef,
+            intentBinding: resolvedIntentBinding,
             metadata: workOrderMetadata,
             createdAt: nowAt
           });
@@ -62649,15 +64242,6 @@ export function createApi({
               {
                 ...workOrder,
                 acceptanceBinding
-              },
-              { path: "$" }
-            );
-          }
-          if (effectiveIntentBinding) {
-            workOrder = normalizeForCanonicalJson(
-              {
-                ...workOrder,
-                intentBinding: effectiveIntentBinding
               },
               { path: "$" }
             );
@@ -63393,43 +64977,66 @@ export function createApi({
               { code: "WORK_ORDER_TRACE_ID_MISMATCH" }
             );
           }
-          let requestedIntentHash = null;
+
+          let resolvedIntentBinding = null;
           try {
-            requestedIntentHash = normalizeSha256HashInput(body?.intentHash ?? null, "intentHash", { allowNull: true });
+            const intentResolution = await resolveAcceptedIntentBindingForWorkOrder({
+              tenantId,
+              intentBindingInput: existingWorkOrder?.intentBinding ?? null,
+              principalAgentId: existingWorkOrder?.principalAgentId ?? null,
+              subAgentId: existingWorkOrder?.subAgentId ?? null,
+              boundAt: nowIso(),
+              requireBinding: workOrderRequireIntentBindingValue,
+              fieldName: "workOrder.intentBinding"
+            });
+            resolvedIntentBinding = intentResolution?.intentBinding ?? null;
           } catch (err) {
-            return sendError(res, 400, "invalid work order completion", { message: err?.message }, { code: "SCHEMA_INVALID" });
-          }
-          const existingWorkOrderIntentBinding =
-            existingWorkOrder?.intentBinding && typeof existingWorkOrder.intentBinding === "object" && !Array.isArray(existingWorkOrder.intentBinding)
-              ? existingWorkOrder.intentBinding
-              : null;
-          if (requestedIntentHash && !existingWorkOrderIntentBinding) {
+            const reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "WORK_ORDER_INTENT_BINDING_BLOCKED";
+            const statusCode =
+              Number.isSafeInteger(Number(err?.statusCode)) && Number(err.statusCode) >= 400 && Number(err.statusCode) < 600
+                ? Number(err.statusCode)
+                : err instanceof TypeError
+                  ? 400
+                  : 409;
+            const details = err instanceof TypeError
+              ? { message: err?.message ?? "invalid work order intent binding" }
+              : {
+                  reasonCode,
+                  message: err?.message ?? null,
+                  ...(err?.details && typeof err.details === "object" ? err.details : {})
+                };
             return sendError(
               res,
-              409,
-              "work order completion blocked",
-              {
-                reasonCode: "WORK_ORDER_INTENT_BINDING_MISSING",
-                message: "intentHash provided but work order has no accepted intent binding"
-              },
-              { code: "WORK_ORDER_COMPLETION_BLOCKED" }
+              statusCode,
+              statusCode >= 500 ? "work order completion unavailable" : "work order completion blocked",
+              details,
+              { code: reasonCode }
             );
           }
-          if (
-            requestedIntentHash &&
-            existingWorkOrderIntentBinding &&
-            requestedIntentHash !== String(existingWorkOrderIntentBinding.intentHash ?? "").toLowerCase()
-          ) {
+
+          let requestedIntentHash = null;
+          if (typeof body?.intentHash === "string" && body.intentHash.trim() !== "") {
+            try {
+              requestedIntentHash = normalizeSha256HashInput(body.intentHash.trim(), "intentHash", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid work order completion", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
+          }
+          const boundIntentHash =
+            resolvedIntentBinding && typeof resolvedIntentBinding.intentHash === "string" && resolvedIntentBinding.intentHash.trim() !== ""
+              ? resolvedIntentBinding.intentHash.trim().toLowerCase()
+              : null;
+          if (requestedIntentHash && boundIntentHash && requestedIntentHash !== boundIntentHash) {
             return sendError(
               res,
               409,
-              "work order completion blocked",
+              "work order completion conflict",
               {
-                reasonCode: "WORK_ORDER_INTENT_HASH_MISMATCH",
-                expectedIntentHash: existingWorkOrderIntentBinding.intentHash ?? null,
+                message: "intentHash does not match work order intent binding",
+                expectedIntentHash: boundIntentHash,
                 providedIntentHash: requestedIntentHash
               },
-              { code: "WORK_ORDER_COMPLETION_BLOCKED" }
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
             );
           }
 
@@ -63453,8 +65060,8 @@ export function createApi({
                   : null,
               amountCents: body?.amountCents ?? null,
               currency: typeof body?.currency === "string" && body.currency.trim() !== "" ? body.currency.trim() : null,
+              intentHash: requestedIntentHash ?? boundIntentHash ?? null,
               traceId: requestedTraceId ?? workOrderTraceId ?? null,
-              intentBinding: existingWorkOrderIntentBinding,
               deliveredAt: typeof body?.deliveredAt === "string" && body.deliveredAt.trim() !== "" ? body.deliveredAt.trim() : nowIso(),
               metadata: body?.metadata ?? null
             });
@@ -63708,86 +65315,109 @@ export function createApi({
               );
             }
           }
+
           let requestedIntentHash = null;
-          try {
-            requestedIntentHash = normalizeSha256HashInput(body?.intentHash ?? null, "intentHash", { allowNull: true });
-          } catch (err) {
-            return sendError(res, 400, "invalid work order settlement", { message: err?.message }, { code: "SCHEMA_INVALID" });
+          if (typeof body?.intentHash === "string" && body.intentHash.trim() !== "") {
+            try {
+              requestedIntentHash = normalizeSha256HashInput(body.intentHash.trim(), "intentHash", { allowNull: false });
+            } catch (err) {
+              return sendError(res, 400, "invalid work order settlement", { message: err?.message }, { code: "SCHEMA_INVALID" });
+            }
           }
-          const workOrderIntentBinding =
-            existingWorkOrder?.intentBinding && typeof existingWorkOrder.intentBinding === "object" && !Array.isArray(existingWorkOrder.intentBinding)
-              ? existingWorkOrder.intentBinding
+          let resolvedIntentBinding = null;
+          try {
+            const intentResolution = await resolveAcceptedIntentBindingForWorkOrder({
+              tenantId,
+              intentBindingInput: existingWorkOrder?.intentBinding ?? null,
+              principalAgentId: existingWorkOrder?.principalAgentId ?? null,
+              subAgentId: existingWorkOrder?.subAgentId ?? null,
+              boundAt: nowIso(),
+              requireBinding: workOrderRequireIntentBindingValue,
+              fieldName: "workOrder.intentBinding"
+            });
+            resolvedIntentBinding = intentResolution?.intentBinding ?? null;
+          } catch (err) {
+            const reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "WORK_ORDER_INTENT_BINDING_BLOCKED";
+            const statusCode =
+              Number.isSafeInteger(Number(err?.statusCode)) && Number(err.statusCode) >= 400 && Number(err.statusCode) < 600
+                ? Number(err.statusCode)
+                : err instanceof TypeError
+                  ? 400
+                  : 409;
+            const details = err instanceof TypeError
+              ? { message: err?.message ?? "invalid work order intent binding" }
+              : {
+                  reasonCode,
+                  message: err?.message ?? null,
+                  ...(err?.details && typeof err.details === "object" ? err.details : {})
+                };
+            return sendError(
+              res,
+              statusCode,
+              statusCode >= 500 ? "work order settlement unavailable" : "work order settlement blocked",
+              details,
+              { code: reasonCode }
+            );
+          }
+          const boundIntentHash =
+            resolvedIntentBinding && typeof resolvedIntentBinding.intentHash === "string" && resolvedIntentBinding.intentHash.trim() !== ""
+              ? resolvedIntentBinding.intentHash.trim().toLowerCase()
               : null;
-          if (requestedIntentHash && !workOrderIntentBinding) {
+          const completionIntentHash =
+            typeof completionReceipt?.intentHash === "string" && completionReceipt.intentHash.trim() !== ""
+              ? completionReceipt.intentHash.trim().toLowerCase()
+              : null;
+          if (boundIntentHash && !completionIntentHash) {
             return sendError(
               res,
               409,
-              "work order settlement conflict",
-              { message: "intentHash provided but work order has no accepted intent binding" },
-              { code: "WORK_ORDER_SETTLEMENT_CONFLICT" }
+              "work order settlement blocked",
+              {
+                reasonCode: "WORK_ORDER_INTENT_BINDING_BLOCKED",
+                message: "completion receipt intentHash is required for bound intent settlement",
+                workOrderId
+              },
+              { code: "WORK_ORDER_SETTLEMENT_BLOCKED" }
             );
           }
-          if (
-            requestedIntentHash &&
-            workOrderIntentBinding &&
-            requestedIntentHash !== String(workOrderIntentBinding.intentHash ?? "").toLowerCase()
-          ) {
+          if (boundIntentHash && completionIntentHash && completionIntentHash !== boundIntentHash) {
             return sendError(
               res,
               409,
               "work order settlement conflict",
               {
-                message: "intentHash does not match work order binding",
-                expectedIntentHash: workOrderIntentBinding.intentHash ?? null,
-                providedIntentHash: requestedIntentHash
+                message: "completion receipt intentHash does not match work order intent binding",
+                expectedIntentHash: boundIntentHash,
+                providedIntentHash: completionIntentHash
               },
-              { code: "WORK_ORDER_SETTLEMENT_CONFLICT" }
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
             );
           }
-          if (workOrderIntentBinding) {
-            const completionIntentBinding =
-              completionReceipt?.intentBinding &&
-              typeof completionReceipt.intentBinding === "object" &&
-              !Array.isArray(completionReceipt.intentBinding)
-                ? completionReceipt.intentBinding
-                : null;
-            if (!completionIntentBinding) {
-              return sendError(
-                res,
-                409,
-                "work order settlement blocked",
-                {
-                  reasonCode: "WORK_ORDER_INTENT_BINDING_MISSING",
-                  message: "completion receipt is missing intent binding required by work order"
-                },
-                { code: "WORK_ORDER_SETTLEMENT_BLOCKED" }
-              );
-            }
-            const workOrderAcceptedEventHash =
-              typeof workOrderIntentBinding.acceptedEventHash === "string" && workOrderIntentBinding.acceptedEventHash.trim() !== ""
-                ? workOrderIntentBinding.acceptedEventHash.trim().toLowerCase()
-                : null;
-            const completionAcceptedEventHash =
-              typeof completionIntentBinding.acceptedEventHash === "string" && completionIntentBinding.acceptedEventHash.trim() !== ""
-                ? completionIntentBinding.acceptedEventHash.trim().toLowerCase()
-                : null;
-            if (
-              String(workOrderIntentBinding.negotiationId ?? "") !== String(completionIntentBinding.negotiationId ?? "") ||
-              String(workOrderIntentBinding.intentId ?? "") !== String(completionIntentBinding.intentId ?? "") ||
-              String(workOrderIntentBinding.intentHash ?? "").toLowerCase() !== String(completionIntentBinding.intentHash ?? "").toLowerCase() ||
-              (workOrderAcceptedEventHash && completionAcceptedEventHash && workOrderAcceptedEventHash !== completionAcceptedEventHash)
-            ) {
-              return sendError(
-                res,
-                409,
-                "work order settlement blocked",
-                {
-                  reasonCode: "WORK_ORDER_INTENT_BINDING_MISMATCH",
-                  message: "completion receipt intent binding does not match work order intent binding"
-                },
-                { code: "WORK_ORDER_SETTLEMENT_BLOCKED" }
-              );
-            }
+          if (requestedIntentHash && boundIntentHash && requestedIntentHash !== boundIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order settlement conflict",
+              {
+                message: "intentHash does not match work order intent binding",
+                expectedIntentHash: boundIntentHash,
+                providedIntentHash: requestedIntentHash
+              },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
+          }
+          if (requestedIntentHash && completionIntentHash && requestedIntentHash !== completionIntentHash) {
+            return sendError(
+              res,
+              409,
+              "work order settlement conflict",
+              {
+                message: "intentHash does not match completion receipt",
+                expectedIntentHash: completionIntentHash,
+                providedIntentHash: requestedIntentHash
+              },
+              { code: "INTENT_CONTRACT_HASH_MISMATCH" }
+            );
           }
 	          let requestedAuthorityGrantRef = null;
 	          try {
@@ -64899,29 +66529,6 @@ export function createApi({
         } catch (err) {
           if (err?.code === "AGENT_IDENTITY_EXISTS") return sendError(res, 409, "agent identity already exists");
           return sendError(res, 400, "invalid agent identity", { message: err?.message });
-        }
-
-        try {
-          await appendIdentityLogEventsForIdentityTransition({
-            tenantId,
-            beforeIdentity: null,
-            afterIdentity: persisted,
-            metadata: { source: "agents.register" },
-            audit: makeOpsAudit({
-              action: "AGENT_IDENTITY_REGISTERED",
-              targetType: "agent_identity",
-              targetId: persisted.agentId,
-              details: { source: "agents.register" }
-            })
-          });
-        } catch (err) {
-          if (String(err?.message ?? "").includes("identity log append not supported")) {
-            return sendError(res, 501, "identity transparency log is not supported for this store");
-          }
-          if (String(err?.code ?? "") === "IDENTITY_LOG_EQUIVOCATION" || String(err?.code ?? "") === "IDENTITY_LOG_CHECKPOINT_ROLLBACK") {
-            return sendError(res, 409, "identity transparency log equivocation detected", { message: err?.message, details: err?.details ?? null }, { code: err.code });
-          }
-          return sendError(res, 409, "identity transparency log append failed", { message: err?.message ?? String(err) }, { code: "IDENTITY_LOG_APPEND_FAILED" });
         }
 
         const responseBody = { agentIdentity: persisted, keyId };
@@ -74289,6 +75896,9 @@ export function createApi({
       const statusCode = Number(res?.statusCode ?? 0);
       const durationMs = Date.now() - startedMs;
       metricInc("http_requests_total", { route, method: String(req.method ?? ""), status: String(statusCode) }, 1);
+      if (req.method === "GET") {
+        recordSettlementRouteLatencyMetric({ route, requestPath: path, durationMs });
+      }
 
 	      if (
 	        req.method === "POST" &&

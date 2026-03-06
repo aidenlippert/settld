@@ -3,338 +3,291 @@ import { sha256Hex } from "./crypto.js";
 
 export const INTENT_CONTRACT_SCHEMA_VERSION = "IntentContract.v1";
 
-export const INTENT_CONTRACT_RISK_CLASS = Object.freeze({
-  READ: "read",
-  COMPUTE: "compute",
-  ACTION: "action",
-  FINANCIAL: "financial"
+export const INTENT_CONTRACT_STATUS = Object.freeze({
+  PROPOSED: "proposed",
+  COUNTERED: "countered",
+  ACCEPTED: "accepted"
 });
-
-export const INTENT_CONTRACT_EXPECTED_DETERMINISM = Object.freeze({
-  DETERMINISTIC: "deterministic",
-  BOUNDED_NONDETERMINISTIC: "bounded_nondeterministic",
-  OPEN_NONDETERMINISTIC: "open_nondeterministic"
-});
-
-const INTENT_CONTRACT_RISK_CLASS_SET = new Set(Object.values(INTENT_CONTRACT_RISK_CLASS));
-const INTENT_CONTRACT_EXPECTED_DETERMINISM_SET = new Set(Object.values(INTENT_CONTRACT_EXPECTED_DETERMINISM));
-
-export const INTENT_CONTRACT_REASON_CODE = Object.freeze({
-  INVALID: "INTENT_CONTRACT_INVALID",
-  HASH_REQUIRED: "INTENT_CONTRACT_HASH_REQUIRED",
-  HASH_INVALID: "INTENT_CONTRACT_HASH_INVALID",
-  HASH_TAMPERED: "INTENT_CONTRACT_HASH_TAMPERED",
-  HASH_MISMATCH: "INTENT_CONTRACT_HASH_MISMATCH"
-});
-
-const INTENT_CONTRACT_ALLOWED_ROOT_FIELDS = new Set([
-  "schemaVersion",
-  "intentId",
-  "negotiationId",
-  "tenantId",
-  "proposerAgentId",
-  "responderAgentId",
-  "intent",
-  "idempotencyKey",
-  "nonce",
-  "expiresAt",
-  "metadata",
-  "createdAt",
-  "updatedAt",
-  "intentHash"
-]);
-
-const INTENT_ALLOWED_FIELDS = new Set([
-  "taskType",
-  "capabilityId",
-  "riskClass",
-  "expectedDeterminism",
-  "sideEffecting",
-  "maxLossCents",
-  "spendLimit",
-  "parametersHash",
-  "constraints"
-]);
-
-const INTENT_SPEND_LIMIT_ALLOWED_FIELDS = new Set(["currency", "maxAmountCents"]);
-
-function createIntentContractError(message, code = INTENT_CONTRACT_REASON_CODE.INVALID) {
-  const err = new TypeError(String(message ?? "invalid intent contract"));
-  err.code = code;
-  return err;
-}
 
 function assertPlainObject(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw createIntentContractError(`${name} must be an object`);
-  }
-  const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) {
-    throw createIntentContractError(`${name} must be a plain object`);
+    throw new TypeError(`${name} must be an object`);
   }
 }
 
-function assertAllowedKeys(input, allowed, name) {
-  for (const key of Object.keys(input)) {
-    if (!allowed.has(key)) {
-      throw createIntentContractError(`${name} contains unknown field: ${key}`);
-    }
-  }
+function assertNonEmptyString(value, name, { max = 200 } = {}) {
+  if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${name} must be a non-empty string`);
+  const normalized = value.trim();
+  if (normalized.length > max) throw new TypeError(`${name} must be <= ${max} characters`);
+  return normalized;
 }
 
-function normalizeNonEmptyString(value, name, { min = 1, max = 200 } = {}) {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw createIntentContractError(`${name} must be a non-empty string`);
-  }
-  const out = value.trim();
-  if (out.length < min || out.length > max) {
-    throw createIntentContractError(`${name} must be length ${min}..${max}`);
-  }
-  return out;
-}
-
-function normalizeId(value, name, { min = 1, max = 200 } = {}) {
-  const out = normalizeNonEmptyString(value, name, { min, max });
-  if (!/^[A-Za-z0-9:_-]+$/.test(out)) {
-    throw createIntentContractError(`${name} must match ^[A-Za-z0-9:_-]+$`);
-  }
-  return out;
+function normalizeOptionalString(value, name, { max = 200 } = {}) {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  if (!normalized) return null;
+  if (normalized.length > max) throw new TypeError(`${name} must be <= ${max} characters`);
+  return normalized;
 }
 
 function normalizeIsoDateTime(value, name) {
-  const out = normalizeNonEmptyString(value, name, { min: 20, max: 64 });
-  if (!Number.isFinite(Date.parse(out))) {
-    throw createIntentContractError(`${name} must be an ISO date-time`);
-  }
-  return out;
+  const normalized = assertNonEmptyString(value, name, { max: 128 });
+  if (!Number.isFinite(Date.parse(normalized))) throw new TypeError(`${name} must be an ISO date-time`);
+  return normalized;
 }
 
-function normalizeNonNegativeSafeInteger(value, name) {
-  const n = Number(value);
-  if (!Number.isSafeInteger(n) || n < 0) {
-    throw createIntentContractError(`${name} must be a non-negative safe integer`);
+function normalizeStatus(value, name = "status") {
+  const normalized = assertNonEmptyString(value, name, { max: 32 }).toLowerCase();
+  if (!Object.values(INTENT_CONTRACT_STATUS).includes(normalized)) {
+    throw new TypeError(`${name} must be one of ${Object.values(INTENT_CONTRACT_STATUS).join("|")}`);
   }
+  return normalized;
+}
+
+function normalizeSha256(value, name, { allowNull = false } = {}) {
+  if (allowNull && (value === null || value === undefined || value === "")) return null;
+  const normalized = assertNonEmptyString(value, name, { max: 64 }).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) throw new TypeError(`${name} must be sha256 hex`);
+  return normalized;
+}
+
+function normalizeNonNegativeSafeInt(value, name, { allowNull = false } = {}) {
+  if (allowNull && (value === null || value === undefined || value === "")) return null;
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`${name} must be a non-negative safe integer`);
   return n;
 }
 
-function normalizeCurrency(value, name = "currency") {
-  const raw = typeof value === "string" && value.trim() !== "" ? value.trim() : "USD";
-  const out = raw.toUpperCase();
-  if (!/^[A-Z][A-Z0-9_]{2,11}$/.test(out)) {
-    throw createIntentContractError(`${name} must match ^[A-Z][A-Z0-9_]{2,11}$`);
-  }
-  return out;
+function normalizeRequiredApprovals(value, name) {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) throw new TypeError(`${name} must be an array`);
+  return value.map((row, index) => {
+    assertPlainObject(row, `${name}[${index}]`);
+    return normalizeForCanonicalJson(
+      {
+        approverRole: assertNonEmptyString(row.approverRole, `${name}[${index}].approverRole`, { max: 128 }),
+        minApprovals: normalizeNonNegativeSafeInt(row.minApprovals ?? 1, `${name}[${index}].minApprovals`, { allowNull: false }),
+        reason: normalizeOptionalString(row.reason ?? null, `${name}[${index}].reason`, { max: 512 })
+      },
+      { path: `$.${name}[${index}]` }
+    );
+  });
 }
 
-function normalizeSha256Hex(value, name, { allowNull = false, code = INTENT_CONTRACT_REASON_CODE.HASH_INVALID } = {}) {
-  if (allowNull && (value === null || value === undefined || String(value).trim() === "")) {
-    return null;
-  }
-  if (value === null || value === undefined || String(value).trim() === "") {
-    throw createIntentContractError(`${name} is required`, INTENT_CONTRACT_REASON_CODE.HASH_REQUIRED);
-  }
-  const out = String(value).trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(out)) {
-    throw createIntentContractError(`${name} must be a 64-char sha256 hex`, code);
-  }
-  return out;
-}
-
-function normalizeIntentPayload(intent) {
-  assertPlainObject(intent, "intentContract.intent");
-  assertAllowedKeys(intent, INTENT_ALLOWED_FIELDS, "intentContract.intent");
-
-  const riskClass = normalizeNonEmptyString(intent.riskClass, "intentContract.intent.riskClass", { max: 64 }).toLowerCase();
-  if (!INTENT_CONTRACT_RISK_CLASS_SET.has(riskClass)) {
-    throw createIntentContractError(
-      `intentContract.intent.riskClass must be one of ${Array.from(INTENT_CONTRACT_RISK_CLASS_SET).join("|")}`
-    );
-  }
-
-  const expectedDeterminism = normalizeNonEmptyString(intent.expectedDeterminism, "intentContract.intent.expectedDeterminism", {
-    max: 64
-  }).toLowerCase();
-  if (!INTENT_CONTRACT_EXPECTED_DETERMINISM_SET.has(expectedDeterminism)) {
-    throw createIntentContractError(
-      `intentContract.intent.expectedDeterminism must be one of ${Array.from(INTENT_CONTRACT_EXPECTED_DETERMINISM_SET).join("|")}`
-    );
-  }
-
-  if (typeof intent.sideEffecting !== "boolean") {
-    throw createIntentContractError("intentContract.intent.sideEffecting must be boolean");
-  }
-
-  assertPlainObject(intent.spendLimit, "intentContract.intent.spendLimit");
-  assertAllowedKeys(intent.spendLimit, INTENT_SPEND_LIMIT_ALLOWED_FIELDS, "intentContract.intent.spendLimit");
-
-  const constraints =
-    intent.constraints === null || intent.constraints === undefined
-      ? null
-      : normalizeForCanonicalJson(intent.constraints, { path: "$.intent.constraints" });
-
-  const normalized = {
-    taskType: normalizeNonEmptyString(intent.taskType, "intentContract.intent.taskType", { max: 120 }),
-    capabilityId: normalizeNonEmptyString(intent.capabilityId, "intentContract.intent.capabilityId", { max: 200 }),
-    riskClass,
-    expectedDeterminism,
-    sideEffecting: intent.sideEffecting,
-    maxLossCents: normalizeNonNegativeSafeInteger(intent.maxLossCents, "intentContract.intent.maxLossCents"),
-    spendLimit: {
-      currency: normalizeCurrency(intent.spendLimit.currency, "intentContract.intent.spendLimit.currency"),
-      maxAmountCents: normalizeNonNegativeSafeInteger(intent.spendLimit.maxAmountCents, "intentContract.intent.spendLimit.maxAmountCents")
+function normalizeBudgetEnvelope(value, name) {
+  assertPlainObject(value, name);
+  const currency = assertNonEmptyString(value.currency ?? "USD", `${name}.currency`, { max: 8 }).toUpperCase();
+  if (!/^[A-Z0-9_]{2,8}$/.test(currency)) throw new TypeError(`${name}.currency must match ^[A-Z0-9_]{2,8}$`);
+  const maxAmountCents = normalizeNonNegativeSafeInt(value.maxAmountCents, `${name}.maxAmountCents`, { allowNull: false });
+  const hardCap = Boolean(value.hardCap !== false);
+  return normalizeForCanonicalJson(
+    {
+      currency,
+      maxAmountCents,
+      hardCap
     },
-    parametersHash: normalizeSha256Hex(intent.parametersHash, "intentContract.intent.parametersHash", {
-      allowNull: true,
-      code: INTENT_CONTRACT_REASON_CODE.INVALID
-    }),
-    constraints
-  };
-
-  return normalizeForCanonicalJson(normalized, { path: "$.intent" });
+    { path: `$.${name}` }
+  );
 }
 
-function normalizeMetadata(metadata) {
-  if (metadata === null || metadata === undefined) return null;
-  return normalizeForCanonicalJson(metadata, { path: "$.metadata" });
+function buildIntentHash(intent) {
+  return sha256Hex(
+    canonicalJsonStringify({
+      ...intent,
+      intentHash: null
+    })
+  );
 }
 
-function normalizeIntentContractCore(intentContract, { allowMissingHash = false } = {}) {
-  assertPlainObject(intentContract, "intentContract");
-  assertAllowedKeys(intentContract, INTENT_CONTRACT_ALLOWED_ROOT_FIELDS, "intentContract");
-
-  const createdAt = normalizeIsoDateTime(intentContract.createdAt, "intentContract.createdAt");
-  const updatedAt = normalizeIsoDateTime(intentContract.updatedAt, "intentContract.updatedAt");
-  if (Date.parse(updatedAt) < Date.parse(createdAt)) {
-    throw createIntentContractError("intentContract.updatedAt must be >= intentContract.createdAt");
-  }
-
-  const normalized = {
-    schemaVersion: normalizeNonEmptyString(intentContract.schemaVersion, "intentContract.schemaVersion", { max: 64 }),
-    intentId: normalizeId(intentContract.intentId, "intentContract.intentId", { max: 200 }),
-    negotiationId: normalizeId(intentContract.negotiationId, "intentContract.negotiationId", { max: 200 }),
-    tenantId: normalizeId(intentContract.tenantId, "intentContract.tenantId", { max: 200 }),
-    proposerAgentId: normalizeId(intentContract.proposerAgentId, "intentContract.proposerAgentId", { max: 200 }),
-    responderAgentId: normalizeId(intentContract.responderAgentId, "intentContract.responderAgentId", { max: 200 }),
-    intent: normalizeIntentPayload(intentContract.intent),
-    idempotencyKey: normalizeId(intentContract.idempotencyKey, "intentContract.idempotencyKey", { max: 200 }),
-    nonce: normalizeNonEmptyString(intentContract.nonce, "intentContract.nonce", { min: 8, max: 256 }),
-    expiresAt: normalizeIsoDateTime(intentContract.expiresAt, "intentContract.expiresAt"),
-    metadata: normalizeMetadata(intentContract.metadata),
-    createdAt,
-    updatedAt,
-    intentHash: allowMissingHash
-      ? null
-      : normalizeSha256Hex(intentContract.intentHash, "intentContract.intentHash", {
-          allowNull: false,
-          code: INTENT_CONTRACT_REASON_CODE.HASH_INVALID
-        })
-  };
+function normalizeIntentContractCore(rawIntent, { fieldPath = "$", allowAcceptedFields = true } = {}) {
+  assertPlainObject(rawIntent, fieldPath);
+  const normalized = normalizeForCanonicalJson(
+    {
+      schemaVersion: assertNonEmptyString(rawIntent.schemaVersion ?? INTENT_CONTRACT_SCHEMA_VERSION, `${fieldPath}.schemaVersion`, { max: 128 }),
+      intentId: assertNonEmptyString(rawIntent.intentId, `${fieldPath}.intentId`, { max: 200 }),
+      tenantId: assertNonEmptyString(rawIntent.tenantId, `${fieldPath}.tenantId`, { max: 128 }),
+      proposerAgentId: assertNonEmptyString(rawIntent.proposerAgentId, `${fieldPath}.proposerAgentId`, { max: 200 }),
+      counterpartyAgentId: assertNonEmptyString(rawIntent.counterpartyAgentId, `${fieldPath}.counterpartyAgentId`, { max: 200 }),
+      objective:
+        typeof rawIntent.objective === "string"
+          ? assertNonEmptyString(rawIntent.objective, `${fieldPath}.objective`, { max: 2000 })
+          : normalizeForCanonicalJson(rawIntent.objective, { path: `${fieldPath}.objective` }),
+      constraints:
+        rawIntent.constraints && typeof rawIntent.constraints === "object" && !Array.isArray(rawIntent.constraints)
+          ? normalizeForCanonicalJson(rawIntent.constraints, { path: `${fieldPath}.constraints` })
+          : null,
+      budgetEnvelope: normalizeBudgetEnvelope(rawIntent.budgetEnvelope, `${fieldPath}.budgetEnvelope`),
+      requiredApprovals: normalizeRequiredApprovals(rawIntent.requiredApprovals ?? [], `${fieldPath}.requiredApprovals`),
+      successCriteria:
+        rawIntent.successCriteria && typeof rawIntent.successCriteria === "object" && !Array.isArray(rawIntent.successCriteria)
+          ? normalizeForCanonicalJson(rawIntent.successCriteria, { path: `${fieldPath}.successCriteria` })
+          : normalizeForCanonicalJson({}, { path: `${fieldPath}.successCriteria` }),
+      terminationPolicy:
+        rawIntent.terminationPolicy && typeof rawIntent.terminationPolicy === "object" && !Array.isArray(rawIntent.terminationPolicy)
+          ? normalizeForCanonicalJson(rawIntent.terminationPolicy, { path: `${fieldPath}.terminationPolicy` })
+          : normalizeForCanonicalJson({}, { path: `${fieldPath}.terminationPolicy` }),
+      counterOfIntentId: normalizeOptionalString(rawIntent.counterOfIntentId ?? null, `${fieldPath}.counterOfIntentId`, { max: 200 }),
+      parentIntentHash: normalizeSha256(rawIntent.parentIntentHash ?? null, `${fieldPath}.parentIntentHash`, { allowNull: true }),
+      status: normalizeStatus(rawIntent.status ?? INTENT_CONTRACT_STATUS.PROPOSED, `${fieldPath}.status`),
+      acceptedByAgentId: allowAcceptedFields
+        ? normalizeOptionalString(rawIntent.acceptedByAgentId ?? null, `${fieldPath}.acceptedByAgentId`, { max: 200 })
+        : null,
+      acceptedAt: allowAcceptedFields
+        ? rawIntent.acceptedAt === null || rawIntent.acceptedAt === undefined
+          ? null
+          : normalizeIsoDateTime(rawIntent.acceptedAt, `${fieldPath}.acceptedAt`)
+        : null,
+      proposedAt: normalizeIsoDateTime(rawIntent.proposedAt, `${fieldPath}.proposedAt`),
+      updatedAt: normalizeIsoDateTime(rawIntent.updatedAt, `${fieldPath}.updatedAt`),
+      revision: normalizeNonNegativeSafeInt(rawIntent.revision ?? 0, `${fieldPath}.revision`, { allowNull: false }),
+      metadata:
+        rawIntent.metadata && typeof rawIntent.metadata === "object" && !Array.isArray(rawIntent.metadata)
+          ? normalizeForCanonicalJson(rawIntent.metadata, { path: `${fieldPath}.metadata` })
+          : null,
+      intentHash: null
+    },
+    { path: fieldPath }
+  );
 
   if (normalized.schemaVersion !== INTENT_CONTRACT_SCHEMA_VERSION) {
-    throw createIntentContractError(
-      `intentContract.schemaVersion must be ${INTENT_CONTRACT_SCHEMA_VERSION}`,
-      INTENT_CONTRACT_REASON_CODE.INVALID
-    );
+    throw new TypeError(`${fieldPath}.schemaVersion must be ${INTENT_CONTRACT_SCHEMA_VERSION}`);
   }
-
-  return normalizeForCanonicalJson(normalized, { path: "$" });
-}
-
-export function computeIntentContractHashV1(intentContract) {
-  const normalized = normalizeIntentContractCore(intentContract, { allowMissingHash: true });
-  return sha256Hex(canonicalJsonStringify({ ...normalized, intentHash: null }));
+  return normalized;
 }
 
 export function buildIntentContractV1({
   intentId,
-  negotiationId,
   tenantId,
   proposerAgentId,
-  responderAgentId,
-  intent,
-  idempotencyKey,
-  nonce,
-  expiresAt,
-  metadata = null,
-  createdAt = new Date().toISOString(),
-  updatedAt = createdAt
+  counterpartyAgentId,
+  objective,
+  constraints = null,
+  budgetEnvelope,
+  requiredApprovals = [],
+  successCriteria = {},
+  terminationPolicy = {},
+  counterOfIntentId = null,
+  parentIntentHash = null,
+  status = INTENT_CONTRACT_STATUS.PROPOSED,
+  acceptedByAgentId = null,
+  acceptedAt = null,
+  proposedAt = new Date().toISOString(),
+  updatedAt = proposedAt,
+  revision = 0,
+  metadata = null
 } = {}) {
-  const base = normalizeIntentContractCore(
+  const core = normalizeIntentContractCore(
     {
       schemaVersion: INTENT_CONTRACT_SCHEMA_VERSION,
       intentId,
-      negotiationId,
       tenantId,
       proposerAgentId,
-      responderAgentId,
-      intent,
-      idempotencyKey,
-      nonce,
-      expiresAt,
-      metadata,
-      createdAt,
+      counterpartyAgentId,
+      objective,
+      constraints,
+      budgetEnvelope,
+      requiredApprovals,
+      successCriteria,
+      terminationPolicy,
+      counterOfIntentId,
+      parentIntentHash,
+      status,
+      acceptedByAgentId,
+      acceptedAt,
+      proposedAt,
       updatedAt,
-      intentHash: null
+      revision,
+      metadata
     },
-    { allowMissingHash: true }
+    { fieldPath: "$.intentContract", allowAcceptedFields: true }
   );
-
-  const intentHash = sha256Hex(canonicalJsonStringify(base));
-  const contract = normalizeForCanonicalJson({ ...base, intentHash }, { path: "$" });
-  validateIntentContractV1(contract);
-  return contract;
+  const intentHash = buildIntentHash(core);
+  const intentContract = normalizeForCanonicalJson(
+    {
+      ...core,
+      intentHash
+    },
+    { path: "$.intentContract" }
+  );
+  validateIntentContractV1(intentContract);
+  return intentContract;
 }
 
-export function verifyIntentContractHashV1(intentContract, { expectedIntentHash = null } = {}) {
-  try {
-    const normalized = normalizeIntentContractCore(intentContract, { allowMissingHash: false });
-    const computed = sha256Hex(canonicalJsonStringify({ ...normalized, intentHash: null }));
-    if (normalized.intentHash !== computed) {
-      return {
-        ok: false,
-        reasonCode: INTENT_CONTRACT_REASON_CODE.HASH_TAMPERED,
-        expectedIntentHash: computed,
-        gotIntentHash: normalized.intentHash
-      };
-    }
+export function validateIntentContractV1(intentContract) {
+  const normalized = normalizeIntentContractCore(intentContract, {
+    fieldPath: "$.intentContract",
+    allowAcceptedFields: true
+  });
+  const providedHash = normalizeSha256(intentContract?.intentHash, "$.intentContract.intentHash", { allowNull: false });
+  const expectedHash = buildIntentHash(normalized);
+  if (providedHash !== expectedHash) throw new TypeError("$.intentContract.intentHash mismatch");
 
-    if (expectedIntentHash !== null && expectedIntentHash !== undefined) {
-      const normalizedExpected = normalizeSha256Hex(expectedIntentHash, "expectedIntentHash", {
-        allowNull: false,
-        code: INTENT_CONTRACT_REASON_CODE.HASH_INVALID
-      });
-      if (normalized.intentHash !== normalizedExpected) {
-        return {
-          ok: false,
-          reasonCode: INTENT_CONTRACT_REASON_CODE.HASH_MISMATCH,
-          expectedIntentHash: normalizedExpected,
-          gotIntentHash: normalized.intentHash
-        };
-      }
+  if (normalized.status === INTENT_CONTRACT_STATUS.ACCEPTED) {
+    if (!normalized.acceptedByAgentId) throw new TypeError("$.intentContract.acceptedByAgentId is required for accepted status");
+    if (!normalized.acceptedAt) throw new TypeError("$.intentContract.acceptedAt is required for accepted status");
+  } else {
+    if (normalized.acceptedByAgentId !== null || normalized.acceptedAt !== null) {
+      throw new TypeError("$.intentContract.accepted fields are only valid for accepted status");
     }
-
-    return {
-      ok: true,
-      intentHash: normalized.intentHash
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      reasonCode: err?.code ?? INTENT_CONTRACT_REASON_CODE.INVALID,
-      error: err?.message ?? String(err ?? "invalid intent contract")
-    };
   }
-}
 
-export function validateIntentContractV1(intentContract, { expectedIntentHash = null } = {}) {
-  const verify = verifyIntentContractHashV1(intentContract, { expectedIntentHash });
-  if (!verify.ok) {
-    throw createIntentContractError(verify.error ?? `intent contract verification failed: ${verify.reasonCode}`, verify.reasonCode);
+  if (normalized.counterOfIntentId && !normalized.parentIntentHash) {
+    throw new TypeError("$.intentContract.parentIntentHash is required when counterOfIntentId is set");
   }
   return true;
 }
 
-export function normalizeIntentContractV1(intentContract) {
+export function counterIntentContractV1({
+  sourceIntent,
+  intentId,
+  proposerAgentId,
+  objective,
+  constraints = null,
+  budgetEnvelope = null,
+  requiredApprovals = null,
+  successCriteria = null,
+  terminationPolicy = null,
+  proposedAt = new Date().toISOString(),
+  metadata = null
+} = {}) {
+  validateIntentContractV1(sourceIntent);
+  return buildIntentContractV1({
+    intentId,
+    tenantId: sourceIntent.tenantId,
+    proposerAgentId,
+    counterpartyAgentId: proposerAgentId === sourceIntent.proposerAgentId ? sourceIntent.counterpartyAgentId : sourceIntent.proposerAgentId,
+    objective: objective ?? sourceIntent.objective,
+    constraints: constraints ?? sourceIntent.constraints,
+    budgetEnvelope: budgetEnvelope ?? sourceIntent.budgetEnvelope,
+    requiredApprovals: requiredApprovals ?? sourceIntent.requiredApprovals,
+    successCriteria: successCriteria ?? sourceIntent.successCriteria,
+    terminationPolicy: terminationPolicy ?? sourceIntent.terminationPolicy,
+    counterOfIntentId: sourceIntent.intentId,
+    parentIntentHash: sourceIntent.intentHash,
+    status: INTENT_CONTRACT_STATUS.COUNTERED,
+    proposedAt,
+    updatedAt: proposedAt,
+    revision: 0,
+    metadata
+  });
+}
+
+export function acceptIntentContractV1({
+  intentContract,
+  acceptedByAgentId,
+  acceptedAt = new Date().toISOString()
+} = {}) {
   validateIntentContractV1(intentContract);
-  return normalizeIntentContractCore(intentContract, { allowMissingHash: false });
+  const normalizedAcceptedByAgentId = assertNonEmptyString(acceptedByAgentId, "acceptedByAgentId", { max: 200 });
+  if (normalizedAcceptedByAgentId !== String(intentContract.proposerAgentId) && normalizedAcceptedByAgentId !== String(intentContract.counterpartyAgentId)) {
+    throw new TypeError("acceptedByAgentId must be a participant in the intent contract");
+  }
+  return buildIntentContractV1({
+    ...intentContract,
+    status: INTENT_CONTRACT_STATUS.ACCEPTED,
+    acceptedByAgentId: normalizedAcceptedByAgentId,
+    acceptedAt,
+    updatedAt: acceptedAt,
+    revision: Number(intentContract.revision ?? 0) + 1
+  });
 }

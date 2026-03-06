@@ -8,9 +8,7 @@ They are written for runtime integrators (OpenClaw, Nooterra, Claude Desktop, Cu
 
 - `AgentCard.v1.md`
 - `AgentCardStreamEvent.v1.md`
-- `AgentInbox.v1.md`
 - `AgentLocator.v1.md`
-- `IdentityTransparencyLog.v1.md`
 - `Session.v1.md`
 - `SessionEvent.v1.md`
 - `SessionEventProvenance.v1.md`
@@ -20,7 +18,6 @@ They are written for runtime integrators (OpenClaw, Nooterra, Claude Desktop, Cu
 - `ToolDescriptor.v1.md`
 - `AuthorityGrant.v1.md`
 - `DelegationGrant.v1.md`
-- `IntentContract.v1.md`
 - `TaskQuote.v1.md`
 - `TaskOffer.v1.md`
 - `TaskAcceptance.v1.md`

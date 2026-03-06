@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { createApi } from "../src/api/app.js";
 import { createStore } from "../src/api/store.js";
 import { createEd25519Keypair } from "../src/core/crypto.js";
-import { buildIntentContractV1 } from "../src/core/intent-contract.js";
 import { request } from "./api-test-harness.js";
 
 async function registerAgent(api, { agentId, capabilities = [] }) {
@@ -43,46 +42,63 @@ async function setX402AgentLifecycle(
   });
 }
 
-function buildTaskIntentContractFixture({
-  intentId = "intent_task_1",
-  negotiationId = "nego_task_1",
-  tenantId = "tenant_default",
-  buyerAgentId,
-  sellerAgentId,
-  requiredCapability
-} = {}) {
-  return buildIntentContractV1({
-    intentId,
-    negotiationId,
-    tenantId,
-    proposerAgentId: buyerAgentId,
-    responderAgentId: sellerAgentId,
-    intent: {
-      taskType: "delegated_task",
-      capabilityId: requiredCapability,
-      riskClass: "action",
-      expectedDeterminism: "deterministic",
-      sideEffecting: true,
-      maxLossCents: 500,
-      spendLimit: {
-        currency: "USD",
-        maxAmountCents: 500
+async function proposeAndAcceptIntentContract(
+  api,
+  {
+    intentId = "intent_task_1",
+    buyerAgentId,
+    sellerAgentId,
+    requiredCapability,
+    amountCents = 500
+  } = {}
+) {
+  const proposed = await request(api, {
+    method: "POST",
+    path: "/intents/propose",
+    headers: { "x-idempotency-key": `intent_propose_${intentId}`, "x-nooterra-protocol": "1.0" },
+    body: {
+      intentId,
+      proposerAgentId: buyerAgentId,
+      counterpartyAgentId: sellerAgentId,
+      objective: {
+        type: "delegated_task",
+        capabilityId: requiredCapability,
+        summary: `Perform ${requiredCapability}`
       },
-      parametersHash: "a".repeat(64),
       constraints: {
         region: "us",
         approval: "standard"
+      },
+      budgetEnvelope: {
+        currency: "USD",
+        maxAmountCents: amountCents,
+        hardCap: true
+      },
+      successCriteria: {
+        deterministic: true
+      },
+      terminationPolicy: {
+        mode: "manual"
+      },
+      proposedAt: "2026-02-24T00:00:00.000Z",
+      metadata: {
+        source: "api-e2e-task-negotiation"
       }
-    },
-    idempotencyKey: `intent_idem_${intentId}`,
-    nonce: `nonce_${intentId}_0001`,
-    expiresAt: "2027-01-01T00:00:00.000Z",
-    metadata: {
-      source: "api-e2e-task-negotiation"
-    },
-    createdAt: "2026-02-24T00:00:00.000Z",
-    updatedAt: "2026-02-24T00:00:00.000Z"
+    }
   });
+  assert.equal(proposed.statusCode, 201, proposed.body);
+
+  const accepted = await request(api, {
+    method: "POST",
+    path: `/intents/${encodeURIComponent(intentId)}/accept`,
+    headers: { "x-idempotency-key": `intent_accept_${intentId}`, "x-nooterra-protocol": "1.0" },
+    body: {
+      acceptedByAgentId: sellerAgentId,
+      acceptedAt: "2026-02-24T00:00:30.000Z"
+    }
+  });
+  assert.equal(accepted.statusCode, 200, accepted.body);
+  return accepted.json?.intentContract;
 }
 
 test("API e2e: task negotiation quote->offer->acceptance lifecycle", async () => {
@@ -368,7 +384,7 @@ test("API e2e: work-order settlement fails closed when acceptance binding is req
   assert.match(String(blocked.json?.details?.message ?? blocked.json?.message ?? ""), /acceptance binding is required/i);
 });
 
-test("API e2e: intent negotiation handshake binds accepted intent hash into work-order and receipt", async () => {
+test("API e2e: accepted intent binding propagates into work-order and receipt", async () => {
   const api = createApi({ opsToken: "tok_ops" });
   const buyerAgentId = "agt_task_intent_buyer_1";
   const sellerAgentId = "agt_task_intent_seller_1";
@@ -376,13 +392,13 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
   await registerAgent(api, { agentId: buyerAgentId, capabilities: [requiredCapability] });
   await registerAgent(api, { agentId: sellerAgentId, capabilities: [requiredCapability] });
 
-  const intentContract = buildTaskIntentContractFixture({
+  const intentContract = await proposeAndAcceptIntentContract(api, {
     intentId: "intent_task_bind_1",
-    negotiationId: "nego_task_bind_1",
     buyerAgentId,
     sellerAgentId,
     requiredCapability
   });
+  assert.equal(intentContract?.status, "accepted");
 
   const quote = await request(api, {
     method: "POST",
@@ -393,15 +409,10 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
       buyerAgentId,
       sellerAgentId,
       requiredCapability,
-      pricing: { amountCents: 500, currency: "USD" },
-      intentContract,
-      intentEventId: "inevent_propose_bind_1",
-      intentEventAt: "2026-02-24T00:01:00.000Z"
+      pricing: { amountCents: 500, currency: "USD" }
     }
   });
   assert.equal(quote.statusCode, 201, quote.body);
-  assert.equal(quote.json?.taskQuote?.metadata?.intentNegotiation?.event?.eventType, "propose");
-  assert.equal(quote.json?.taskQuote?.metadata?.intentNegotiation?.intentContract?.intentHash, intentContract.intentHash);
 
   const offer = await request(api, {
     method: "POST",
@@ -415,14 +426,10 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
         quoteId: "tquote_intent_bind_1",
         quoteHash: quote.json?.taskQuote?.quoteHash
       },
-      pricing: { amountCents: 500, currency: "USD" },
-      intentContract,
-      intentEventId: "inevent_counter_bind_1",
-      intentEventAt: "2026-02-24T00:02:00.000Z"
+      pricing: { amountCents: 500, currency: "USD" }
     }
   });
   assert.equal(offer.statusCode, 201, offer.body);
-  assert.equal(offer.json?.taskOffer?.metadata?.intentNegotiation?.event?.eventType, "counter");
 
   const acceptance = await request(api, {
     method: "POST",
@@ -432,18 +439,10 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
       acceptanceId: "taccept_intent_bind_1",
       quoteId: "tquote_intent_bind_1",
       offerId: "toffer_intent_bind_1",
-      acceptedByAgentId: buyerAgentId,
-      intentContract,
-      intentEventId: "inevent_accept_bind_1",
-      intentEventAt: "2026-02-24T00:03:00.000Z"
+      acceptedByAgentId: buyerAgentId
     }
   });
   assert.equal(acceptance.statusCode, 201, acceptance.body);
-  assert.equal(acceptance.json?.taskAcceptance?.metadata?.intentNegotiation?.event?.eventType, "accept");
-  assert.equal(acceptance.json?.taskAcceptance?.metadata?.intentNegotiation?.transcriptStatus, "accepted");
-
-  const acceptedEventHash = acceptance.json?.taskAcceptance?.metadata?.intentNegotiation?.event?.eventHash;
-  assert.ok(typeof acceptedEventHash === "string" && acceptedEventHash.length === 64);
 
   const workOrder = await request(api, {
     method: "POST",
@@ -460,12 +459,9 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
         acceptanceId: "taccept_intent_bind_1",
         acceptanceHash: acceptance.json?.taskAcceptance?.acceptanceHash
       },
-      requireAcceptedIntentHash: true,
-      intentRef: {
-        negotiationId: intentContract.negotiationId,
+      intentBinding: {
         intentId: intentContract.intentId,
-        intentHash: intentContract.intentHash,
-        acceptedEventHash
+        intentHash: intentContract.intentHash
       }
     }
   });
@@ -497,7 +493,7 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
     }
   });
   assert.equal(completed.statusCode, 200, completed.body);
-  assert.equal(completed.json?.completionReceipt?.intentBinding?.intentHash, intentContract.intentHash);
+  assert.equal(completed.json?.completionReceipt?.intentHash, intentContract.intentHash);
 
   const settleMismatch = await request(api, {
     method: "POST",
@@ -511,7 +507,7 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
     }
   });
   assert.equal(settleMismatch.statusCode, 409, settleMismatch.body);
-  assert.equal(settleMismatch.json?.code, "WORK_ORDER_SETTLEMENT_CONFLICT");
+  assert.equal(settleMismatch.json?.code, "INTENT_CONTRACT_HASH_MISMATCH");
   assert.match(String(settleMismatch.json?.details?.message ?? ""), /intenthash/i);
 
   const settle = await request(api, {
@@ -528,8 +524,8 @@ test("API e2e: intent negotiation handshake binds accepted intent hash into work
   assert.equal(settle.statusCode, 200, settle.body);
 });
 
-test("API e2e: work-order creation fails closed when accepted intent hash is required and missing", async () => {
-  const api = createApi({ opsToken: "tok_ops" });
+test("API e2e: work-order creation fails closed when intent binding is required and missing", async () => {
+  const api = createApi({ opsToken: "tok_ops", workOrderRequireIntentBinding: true });
   const buyerAgentId = "agt_task_intent_required_buyer_1";
   const sellerAgentId = "agt_task_intent_required_seller_1";
   const requiredCapability = "analysis.generic";
@@ -599,7 +595,7 @@ test("API e2e: work-order creation fails closed when accepted intent hash is req
     }
   });
   assert.equal(blocked.statusCode, 409, blocked.body);
-  assert.equal(blocked.json?.code, "WORK_ORDER_INTENT_BINDING_BLOCKED");
+  assert.equal(blocked.json?.code, "WORK_ORDER_INTENT_BINDING_REQUIRED");
   assert.equal(blocked.json?.details?.reasonCode, "WORK_ORDER_INTENT_BINDING_REQUIRED");
 });
 

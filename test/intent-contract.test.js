@@ -1,121 +1,89 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canonicalJsonStringify } from "../src/core/canonical-json.js";
 import {
   INTENT_CONTRACT_SCHEMA_VERSION,
-  INTENT_CONTRACT_REASON_CODE,
+  INTENT_CONTRACT_STATUS,
+  acceptIntentContractV1,
   buildIntentContractV1,
-  computeIntentContractHashV1,
-  validateIntentContractV1,
-  verifyIntentContractHashV1
+  counterIntentContractV1,
+  validateIntentContractV1
 } from "../src/core/intent-contract.js";
 
-function baseIntentContractInput(overrides = {}) {
-  return {
-    intentId: "intent_core_0001",
-    negotiationId: "nego_core_0001",
+function buildSeedIntent(intentId = "intent_test_1") {
+  return buildIntentContractV1({
+    intentId,
     tenantId: "tenant_default",
-    proposerAgentId: "agt_proposer_1",
-    responderAgentId: "agt_responder_1",
-    intent: {
-      taskType: "tool_call",
-      capabilityId: "weather.read",
-      riskClass: "read",
-      expectedDeterminism: "deterministic",
-      sideEffecting: false,
-      maxLossCents: 0,
-      spendLimit: {
-        currency: "usd",
-        maxAmountCents: 250
-      },
-      parametersHash: "a".repeat(64),
-      constraints: {
-        region: "us",
-        retries: 1
-      }
-    },
-    idempotencyKey: "intent_idem_0001",
-    nonce: "nonce_intent_contract_0001",
-    expiresAt: "2026-03-01T00:20:00.000Z",
-    metadata: {
-      channel: "sdk"
-    },
-    createdAt: "2026-03-01T00:00:00.000Z",
-    updatedAt: "2026-03-01T00:00:00.000Z",
-    ...overrides
-  };
-}
-
-function isPlainObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
-}
-
-function reverseObjectKeys(value) {
-  if (Array.isArray(value)) return value.map((item) => reverseObjectKeys(item));
-  if (!isPlainObject(value)) return value;
-  const out = {};
-  for (const key of Object.keys(value).reverse()) {
-    out[key] = reverseObjectKeys(value[key]);
-  }
-  return out;
-}
-
-test("IntentContract.v1 build/validate emits deterministic intentHash", () => {
-  const contract = buildIntentContractV1(baseIntentContractInput());
-  assert.equal(contract.schemaVersion, INTENT_CONTRACT_SCHEMA_VERSION);
-  assert.equal(validateIntentContractV1(contract), true);
-
-  const recomputed = computeIntentContractHashV1(contract);
-  assert.equal(contract.intentHash, recomputed);
-  assert.match(contract.intentHash, /^[0-9a-f]{64}$/);
-});
-
-test("IntentContract.v1 hash is stable across key insertion order", () => {
-  const contract = buildIntentContractV1(baseIntentContractInput());
-  const reordered = reverseObjectKeys(contract);
-
-  const hashA = computeIntentContractHashV1(contract);
-  const hashB = computeIntentContractHashV1(reordered);
-  const canonicalA = canonicalJsonStringify(contract);
-  const canonicalB = canonicalJsonStringify(reordered);
-
-  assert.equal(hashA, hashB);
-  assert.equal(hashA, contract.intentHash);
-  assert.equal(canonicalA, canonicalB);
-});
-
-test("IntentContract.v1 verify fails closed on missing/invalid hash", () => {
-  const contract = buildIntentContractV1(baseIntentContractInput());
-
-  const missing = { ...contract };
-  delete missing.intentHash;
-  const missingVerify = verifyIntentContractHashV1(missing);
-  assert.equal(missingVerify.ok, false);
-  assert.equal(missingVerify.reasonCode, INTENT_CONTRACT_REASON_CODE.HASH_REQUIRED);
-
-  const invalid = { ...contract, intentHash: "not-a-hash" };
-  const invalidVerify = verifyIntentContractHashV1(invalid);
-  assert.equal(invalidVerify.ok, false);
-  assert.equal(invalidVerify.reasonCode, INTENT_CONTRACT_REASON_CODE.HASH_INVALID);
-});
-
-test("IntentContract.v1 verify fails closed on tampered contract payload", () => {
-  const contract = buildIntentContractV1(baseIntentContractInput());
-  const tampered = structuredClone(contract);
-  tampered.intent.spendLimit.maxAmountCents = contract.intent.spendLimit.maxAmountCents + 1;
-
-  const verify = verifyIntentContractHashV1(tampered);
-  assert.equal(verify.ok, false);
-  assert.equal(verify.reasonCode, INTENT_CONTRACT_REASON_CODE.HASH_TAMPERED);
-});
-
-test("IntentContract.v1 verify fails closed on expected hash mismatch", () => {
-  const contract = buildIntentContractV1(baseIntentContractInput());
-
-  const verify = verifyIntentContractHashV1(contract, {
-    expectedIntentHash: "f".repeat(64)
+    proposerAgentId: "agt_requester_1",
+    counterpartyAgentId: "agt_worker_1",
+    objective: { summary: "Write deterministic parser" },
+    constraints: { maxDurationSeconds: 600 },
+    budgetEnvelope: { currency: "USD", maxAmountCents: 2500, hardCap: true },
+    requiredApprovals: [{ approverRole: "finance", minApprovals: 1 }],
+    successCriteria: { checks: ["tests-pass", "lint-pass"] },
+    terminationPolicy: { timeoutSeconds: 3600 },
+    proposedAt: "2026-03-01T00:00:00.000Z",
+    updatedAt: "2026-03-01T00:00:00.000Z"
   });
-  assert.equal(verify.ok, false);
-  assert.equal(verify.reasonCode, INTENT_CONTRACT_REASON_CODE.HASH_MISMATCH);
+}
+
+test("intent contract: deterministic hash for equivalent payloads", () => {
+  const a = buildSeedIntent("intent_det_1");
+  const b = buildSeedIntent("intent_det_1");
+  assert.equal(a.schemaVersion, INTENT_CONTRACT_SCHEMA_VERSION);
+  assert.equal(a.intentHash, b.intentHash);
+  assert.equal(a.intentHash.length, 64);
+});
+
+test("intent contract: tampering payload fails closed", () => {
+  const intent = buildSeedIntent("intent_tamper_1");
+  const tampered = {
+    ...intent,
+    objective: { summary: "tampered objective" }
+  };
+  assert.throws(() => validateIntentContractV1(tampered), /intentHash mismatch/i);
+});
+
+test("intent contract: counter links parent intent hash deterministically", () => {
+  const source = buildSeedIntent("intent_parent_1");
+  const counter = counterIntentContractV1({
+    sourceIntent: source,
+    intentId: "intent_counter_1",
+    proposerAgentId: "agt_worker_1",
+    budgetEnvelope: { currency: "USD", maxAmountCents: 2200, hardCap: true },
+    proposedAt: "2026-03-01T00:01:00.000Z"
+  });
+
+  assert.equal(counter.status, INTENT_CONTRACT_STATUS.COUNTERED);
+  assert.equal(counter.counterOfIntentId, source.intentId);
+  assert.equal(counter.parentIntentHash, source.intentHash);
+  assert.equal(validateIntentContractV1(counter), true);
+});
+
+test("intent contract: accept transition requires participant and is hash-bound", () => {
+  const proposed = buildSeedIntent("intent_accept_1");
+  const accepted = acceptIntentContractV1({
+    intentContract: proposed,
+    acceptedByAgentId: "agt_worker_1",
+    acceptedAt: "2026-03-01T00:02:00.000Z"
+  });
+
+  assert.equal(accepted.status, INTENT_CONTRACT_STATUS.ACCEPTED);
+  assert.equal(accepted.acceptedByAgentId, "agt_worker_1");
+  assert.equal(accepted.acceptedAt, "2026-03-01T00:02:00.000Z");
+  assert.notEqual(accepted.intentHash, proposed.intentHash);
+  assert.equal(validateIntentContractV1(accepted), true);
+});
+
+test("intent contract: accept fails closed for non-participant", () => {
+  const proposed = buildSeedIntent("intent_accept_fail_1");
+  assert.throws(
+    () =>
+      acceptIntentContractV1({
+        intentContract: proposed,
+        acceptedByAgentId: "agt_outsider_1",
+        acceptedAt: "2026-03-01T00:02:00.000Z"
+      }),
+    /must be a participant/i
+  );
 });

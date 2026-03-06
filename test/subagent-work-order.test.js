@@ -212,56 +212,6 @@ test("sub-agent work order: fail-closed when settlement exceeds constraints.maxC
   );
 });
 
-test("sub-agent work order: completion receipt hash binds optional intent binding", () => {
-  const created = buildSubAgentWorkOrderV1({
-    workOrderId: "workord_intent_bind_1",
-    tenantId: "tenant_default",
-    principalAgentId: "agt_principal_1",
-    subAgentId: "agt_worker_1",
-    requiredCapability: "code.generation",
-    specification: { prompt: "intent-bound completion" },
-    pricing: { model: "fixed", amountCents: 500, currency: "USD" },
-    intentBinding: {
-      schemaVersion: "WorkOrderIntentBinding.v1",
-      negotiationId: "nego_intent_bind_1",
-      intentId: "intent_bind_1",
-      intentHash: "a".repeat(64),
-      acceptedEventId: "inevent_accept_1",
-      acceptedEventHash: "b".repeat(64),
-      acceptanceId: "taccept_intent_bind_1",
-      acceptanceHash: "c".repeat(64),
-      acceptedAt: "2026-02-24T00:00:00.000Z"
-    },
-    createdAt: "2026-02-24T00:00:00.000Z"
-  });
-  const accepted = acceptSubAgentWorkOrderV1({
-    workOrder: created,
-    acceptedByAgentId: "agt_worker_1",
-    acceptedAt: "2026-02-24T00:01:00.000Z"
-  });
-  const receipt = buildSubAgentCompletionReceiptV1({
-    receiptId: "worec_intent_bind_1",
-    tenantId: "tenant_default",
-    workOrder: accepted,
-    status: SUB_AGENT_COMPLETION_STATUS.SUCCESS,
-    outputs: { artifactRef: "artifact://intent/1" },
-    evidenceRefs: ["artifact://intent/1"],
-    deliveredAt: "2026-02-24T00:02:00.000Z"
-  });
-  assert.equal(receipt.intentBinding?.intentHash, "a".repeat(64));
-  assert.equal(receipt.intentBinding?.acceptedEventHash, "b".repeat(64));
-  assert.equal(validateSubAgentCompletionReceiptV1(receipt), true);
-
-  const tampered = {
-    ...receipt,
-    intentBinding: {
-      ...receipt.intentBinding,
-      intentHash: "d".repeat(64)
-    }
-  };
-  assert.throws(() => validateSubAgentCompletionReceiptV1(tampered), /receipt\.receipthash mismatch/i);
-});
-
 test("sub-agent work order: execution attestation is hash-bound and validated fail-closed", () => {
   const workOrder = buildSubAgentWorkOrderV1({
     workOrderId: "workord_execatt_1",

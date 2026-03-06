@@ -1033,6 +1033,20 @@ export function applyTxRecord(store, record) {
       continue;
     }
 
+    if (kind === "INTENT_CONTRACT_UPSERT") {
+      const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
+      const intentContract = op.intentContract ?? null;
+      if (!intentContract || typeof intentContract !== "object" || Array.isArray(intentContract)) {
+        throw new TypeError("INTENT_CONTRACT_UPSERT requires intentContract");
+      }
+      const intentId = intentContract.intentId ?? op.intentId ?? null;
+      if (!intentId) throw new TypeError("INTENT_CONTRACT_UPSERT requires intentContract.intentId");
+      if (!(store.intentContracts instanceof Map)) store.intentContracts = new Map();
+      const key = makeScopedKey({ tenantId, id: String(intentId) });
+      store.intentContracts.set(key, { ...intentContract, tenantId, intentId: String(intentId) });
+      continue;
+    }
+
     if (kind === "CAPABILITY_ATTESTATION_UPSERT") {
       const tenantId = normalizeTenantId(op.tenantId ?? DEFAULT_TENANT_ID);
       const capabilityAttestation = op.capabilityAttestation ?? null;

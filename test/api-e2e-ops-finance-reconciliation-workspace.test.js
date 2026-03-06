@@ -267,8 +267,7 @@ test("API e2e: finance reconciliation workspace page renders with token query bo
     headers: {},
     auth: "none"
   });
-  assert.equal(queryAuthWorkspace.statusCode, 200, queryAuthWorkspace.body);
-  assert.match(queryAuthWorkspace.body, /Finance Reconciliation Workspace/);
+  assert.equal(queryAuthWorkspace.statusCode, 403, queryAuthWorkspace.body);
 
   const forbidden = await request(api, {
     method: "GET",

@@ -14,6 +14,7 @@ test("sdk quickstart contract: package scripts pin ACS smoke entrypoints", async
   const pkg = JSON.parse(raw);
   assert.equal(pkg.scripts["sdk:acs-smoke"], "node scripts/examples/sdk-acs-substrate-smoke.mjs");
   assert.equal(pkg.scripts["sdk:acs-smoke:py"], "PYTHONDONTWRITEBYTECODE=1 python3 scripts/examples/sdk-acs-substrate-smoke.py");
+  assert.equal(pkg.scripts["test:ops:agentverse-gate"], "node scripts/ci/run-agentverse-gate.mjs");
 });
 
 test("sdk quickstart contract: ACS smoke example files exist", async () => {
@@ -43,4 +44,12 @@ test("sdk quickstart contract: package READMEs expose ACS quickstart surface", a
   assert.match(pyReadme, /create_work_order/);
   assert.match(pyReadme, /create_capability_attestation/);
   assert.match(pyReadme, /npm run sdk:acs-smoke:py/);
+});
+
+test("sdk quickstart contract: package exports include agentverse surfaces", async () => {
+  const raw = await readRepoFile("package.json");
+  const pkg = JSON.parse(raw);
+  assert.equal(pkg.exports["./agentverse"], "./src/agentverse/index.js");
+  assert.equal(pkg.exports["./agentverse/bridge"], "./src/agentverse/bridge/index.js");
+  assert.equal(pkg.bin.agentverse, "bin/agentverse-cli.js");
 });

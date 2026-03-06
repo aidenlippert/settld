@@ -5,7 +5,6 @@ export const IDENTITY_SIGNER_LIFECYCLE_REASON_CODES = Object.freeze({
   SIGNER_EVENT_TIME_INVALID: "IDENTITY_SIGNER_EVENT_TIME_INVALID",
   SIGNER_KEY_STATUS_INVALID: "IDENTITY_SIGNER_KEY_STATUS_INVALID",
   SIGNER_KEY_LIFECYCLE_INVALID: "IDENTITY_SIGNER_KEY_LIFECYCLE_INVALID",
-  SIGNER_KEY_CHAIN_GAP: "IDENTITY_SIGNER_KEY_CHAIN_GAP",
   SIGNER_KEY_NOT_REGISTERED: "IDENTITY_SIGNER_KEY_NOT_REGISTERED",
   SIGNER_KEY_NOT_ACTIVE: "IDENTITY_SIGNER_KEY_NOT_ACTIVE",
   SIGNER_KEY_NOT_YET_VALID: "IDENTITY_SIGNER_KEY_NOT_YET_VALID",
@@ -19,7 +18,6 @@ export const IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES = Object.freeze({
   KEY_EVENT_TIME_INVALID: "KEY_EVENT_TIME_INVALID",
   KEY_STATUS_INVALID: "KEY_STATUS_INVALID",
   KEY_LIFECYCLE_INVALID: "KEY_LIFECYCLE_INVALID",
-  KEY_CHAIN_GAP: "KEY_CHAIN_GAP",
   KEY_NOT_REGISTERED: "KEY_NOT_REGISTERED",
   KEY_NOT_ACTIVE: "KEY_NOT_ACTIVE",
   KEY_NOT_YET_VALID: "KEY_NOT_YET_VALID",
@@ -35,7 +33,6 @@ const LEGACY_TO_CANONICAL_REASON_CODE = Object.freeze({
   [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_EVENT_TIME_INVALID]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_EVENT_TIME_INVALID,
   [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_STATUS_INVALID]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_STATUS_INVALID,
   [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_LIFECYCLE_INVALID]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_LIFECYCLE_INVALID,
-  [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_CHAIN_GAP]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_CHAIN_GAP,
   [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_REGISTERED]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_NOT_REGISTERED,
   [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_ACTIVE]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_NOT_ACTIVE,
   [IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_YET_VALID]: IDENTITY_SIGNER_LIFECYCLE_CANONICAL_REASON_CODES.KEY_NOT_YET_VALID,
@@ -52,9 +49,7 @@ function buildLifecycleDecision({
   validFrom = null,
   validTo = null,
   rotatedAt = null,
-  revokedAt = null,
-  validAt = null,
-  validNow = null
+  revokedAt = null
 } = {}) {
   const legacyCode = code;
   const canonicalCode = legacyCode ? LEGACY_TO_CANONICAL_REASON_CODE[legacyCode] ?? null : null;
@@ -68,27 +63,7 @@ function buildLifecycleDecision({
     validFrom,
     validTo,
     rotatedAt,
-    revokedAt,
-    validAt:
-      validAt && typeof validAt === "object" && !Array.isArray(validAt)
-        ? {
-            ok: validAt.ok === true,
-            code: validAt.code ?? null,
-            legacyCode: validAt.code ?? null,
-            canonicalCode: validAt.code ? LEGACY_TO_CANONICAL_REASON_CODE[validAt.code] ?? null : null,
-            error: validAt.error ?? null
-          }
-        : null,
-    validNow:
-      validNow && typeof validNow === "object" && !Array.isArray(validNow)
-        ? {
-            ok: validNow.ok === true,
-            code: validNow.code ?? null,
-            legacyCode: validNow.code ?? null,
-            canonicalCode: validNow.code ? LEGACY_TO_CANONICAL_REASON_CODE[validNow.code] ?? null : null,
-            error: validNow.error ?? null
-          }
-        : null
+    revokedAt
   };
 }
 
@@ -108,78 +83,7 @@ function validateLifecycleWindow({ validFrom, validTo } = {}) {
   }
 }
 
-function evaluateLifecycleAtPoint({
-  atMs,
-  signerStatus,
-  validFrom,
-  validTo,
-  rotatedAt,
-  revokedAt,
-  phase = "evaluation"
-} = {}) {
-  if (validFrom && atMs < validFrom.ms) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_YET_VALID,
-      error: `signer key is not yet valid at ${phase}`
-    };
-  }
-  if (validTo && atMs > validTo.ms) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_EXPIRED,
-      error: `signer key is expired at ${phase}`
-    };
-  }
-  if (rotatedAt && atMs >= rotatedAt.ms) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_ROTATED,
-      error: `signer key is rotated at ${phase}`
-    };
-  }
-  if (revokedAt && atMs >= revokedAt.ms) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_REVOKED,
-      error: `signer key is revoked at ${phase}`
-    };
-  }
-  if (signerStatus === SIGNER_KEY_STATUS.ROTATED && !rotatedAt) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_CHAIN_GAP,
-      error: "signer key rotation boundary is missing"
-    };
-  }
-  if (signerStatus === SIGNER_KEY_STATUS.REVOKED && !revokedAt) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_CHAIN_GAP,
-      error: "signer key revocation boundary is missing"
-    };
-  }
-  if (
-    signerStatus !== SIGNER_KEY_STATUS.ACTIVE &&
-    signerStatus !== SIGNER_KEY_STATUS.ROTATED &&
-    signerStatus !== SIGNER_KEY_STATUS.REVOKED
-  ) {
-    return {
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_ACTIVE,
-      error: "signer key is not active"
-    };
-  }
-  return { ok: true, code: null, error: null };
-}
-
-export function evaluateSignerLifecycleForContinuity({
-  signerKey = null,
-  at = null,
-  now = null,
-  requireRegistered = true,
-  enforceCurrentValidity = false
-} = {}) {
+export function evaluateSignerLifecycleForContinuity({ signerKey = null, at = null, requireRegistered = true } = {}) {
   if (!signerKey || typeof signerKey !== "object" || Array.isArray(signerKey)) {
     if (requireRegistered) {
       return buildLifecycleDecision({
@@ -218,26 +122,6 @@ export function evaluateSignerLifecycleForContinuity({
     });
   }
 
-  const nowIso =
-    typeof now === "string" && now.trim() !== ""
-      ? now.trim()
-      : atIso;
-  if (!ISO_DATE_TIME_PATTERN.test(nowIso)) {
-    return buildLifecycleDecision({
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_EVENT_TIME_INVALID,
-      error: "current evaluation time must be an ISO date-time"
-    });
-  }
-  const nowMs = Date.parse(nowIso);
-  if (!Number.isFinite(nowMs)) {
-    return buildLifecycleDecision({
-      ok: false,
-      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_EVENT_TIME_INVALID,
-      error: "current evaluation time must be an ISO date-time"
-    });
-  }
-
   let signerStatus = null;
   let validFrom = null;
   let validTo = null;
@@ -268,52 +152,67 @@ export function evaluateSignerLifecycleForContinuity({
     });
   }
 
-  const validAt = evaluateLifecycleAtPoint({
-    atMs,
-    signerStatus,
-    validFrom,
-    validTo,
-    rotatedAt,
-    revokedAt,
-    phase: "event-time evaluation"
-  });
-  const validNow = evaluateLifecycleAtPoint({
-    atMs: nowMs,
-    signerStatus,
-    validFrom,
-    validTo,
-    rotatedAt,
-    revokedAt,
-    phase: "current-time evaluation"
-  });
-
-  if (!validAt.ok) {
+  if (signerStatus !== SIGNER_KEY_STATUS.ACTIVE) {
+    if (signerStatus === SIGNER_KEY_STATUS.ROTATED) {
+      return buildLifecycleDecision({
+        ok: false,
+        code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_ROTATED,
+        error: "signer key is rotated",
+        signerStatus,
+        rotatedAt: rotatedAt?.iso ?? null
+      });
+    }
+    if (signerStatus === SIGNER_KEY_STATUS.REVOKED) {
+      return buildLifecycleDecision({
+        ok: false,
+        code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_REVOKED,
+        error: "signer key is revoked",
+        signerStatus,
+        revokedAt: revokedAt?.iso ?? null
+      });
+    }
     return buildLifecycleDecision({
       ok: false,
-      code: validAt.code,
-      error: validAt.error,
-      signerStatus,
-      validFrom: validFrom?.iso ?? null,
-      validTo: validTo?.iso ?? null,
-      rotatedAt: rotatedAt?.iso ?? null,
-      revokedAt: revokedAt?.iso ?? null,
-      validAt,
-      validNow
+      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_ACTIVE,
+      error: "signer key is not active",
+      signerStatus
     });
   }
 
-  if (enforceCurrentValidity && !validNow.ok) {
+  if (validFrom && atMs < validFrom.ms) {
     return buildLifecycleDecision({
       ok: false,
-      code: validNow.code,
-      error: validNow.error,
+      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_NOT_YET_VALID,
+      error: "signer key is not yet valid",
       signerStatus,
-      validFrom: validFrom?.iso ?? null,
-      validTo: validTo?.iso ?? null,
-      rotatedAt: rotatedAt?.iso ?? null,
-      revokedAt: revokedAt?.iso ?? null,
-      validAt,
-      validNow
+      validFrom: validFrom.iso
+    });
+  }
+  if (validTo && atMs > validTo.ms) {
+    return buildLifecycleDecision({
+      ok: false,
+      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_EXPIRED,
+      error: "signer key is expired",
+      signerStatus,
+      validTo: validTo.iso
+    });
+  }
+  if (rotatedAt && atMs >= rotatedAt.ms) {
+    return buildLifecycleDecision({
+      ok: false,
+      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_ROTATED,
+      error: "signer key is rotated at evaluation time",
+      signerStatus,
+      rotatedAt: rotatedAt.iso
+    });
+  }
+  if (revokedAt && atMs >= revokedAt.ms) {
+    return buildLifecycleDecision({
+      ok: false,
+      code: IDENTITY_SIGNER_LIFECYCLE_REASON_CODES.SIGNER_KEY_REVOKED,
+      error: "signer key is revoked at evaluation time",
+      signerStatus,
+      revokedAt: revokedAt.iso
     });
   }
 
@@ -324,8 +223,6 @@ export function evaluateSignerLifecycleForContinuity({
     validFrom: validFrom?.iso ?? null,
     validTo: validTo?.iso ?? null,
     rotatedAt: rotatedAt?.iso ?? null,
-    revokedAt: revokedAt?.iso ?? null,
-    validAt,
-    validNow
+    revokedAt: revokedAt?.iso ?? null
   });
 }

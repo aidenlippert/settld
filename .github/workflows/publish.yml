@@ -1,0 +1,72 @@
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish package to npm"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  prepublish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run prepublish check
+        run: npm run -s publish:precheck -- --out artifacts/publish/prepublish-check.ci.json
+
+      - name: npm pack dry run
+        run: npm pack --dry-run
+
+      - name: Upload prepublish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepublish-check-${{ github.run_id }}
+          path: artifacts/publish/prepublish-check.ci.json
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs:
+      - prepublish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Re-run prepublish check
+        run: npm run -s publish:precheck -- --out artifacts/publish/prepublish-check.publish.json
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public

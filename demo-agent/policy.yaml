@@ -1,0 +1,13 @@
+version: "1"
+defaults:
+  action: deny
+rules:
+  - name: allow-code_review
+    when:
+      requiredCapability: code_review
+    then: allow
+  - name: require-approval-high-spend
+    when:
+      amountUsdCents:
+        gt: 50000
+    then: require_approval

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "NooterraAgentProject.v1",
+  "name": "demo-agent",
+  "description": "Nooterra agent",
+  "agentId": "agt_demo_agent",
+  "entrypoint": "./agent.js",
+  "policyPath": "./policy.yaml",
+  "defaults": {
+    "baseUrl": "http://127.0.0.1:3000",
+    "protocol": "1.0",
+    "tenantId": "tenant_default"
+  }
+}

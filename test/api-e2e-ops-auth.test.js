@@ -17,6 +17,10 @@ test("API e2e v1.2: scoped ops auth gates ops/audit/finance endpoints", async ()
 
   // No token -> forbidden.
   assert.equal((await request(api, { method: "GET", path: "/ops", auth: "none" })).statusCode, 403);
+  // Query token must not authenticate.
+  const queryTokenOnly = await request(api, { method: "GET", path: "/ops/jobs?opsToken=tok_read", auth: "none" });
+  assert.equal(queryTokenOnly.statusCode, 403);
+  assert.equal(queryTokenOnly.json?.code, "FORBIDDEN");
 
   // ops_read can view ops lists.
   assert.equal((await request(api, { method: "GET", path: "/ops/jobs", headers: { "x-proxy-ops-token": "tok_read" } })).statusCode, 200);

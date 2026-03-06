@@ -112,3 +112,97 @@ test("magic-link auth mode endpoint: returns hybrid when signup is enabled and a
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test("magic-link auth mode endpoint: returns public_signup when signup is enabled and admin API key is absent", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "nooterra-magic-link-auth-mode-"));
+  let restoreEnv = null;
+  try {
+    const loaded = await loadHandler({ dataDir, publicSignupEnabled: true, apiKey: null });
+    restoreEnv = loaded.restoreEnv;
+    const res = await runReq(loaded.handler, { method: "GET", url: "/v1/public/auth-mode" });
+    assert.equal(res.statusCode, 200, res._body().toString("utf8"));
+    const json = JSON.parse(res._body().toString("utf8"));
+    assert.equal(json.ok, true);
+    assert.equal(json.authMode, "public_signup");
+    assert.equal(json.publicSignupEnabled, true);
+  } finally {
+    if (restoreEnv) restoreEnv();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("magic-link signup endpoint: fails closed with SIGNUP_DISABLED when public signup is disabled", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "nooterra-magic-link-signup-disabled-"));
+  let restoreEnv = null;
+  try {
+    const loaded = await loadHandler({ dataDir, publicSignupEnabled: false, apiKey: "test_key" });
+    restoreEnv = loaded.restoreEnv;
+    const body = Buffer.from(
+      JSON.stringify({
+        company: "Nooterra Labs",
+        fullName: "Aiden",
+        email: "aiden@nooterra.work"
+      }),
+      "utf8"
+    );
+    const res = await runReq(loaded.handler, {
+      method: "POST",
+      url: "/v1/public/signup",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(body.length)
+      },
+      bodyChunks: [body]
+    });
+    assert.equal(res.statusCode, 403, res._body().toString("utf8"));
+    const json = JSON.parse(res._body().toString("utf8"));
+    assert.equal(json.ok, false);
+    assert.equal(json.code, "SIGNUP_DISABLED");
+  } finally {
+    if (restoreEnv) restoreEnv();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("magic-link buyer auth endpoints: fail closed with BUYER_AUTH_DISABLED when domains are not configured", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "nooterra-magic-link-buyer-auth-disabled-"));
+  let restoreEnv = null;
+  try {
+    const loaded = await loadHandler({ dataDir, publicSignupEnabled: true, apiKey: "test_key" });
+    restoreEnv = loaded.restoreEnv;
+    const tenantId = "tenant_auth_disabled";
+
+    const otpBody = Buffer.from(JSON.stringify({ email: "buyer@acme.example" }), "utf8");
+    const otpRes = await runReq(loaded.handler, {
+      method: "POST",
+      url: `/v1/tenants/${encodeURIComponent(tenantId)}/buyer/login/otp`,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(otpBody.length)
+      },
+      bodyChunks: [otpBody]
+    });
+    assert.equal(otpRes.statusCode, 400, otpRes._body().toString("utf8"));
+    const otpJson = JSON.parse(otpRes._body().toString("utf8"));
+    assert.equal(otpJson.ok, false);
+    assert.equal(otpJson.code, "BUYER_AUTH_DISABLED");
+
+    const loginBody = Buffer.from(JSON.stringify({ email: "buyer@acme.example", code: "123456" }), "utf8");
+    const loginRes = await runReq(loaded.handler, {
+      method: "POST",
+      url: `/v1/tenants/${encodeURIComponent(tenantId)}/buyer/login`,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(loginBody.length)
+      },
+      bodyChunks: [loginBody]
+    });
+    assert.equal(loginRes.statusCode, 400, loginRes._body().toString("utf8"));
+    const loginJson = JSON.parse(loginRes._body().toString("utf8"));
+    assert.equal(loginJson.ok, false);
+    assert.equal(loginJson.code, "BUYER_AUTH_DISABLED");
+  } finally {
+    if (restoreEnv) restoreEnv();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});

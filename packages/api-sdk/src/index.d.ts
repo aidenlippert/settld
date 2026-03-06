@@ -1754,6 +1754,37 @@ export class NooterraClient {
     acceptanceId: string,
     opts?: RequestOptions
   ): Promise<NooterraResponse<{ taskAcceptance: Record<string, unknown> }>>;
+  proposeIntentContract(
+    body: Record<string, unknown> & {
+      proposerAgentId: string;
+      counterpartyAgentId: string;
+      objective: unknown;
+      budgetEnvelope: Record<string, unknown>;
+    },
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ intentContract: Record<string, unknown> }>>;
+  listIntentContracts(
+    params?: {
+      intentId?: string;
+      proposerAgentId?: string;
+      counterpartyAgentId?: string;
+      status?: "proposed" | "countered" | "accepted";
+      limit?: number;
+      offset?: number;
+    },
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ intents: Array<Record<string, unknown>>; limit: number; offset: number }>>;
+  getIntentContract(intentId: string, opts?: RequestOptions): Promise<NooterraResponse<{ intentContract: Record<string, unknown> }>>;
+  counterIntentContract(
+    intentId: string,
+    body: Record<string, unknown> & { proposerAgentId: string },
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ intentContract: Record<string, unknown> }>>;
+  acceptIntentContract(
+    intentId: string,
+    body: Record<string, unknown> & { acceptedByAgentId: string },
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ intentContract: Record<string, unknown> }>>;
   createWorkOrder(
     body: Record<string, unknown>,
     opts?: RequestOptions
@@ -1916,9 +1947,24 @@ export class NooterraClient {
   getSession(sessionId: string, opts?: RequestOptions): Promise<NooterraResponse<{ session: SessionV1 }>>;
   listSessionEvents(
     sessionId: string,
-    params?: { eventType?: string; sinceEventId?: string; limit?: number; offset?: number },
+    params?: { eventType?: string; sinceEventId?: string; checkpointConsumerId?: string; limit?: number; offset?: number },
     opts?: RequestOptions
   ): Promise<NooterraResponse<{ sessionId: string; events: Array<SessionEventV1>; limit: number; offset: number }>>;
+  getSessionEventCheckpoint(
+    sessionId: string,
+    checkpointConsumerId: string,
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ checkpoint: Record<string, unknown>; inbox: Record<string, unknown> }>>;
+  ackSessionEventCheckpoint(
+    sessionId: string,
+    body: { checkpointConsumerId: string; sinceEventId?: string | null },
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ checkpoint: Record<string, unknown>; inbox: Record<string, unknown> }>>;
+  requeueSessionEventCheckpoint(
+    sessionId: string,
+    body: { checkpointConsumerId: string; sinceEventId?: string | null },
+    opts?: RequestOptions
+  ): Promise<NooterraResponse<{ checkpoint: Record<string, unknown>; inbox: Record<string, unknown> }>>;
   appendSessionEvent(
     sessionId: string,
     body: {
@@ -1937,7 +1983,7 @@ export class NooterraClient {
   ): Promise<NooterraResponse<{ transcript: Record<string, unknown> }>>;
   streamSessionEvents(
     sessionId: string,
-    params?: { eventType?: string; sinceEventId?: string },
+    params?: { eventType?: string; sinceEventId?: string; checkpointConsumerId?: string },
     opts?: Pick<RequestOptions, "requestId" | "signal"> & { lastEventId?: string }
   ): AsyncGenerator<NooterraSseEvent, void, unknown>;
   getAgentWallet(agentId: string, opts?: RequestOptions): Promise<NooterraResponse<{ wallet: AgentWalletV1 }>>;

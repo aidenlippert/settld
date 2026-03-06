@@ -532,6 +532,19 @@ function buildRuntimeRelease({ repoPackage, artifactVerifyPackage, openapiMetada
   const nodeMajor = parseNodeMajor(nodeVersion ?? "");
 
   const repoVersion = repoPackage.readOk && repoPackage.parseOk ? normalizeOptionalString(repoPackage.json?.version) : null;
+  const repoPackageName = repoPackage.readOk && repoPackage.parseOk ? normalizeOptionalString(repoPackage.json?.name) : null;
+  const repoScripts = repoPackage.readOk && repoPackage.parseOk && isPlainObject(repoPackage.json?.scripts)
+    ? repoPackage.json.scripts
+    : {};
+  const repoBin = repoPackage.readOk && repoPackage.parseOk && isPlainObject(repoPackage.json?.bin)
+    ? repoPackage.json.bin
+    : {};
+  const repoExports = repoPackage.readOk && repoPackage.parseOk && isPlainObject(repoPackage.json?.exports)
+    ? repoPackage.json.exports
+    : {};
+  const hasAgentverseGateScript = typeof repoScripts["test:ops:agentverse-gate"] === "string";
+  const hasAgentverseBin = typeof repoBin.agentverse === "string";
+  const hasAgentverseExport = typeof repoExports["./agentverse"] === "string";
   const artifactVerifyVersion =
     artifactVerifyPackage.readOk && artifactVerifyPackage.parseOk ? normalizeOptionalString(artifactVerifyPackage.json?.version) : null;
   const openapiInfoVersion =
@@ -543,7 +556,7 @@ function buildRuntimeRelease({ repoPackage, artifactVerifyPackage, openapiMetada
     repo: {
       path: repoPackage.path,
       sourceSha256: repoPackage.sourceSha256,
-      packageName: repoPackage.readOk && repoPackage.parseOk ? normalizeOptionalString(repoPackage.json?.name) : null,
+      packageName: repoPackageName,
       version: repoVersion,
       readOk: repoPackage.readOk,
       parseOk: repoPackage.parseOk,
@@ -574,6 +587,11 @@ function buildRuntimeRelease({ repoPackage, artifactVerifyPackage, openapiMetada
     node: {
       version: nodeVersion,
       major: nodeMajor
+    },
+    agentverse: {
+      gateScriptPresent: hasAgentverseGateScript,
+      cliBinPresent: hasAgentverseBin,
+      packageExportPresent: hasAgentverseExport
     }
   };
 }
@@ -624,6 +642,34 @@ function buildRuntimeReleaseIssues(runtimeRelease) {
       code: "runtime_release_node_major_missing",
       message: "node major version is unavailable"
     });
+  }
+
+  // Agentverse gate requirements apply to this repository package only.
+  if (runtimeRelease.repo.packageName === "nooterra") {
+    if (runtimeRelease.agentverse?.gateScriptPresent !== true) {
+      issues.push({
+        id: "runtime:agentverse_gate_script_missing",
+        category: "gate",
+        code: "runtime_release_agentverse_gate_script_missing",
+        message: "package.json scripts.test:ops:agentverse-gate is missing"
+      });
+    }
+    if (runtimeRelease.agentverse?.cliBinPresent !== true) {
+      issues.push({
+        id: "runtime:agentverse_cli_bin_missing",
+        category: "gate",
+        code: "runtime_release_agentverse_cli_bin_missing",
+        message: "package.json bin.agentverse is missing"
+      });
+    }
+    if (runtimeRelease.agentverse?.packageExportPresent !== true) {
+      issues.push({
+        id: "runtime:agentverse_export_missing",
+        category: "gate",
+        code: "runtime_release_agentverse_export_missing",
+        message: "package.json exports['./agentverse'] is missing"
+      });
+    }
   }
 
   return issues;

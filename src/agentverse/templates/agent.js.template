@@ -1,0 +1,41 @@
+export default {
+  name: "{{AGENT_SLUG}}",
+  capabilities: [
+    {
+      capabilityId: "{{CAPABILITY_ID}}",
+      description: "{{CAPABILITY_DESCRIPTION}}"
+    }
+  ],
+  constraints: {
+    maxSpendPerRequest: {{MAX_SPEND_PER_REQUEST}},
+    dataClassificationMax: "{{DATA_CLASSIFICATION_MAX}}"
+  },
+  async handle(workOrder, context) {
+    const input = workOrder?.specification ?? workOrder?.input ?? {};
+    context.log("processing work order");
+    return {
+      output: {
+        ok: true,
+        agent: "{{AGENT_SLUG}}",
+        capability: "{{CAPABILITY_ID}}",
+        input
+      },
+      costUsdCents: {{DEFAULT_COST_USD_CENTS}},
+      evidenceRefs: []
+    };
+  },
+  async bid(rfq, context) {
+    if (rfq?.capability !== "{{CAPABILITY_ID}}") return null;
+    context.log("preparing marketplace bid");
+    return {
+      amountCents: {{DEFAULT_COST_USD_CENTS}},
+      currency: rfq?.currency ?? "USD",
+      etaSeconds: 3600,
+      note: "{{AGENT_SLUG}} can take this task",
+      metadata: {
+        source: "agentverse-template",
+        capability: "{{CAPABILITY_ID}}"
+      }
+    };
+  }
+};

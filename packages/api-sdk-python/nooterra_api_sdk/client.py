@@ -1370,6 +1370,43 @@ class NooterraClient:
         _assert_non_empty_string(acceptance_id, "acceptance_id")
         return self._request("GET", f"/task-acceptances/{parse.quote(acceptance_id, safe='')}", **opts)
 
+    def propose_intent_contract(self, body: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        if not isinstance(body, dict):
+            raise ValueError("body is required")
+        _assert_non_empty_string(body.get("proposerAgentId"), "body.proposerAgentId")
+        _assert_non_empty_string(body.get("counterpartyAgentId"), "body.counterpartyAgentId")
+        if body.get("objective") is None:
+            raise ValueError("body.objective is required")
+        budget_envelope = body.get("budgetEnvelope")
+        if not isinstance(budget_envelope, dict):
+            raise ValueError("body.budgetEnvelope is required")
+        return self._request("POST", "/intents/propose", body=body, **opts)
+
+    def list_intent_contracts(self, query: Optional[Dict[str, Any]] = None, **opts: Any) -> Dict[str, Any]:
+        suffix = self._query_suffix(
+            query,
+            allowed_keys=["intentId", "proposerAgentId", "counterpartyAgentId", "status", "limit", "offset"],
+        )
+        return self._request("GET", f"/intents{suffix}", **opts)
+
+    def get_intent_contract(self, intent_id: str, **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(intent_id, "intent_id")
+        return self._request("GET", f"/intents/{parse.quote(intent_id, safe='')}", **opts)
+
+    def counter_intent_contract(self, intent_id: str, body: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(intent_id, "intent_id")
+        if not isinstance(body, dict):
+            raise ValueError("body is required")
+        _assert_non_empty_string(body.get("proposerAgentId"), "body.proposerAgentId")
+        return self._request("POST", f"/intents/{parse.quote(intent_id, safe='')}/counter", body=body, **opts)
+
+    def accept_intent_contract(self, intent_id: str, body: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(intent_id, "intent_id")
+        if not isinstance(body, dict):
+            raise ValueError("body is required")
+        _assert_non_empty_string(body.get("acceptedByAgentId"), "body.acceptedByAgentId")
+        return self._request("POST", f"/intents/{parse.quote(intent_id, safe='')}/accept", body=body, **opts)
+
     def create_work_order(self, body: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
         if not isinstance(body, dict):
             raise ValueError("body is required")
@@ -1521,8 +1558,28 @@ class NooterraClient:
 
     def list_session_events(self, session_id: str, query: Optional[Dict[str, Any]] = None, **opts: Any) -> Dict[str, Any]:
         _assert_non_empty_string(session_id, "session_id")
-        suffix = self._query_suffix(query, allowed_keys=["eventType", "limit", "offset", "sinceEventId"])
+        suffix = self._query_suffix(query, allowed_keys=["eventType", "limit", "offset", "sinceEventId", "checkpointConsumerId"])
         return self._request("GET", f"/sessions/{parse.quote(session_id, safe='')}/events{suffix}", **opts)
+
+    def get_session_event_checkpoint(self, session_id: str, checkpoint_consumer_id: str, **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(session_id, "session_id")
+        _assert_non_empty_string(checkpoint_consumer_id, "checkpoint_consumer_id")
+        suffix = self._query_suffix({"checkpointConsumerId": checkpoint_consumer_id}, allowed_keys=["checkpointConsumerId"])
+        return self._request("GET", f"/sessions/{parse.quote(session_id, safe='')}/events/checkpoint{suffix}", **opts)
+
+    def ack_session_event_checkpoint(self, session_id: str, body: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(session_id, "session_id")
+        if not isinstance(body, dict):
+            raise ValueError("body is required")
+        _assert_non_empty_string(body.get("checkpointConsumerId"), "body.checkpointConsumerId")
+        return self._request("POST", f"/sessions/{parse.quote(session_id, safe='')}/events/checkpoint", body=body, **opts)
+
+    def requeue_session_event_checkpoint(self, session_id: str, body: Dict[str, Any], **opts: Any) -> Dict[str, Any]:
+        _assert_non_empty_string(session_id, "session_id")
+        if not isinstance(body, dict):
+            raise ValueError("body is required")
+        _assert_non_empty_string(body.get("checkpointConsumerId"), "body.checkpointConsumerId")
+        return self._request("POST", f"/sessions/{parse.quote(session_id, safe='')}/events/checkpoint/requeue", body=body, **opts)
 
     def stream_session_events(
         self,
@@ -1534,7 +1591,7 @@ class NooterraClient:
         timeout_seconds: Optional[float] = None,
     ) -> Iterator[Dict[str, Any]]:
         _assert_non_empty_string(session_id, "session_id")
-        suffix = self._query_suffix(query, allowed_keys=["eventType", "sinceEventId"])
+        suffix = self._query_suffix(query, allowed_keys=["eventType", "sinceEventId", "checkpointConsumerId"])
         rid = request_id if request_id else _random_request_id()
         headers: Dict[str, str] = {
             "accept": "text/event-stream",

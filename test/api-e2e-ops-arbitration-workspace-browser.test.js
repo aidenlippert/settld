@@ -268,11 +268,16 @@ test(
     try {
       await runPw({
         session,
+        args: ["open", "--browser", browser, "about:blank"]
+      });
+      await runPw({
+        session,
         args: [
-          "open",
-          "--browser",
-          browser,
-          `${baseUrl}/ops/arbitration/workspace?tenantId=${encodeURIComponent(tenantId)}&opsToken=tok_finw&caseId=${encodeURIComponent(caseId)}&status=under_review`
+          "run-code",
+          `await page.setExtraHTTPHeaders({ 'x-proxy-tenant-id': ${JSON.stringify(tenantId)}, 'x-proxy-ops-token': 'tok_finw' });
+           await page.goto(${JSON.stringify(
+             `${baseUrl}/ops/arbitration/workspace?tenantId=${encodeURIComponent(tenantId)}&caseId=${encodeURIComponent(caseId)}&status=under_review`
+           )});`
         ]
       });
       await runPw({ session, args: ["run-code", "await page.waitForSelector('#arbitrationWorkspaceRoot');"] });

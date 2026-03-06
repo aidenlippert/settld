@@ -1194,6 +1194,84 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
     }
   };
 
+  const IntentBindingV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: ["schemaVersion", "intentId", "intentHash", "boundAt"],
+    properties: {
+      schemaVersion: { type: "string", enum: ["IntentBinding.v1"] },
+      intentId: { type: "string" },
+      intentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      boundAt: { type: "string", format: "date-time" }
+    }
+  };
+
+  const IntentContractV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "intentId",
+      "tenantId",
+      "proposerAgentId",
+      "counterpartyAgentId",
+      "objective",
+      "budgetEnvelope",
+      "requiredApprovals",
+      "successCriteria",
+      "terminationPolicy",
+      "status",
+      "proposedAt",
+      "updatedAt",
+      "revision",
+      "intentHash"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["IntentContract.v1"] },
+      intentId: { type: "string" },
+      tenantId: { type: "string" },
+      proposerAgentId: { type: "string" },
+      counterpartyAgentId: { type: "string" },
+      objective: {},
+      constraints: { type: "object", additionalProperties: true, nullable: true },
+      budgetEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["currency", "maxAmountCents", "hardCap"],
+        properties: {
+          currency: { type: "string" },
+          maxAmountCents: { type: "integer", minimum: 0 },
+          hardCap: { type: "boolean" }
+        }
+      },
+      requiredApprovals: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["approverRole", "minApprovals"],
+          properties: {
+            approverRole: { type: "string" },
+            minApprovals: { type: "integer", minimum: 0 },
+            reason: { type: "string", nullable: true }
+          }
+        }
+      },
+      successCriteria: { type: "object", additionalProperties: true },
+      terminationPolicy: { type: "object", additionalProperties: true },
+      counterOfIntentId: { type: "string", nullable: true },
+      parentIntentHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+      status: { type: "string", enum: ["proposed", "countered", "accepted"] },
+      acceptedByAgentId: { type: "string", nullable: true },
+      acceptedAt: { type: "string", format: "date-time", nullable: true },
+      proposedAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+      revision: { type: "integer", minimum: 0 },
+      metadata: { type: "object", additionalProperties: true, nullable: true },
+      intentHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
+    }
+  };
+
   const SubAgentWorkOrderProgressEventV1 = {
     type: "object",
     additionalProperties: false,
@@ -1223,24 +1301,6 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       authorityGrantRef: { type: "string", nullable: true },
       completionReceiptId: { type: "string" },
       settledAt: { type: "string", format: "date-time" }
-    }
-  };
-
-  const WorkOrderIntentBindingV1 = {
-    type: "object",
-    additionalProperties: false,
-    nullable: true,
-    required: ["schemaVersion", "negotiationId", "intentId", "intentHash"],
-    properties: {
-      schemaVersion: { type: "string", enum: ["WorkOrderIntentBinding.v1"] },
-      negotiationId: { type: "string" },
-      intentId: { type: "string" },
-      intentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
-      acceptedEventId: { type: "string", nullable: true },
-      acceptedEventHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
-      acceptanceId: { type: "string", nullable: true },
-      acceptanceHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
-      acceptedAt: { type: "string", format: "date-time", nullable: true }
     }
   };
 
@@ -1280,6 +1340,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       attestationRequirement: WorkOrderCapabilityAttestationRequirementV1,
       delegationGrantRef: { type: "string", nullable: true },
       authorityGrantRef: { type: "string", nullable: true },
+      intentBinding: { allOf: [IntentBindingV1], nullable: true },
       status: {
         type: "string",
         enum: ["created", "accepted", "working", "completed", "failed", "settled", "cancelled", "disputed"]
@@ -1290,7 +1351,6 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       completedAt: { type: "string", format: "date-time", nullable: true },
       completionReceiptId: { type: "string", nullable: true },
       settlement: SubAgentWorkOrderSettlementV1,
-      intentBinding: WorkOrderIntentBindingV1,
       metadata: { type: "object", additionalProperties: true, nullable: true },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1359,8 +1419,8 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           currency: { type: "string" }
         }
       },
+      intentHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
       deliveredAt: { type: "string", format: "date-time" },
-      intentBinding: WorkOrderIntentBindingV1,
       metadata: { type: "object", additionalProperties: true, nullable: true },
       receiptHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
     }
@@ -1389,17 +1449,14 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       attestationIssuerAgentId: { type: "string", nullable: true },
       delegationGrantRef: { type: "string" },
       authorityGrantRef: { type: "string" },
-      requireAcceptedIntentHash: { type: "boolean", nullable: true },
-      intentRef: {
+      intentBinding: {
         type: "object",
         additionalProperties: false,
         nullable: true,
-        required: ["negotiationId", "intentId", "intentHash"],
         properties: {
-          negotiationId: { type: "string" },
           intentId: { type: "string" },
-          intentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
-          acceptedEventHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true }
+          intentHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+          boundAt: { type: "string", format: "date-time", nullable: true }
         }
       },
       metadata: { type: "object", additionalProperties: true }
@@ -1440,8 +1497,8 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       executionAttestation: { ...ExecutionAttestationV1, nullable: true },
       amountCents: { type: "integer", minimum: 0, nullable: true },
       currency: { type: "string", nullable: true },
-      traceId: { type: "string", nullable: true },
       intentHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+      traceId: { type: "string", nullable: true },
       deliveredAt: { type: "string", format: "date-time" },
       completedAt: { type: "string", format: "date-time" },
       metadata: { type: "object", additionalProperties: true }
@@ -1464,6 +1521,55 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       traceId: { type: "string", nullable: true },
       authorityGrantRef: { type: "string" },
       settledAt: { type: "string", format: "date-time" }
+    }
+  };
+
+  const IntentContractProposeRequest = {
+    type: "object",
+    additionalProperties: false,
+    required: ["proposerAgentId", "counterpartyAgentId", "objective", "budgetEnvelope"],
+    properties: {
+      intentId: { type: "string" },
+      proposerAgentId: { type: "string" },
+      counterpartyAgentId: { type: "string" },
+      objective: {},
+      constraints: { type: "object", additionalProperties: true, nullable: true },
+      budgetEnvelope: { type: "object", additionalProperties: true },
+      requiredApprovals: { type: "array", items: { type: "object", additionalProperties: true }, nullable: true },
+      successCriteria: { type: "object", additionalProperties: true, nullable: true },
+      terminationPolicy: { type: "object", additionalProperties: true, nullable: true },
+      proposedAt: { type: "string", format: "date-time", nullable: true },
+      metadata: { type: "object", additionalProperties: true, nullable: true }
+    }
+  };
+
+  const IntentContractCounterRequest = {
+    type: "object",
+    additionalProperties: false,
+    required: ["proposerAgentId"],
+    properties: {
+      intentId: { type: "string", nullable: true },
+      proposerAgentId: { type: "string" },
+      parentIntentHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+      objective: { nullable: true },
+      constraints: { type: "object", additionalProperties: true, nullable: true },
+      budgetEnvelope: { type: "object", additionalProperties: true, nullable: true },
+      requiredApprovals: { type: "array", items: { type: "object", additionalProperties: true }, nullable: true },
+      successCriteria: { type: "object", additionalProperties: true, nullable: true },
+      terminationPolicy: { type: "object", additionalProperties: true, nullable: true },
+      proposedAt: { type: "string", format: "date-time", nullable: true },
+      metadata: { type: "object", additionalProperties: true, nullable: true }
+    }
+  };
+
+  const IntentContractAcceptRequest = {
+    type: "object",
+    additionalProperties: false,
+    required: ["acceptedByAgentId"],
+    properties: {
+      acceptedByAgentId: { type: "string" },
+      acceptedAt: { type: "string", format: "date-time", nullable: true },
+      intentHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true }
     }
   };
 
@@ -2424,124 +2530,6 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
     }
   };
 
-  const IdentityLogCheckpointV1 = {
-    type: "object",
-    additionalProperties: false,
-    required: ["schemaVersion", "tenantId", "treeSize", "rootHash", "headEntryId", "headEntryHash", "generatedAt", "checkpointHash"],
-    properties: {
-      schemaVersion: { type: "string", enum: ["IdentityLogCheckpoint.v1"] },
-      tenantId: { type: "string" },
-      treeSize: { type: "integer", minimum: 0 },
-      rootHash: { type: "string", nullable: true, pattern: "^[0-9a-f]{64}$" },
-      headEntryId: { type: "string", nullable: true },
-      headEntryHash: { type: "string", nullable: true, pattern: "^[0-9a-f]{64}$" },
-      generatedAt: { type: "string", format: "date-time" },
-      checkpointHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
-    }
-  };
-
-  const IdentityLogEntryV1 = {
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "schemaVersion",
-      "entryId",
-      "tenantId",
-      "agentId",
-      "eventType",
-      "logIndex",
-      "prevEntryHash",
-      "keyIdBefore",
-      "keyIdAfter",
-      "statusBefore",
-      "statusAfter",
-      "capabilitiesBefore",
-      "capabilitiesAfter",
-      "reasonCode",
-      "reason",
-      "occurredAt",
-      "recordedAt",
-      "metadata",
-      "entryHash"
-    ],
-    properties: {
-      schemaVersion: { type: "string", enum: ["IdentityLogEntry.v1"] },
-      entryId: { type: "string" },
-      tenantId: { type: "string" },
-      agentId: { type: "string" },
-      eventType: { type: "string", enum: ["create", "rotate", "revoke", "capability-claim-change"] },
-      logIndex: { type: "integer", minimum: 0 },
-      prevEntryHash: { type: "string", nullable: true, pattern: "^[0-9a-f]{64}$" },
-      keyIdBefore: { type: "string", nullable: true },
-      keyIdAfter: { type: "string", nullable: true },
-      statusBefore: { type: "string", nullable: true, enum: ["active", "suspended", "revoked", null] },
-      statusAfter: { type: "string", nullable: true, enum: ["active", "suspended", "revoked", null] },
-      capabilitiesBefore: { type: "array", items: { type: "string" } },
-      capabilitiesAfter: { type: "array", items: { type: "string" } },
-      reasonCode: { type: "string", nullable: true },
-      reason: { type: "string", nullable: true },
-      occurredAt: { type: "string", format: "date-time" },
-      recordedAt: { type: "string", format: "date-time" },
-      metadata: { type: "object", nullable: true, additionalProperties: true },
-      entryHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
-    }
-  };
-
-  const IdentityLogProofV1 = {
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "schemaVersion",
-      "tenantId",
-      "entryId",
-      "entry",
-      "treeSize",
-      "leafIndex",
-      "leafHash",
-      "siblings",
-      "rootHash",
-      "checkpoint",
-      "generatedAt",
-      "trustedCheckpoint",
-      "proofHash"
-    ],
-    properties: {
-      schemaVersion: { type: "string", enum: ["IdentityLogProof.v1"] },
-      tenantId: { type: "string" },
-      entryId: { type: "string" },
-      entry: IdentityLogEntryV1,
-      treeSize: { type: "integer", minimum: 1 },
-      leafIndex: { type: "integer", minimum: 0 },
-      leafHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
-      siblings: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["position", "hash"],
-          properties: {
-            position: { type: "string", enum: ["left", "right"] },
-            hash: { type: "string", pattern: "^[0-9a-f]{64}$" }
-          }
-        }
-      },
-      rootHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
-      checkpoint: IdentityLogCheckpointV1,
-      generatedAt: { type: "string", format: "date-time" },
-      trustedCheckpoint: {
-        type: "object",
-        nullable: true,
-        additionalProperties: false,
-        required: ["treeSize", "checkpointHash"],
-        properties: {
-          treeSize: { type: "integer", minimum: 0 },
-          checkpointHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
-        }
-      },
-      proofHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
-    }
-  };
-
   const InteractionGraphSummaryV1 = {
     type: "object",
     additionalProperties: false,
@@ -2741,6 +2729,35 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
       chainHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
       signature: { type: "string", nullable: true },
       signerKeyId: { type: "string", nullable: true }
+    }
+  };
+
+  const SessionEventInboxRelayCheckpointV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: ["schemaVersion", "tenantId", "sessionId", "consumerId", "sinceEventId", "createdAt", "updatedAt", "checkpointHash"],
+    properties: {
+      schemaVersion: { type: "string", enum: ["SessionEventInboxRelayCheckpoint.v1"] },
+      tenantId: { type: "string" },
+      sessionId: { type: "string" },
+      consumerId: { type: "string" },
+      sinceEventId: { type: "string", nullable: true },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+      checkpointHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
+    }
+  };
+
+  const SessionEventInboxWatermarkV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: ["schemaVersion", "eventCount", "sinceEventId", "nextSinceEventId", "headEventId"],
+    properties: {
+      schemaVersion: { type: "string", enum: ["SessionEventInboxWatermark.v1"] },
+      eventCount: { type: "integer", minimum: 0 },
+      sinceEventId: { type: "string", nullable: true },
+      nextSinceEventId: { type: "string", nullable: true },
+      headEventId: { type: "string", nullable: true }
     }
   };
 
@@ -4981,6 +4998,350 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
     }
   };
 
+  const MarketplaceBidAutoAcceptRequest = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      acceptedByAgentId: { type: "string" },
+      runId: { type: "string" },
+      taskType: { type: "string" },
+      inputRef: { type: "string" },
+      payerAgentId: { type: "string" },
+      fromType: InteractionDirectionEntityType,
+      toType: InteractionDirectionEntityType,
+      disputeWindowDays: { type: "integer", minimum: 0 },
+      acceptanceSignature: MarketplaceAgreementAcceptanceSignatureInput,
+      agreementTerms: MarketplaceAgreementTermsInput,
+      verificationMethod: MarketplaceBidAcceptRequest.properties.verificationMethod,
+      policy: MarketplaceBidAcceptRequest.properties.policy,
+      policyRef: MarketplaceBidAcceptRequest.properties.policyRef,
+      settlement: MarketplaceBidAcceptRequest.properties.settlement,
+      selectionStrategy: {
+        type: "string",
+        enum: ["lowest_amount_then_eta"]
+      },
+      strategy: {
+        type: "string",
+        enum: ["lowest_amount_then_eta"]
+      },
+      allowOverBudget: { type: "boolean" }
+    }
+  };
+
+  const MarketplaceAutoAwardDecisionCandidate = {
+    type: "object",
+    additionalProperties: false,
+    required: ["rank", "bidId", "amountCents", "currency"],
+    properties: {
+      rank: { type: "integer", minimum: 1 },
+      bidId: { type: "string" },
+      bidderAgentId: { type: "string", nullable: true },
+      amountCents: { type: "integer", minimum: 1 },
+      currency: { type: "string" },
+      etaSeconds: { type: "integer", minimum: 1, nullable: true },
+      createdAt: { type: "string", format: "date-time", nullable: true }
+    }
+  };
+
+  const MarketplaceAutoAwardDecisionV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "rfqId",
+      "strategy",
+      "allowOverBudget",
+      "decidedAt",
+      "outcome",
+      "tiedBidIds",
+      "consideredBidCount",
+      "consideredBids",
+      "decisionHash"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["MarketplaceAutoAwardDecision.v1"] },
+      rfqId: { type: "string" },
+      strategy: { type: "string", enum: ["lowest_amount_then_eta"] },
+      allowOverBudget: { type: "boolean" },
+      budgetCents: { type: "integer", minimum: 1, nullable: true },
+      decidedAt: { type: "string", format: "date-time" },
+      outcome: { type: "string", enum: ["selected", "blocked"] },
+      reasonCode: { type: "string", nullable: true },
+      selectedBidId: { type: "string", nullable: true },
+      tiedBidIds: { type: "array", items: { type: "string" } },
+      consideredBidCount: { type: "integer", minimum: 0 },
+      consideredBids: { type: "array", items: MarketplaceAutoAwardDecisionCandidate },
+      decisionHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
+    }
+  };
+
+  const RouterDispatchRequest = {
+    type: "object",
+    additionalProperties: false,
+    required: ["launchId"],
+    properties: {
+      launchId: { type: "string" },
+      dispatchId: { type: "string" },
+      taskIds: { type: "array", items: { type: "string" } },
+      acceptedByAgentId: { type: "string" },
+      payerAgentId: { type: "string" },
+      selectionStrategy: { type: "string", enum: ["lowest_amount_then_eta"] },
+      strategy: { type: "string", enum: ["lowest_amount_then_eta"] },
+      allowOverBudget: { type: "boolean" }
+    }
+  };
+
+  const RouterMarketplaceDispatchTaskV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "taskId",
+      "taskIndex",
+      "rfqId",
+      "dependsOnTaskIds",
+      "state",
+      "blockingTaskIds"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["RouterMarketplaceDispatchTask.v1"] },
+      taskId: { type: "string" },
+      taskIndex: { type: "integer", minimum: 1 },
+      rfqId: { type: "string" },
+      dependsOnTaskIds: { type: "array", items: { type: "string" } },
+      state: {
+        type: "string",
+        enum: [
+          "accepted",
+          "already_assigned",
+          "already_closed",
+          "blocked_dependencies_pending",
+          "blocked_dependency_cancelled",
+          "blocked_dependency_missing",
+          "blocked_no_pending_bids",
+          "blocked_ambiguous",
+          "blocked_over_budget",
+          "blocked_accept_failed",
+          "blocked_rfq_cancelled",
+          "blocked_rfq_invalid"
+        ]
+      },
+      reasonCode: { type: "string", nullable: true },
+      rfqStatus: { type: "string", nullable: true },
+      acceptedBidId: { type: "string", nullable: true },
+      runId: { type: "string", nullable: true },
+      decisionHash: { type: "string", nullable: true },
+      blockingTaskIds: { type: "array", items: { type: "string" } }
+    }
+  };
+
+  const RouterMarketplaceDispatchV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "dispatchId",
+      "launchRef",
+      "tenantId",
+      "posterAgentId",
+      "selectionStrategy",
+      "allowOverBudget",
+      "taskCount",
+      "acceptedCount",
+      "noopCount",
+      "blockedCount",
+      "tasks",
+      "dispatchedAt",
+      "dispatchHash"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["RouterMarketplaceDispatch.v1"] },
+      dispatchId: { type: "string" },
+      launchRef: {
+        type: "object",
+        additionalProperties: false,
+        required: ["launchId"],
+        properties: {
+          launchId: { type: "string" },
+          launchHash: { type: "string", nullable: true },
+          planId: { type: "string", nullable: true },
+          planHash: { type: "string", nullable: true },
+          requestTextSha256: { type: "string", nullable: true }
+        }
+      },
+      tenantId: { type: "string" },
+      posterAgentId: { type: "string" },
+      selectionStrategy: { type: "string", enum: ["lowest_amount_then_eta"] },
+      allowOverBudget: { type: "boolean" },
+      taskCount: { type: "integer", minimum: 0 },
+      acceptedCount: { type: "integer", minimum: 0 },
+      noopCount: { type: "integer", minimum: 0 },
+      blockedCount: { type: "integer", minimum: 0 },
+      tasks: { type: "array", items: RouterMarketplaceDispatchTaskV1 },
+      metadata: { type: "object", nullable: true },
+      dispatchedAt: { type: "string", format: "date-time" },
+      dispatchHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
+    }
+  };
+
+  const RouterLaunchStatusTaskV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "taskId",
+      "taskIndex",
+      "rfqId",
+      "title",
+      "requiredCapability",
+      "dependsOnTaskIds",
+      "candidateAgentIds",
+      "candidateCount",
+      "state",
+      "blockedByTaskIds",
+      "bidCount",
+      "bids"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["RouterLaunchStatusTask.v1"] },
+      taskId: { type: "string" },
+      taskIndex: { type: "integer", minimum: 1 },
+      rfqId: { type: "string" },
+      title: { type: "string" },
+      requiredCapability: { type: "string" },
+      dependsOnTaskIds: { type: "array", items: { type: "string" } },
+      candidateAgentIds: { type: "array", items: { type: "string" } },
+      candidateCount: { type: "integer", minimum: 0 },
+      state: {
+        type: "string",
+        enum: [
+          "open_no_bids",
+          "open_ready",
+          "blocked_dependencies_pending",
+          "blocked_dependency_cancelled",
+          "blocked_dependency_missing",
+          "assigned",
+          "closed",
+          "cancelled"
+        ]
+      },
+      blockedByTaskIds: { type: "array", items: { type: "string" } },
+      rfqStatus: { type: "string", nullable: true },
+      bidCount: { type: "integer", minimum: 0 },
+      acceptedBidId: { type: "string", nullable: true },
+      runId: { type: "string", nullable: true },
+      settlementStatus: { type: "string", nullable: true },
+      disputeStatus: { type: "string", nullable: true },
+      rfq: { type: "object", nullable: true },
+      bids: { type: "array", items: { type: "object" } },
+      acceptedBid: { type: "object", nullable: true },
+      run: { type: "object", nullable: true },
+      settlement: { type: "object", nullable: true }
+    }
+  };
+
+  const RouterLaunchStatusV1 = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schemaVersion",
+      "launchRef",
+      "tenantId",
+      "posterAgentId",
+      "taskCount",
+      "summary",
+      "tasks",
+      "generatedAt",
+      "statusHash"
+    ],
+    properties: {
+      schemaVersion: { type: "string", enum: ["RouterLaunchStatus.v1"] },
+      launchRef: {
+        type: "object",
+        additionalProperties: false,
+        required: ["launchId"],
+        properties: {
+          launchId: { type: "string" },
+          launchHash: { type: "string", nullable: true },
+          planId: { type: "string", nullable: true },
+          planHash: { type: "string", nullable: true },
+          requestTextSha256: { type: "string", nullable: true }
+        }
+      },
+      tenantId: { type: "string" },
+      posterAgentId: { type: "string" },
+      taskCount: { type: "integer", minimum: 0 },
+      summary: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "openCount",
+          "readyCount",
+          "blockedCount",
+          "assignedCount",
+          "closedCount",
+          "cancelledCount",
+          "settlementLockedCount",
+          "settlementReleasedCount",
+          "disputeOpenCount"
+        ],
+        properties: {
+          openCount: { type: "integer", minimum: 0 },
+          readyCount: { type: "integer", minimum: 0 },
+          blockedCount: { type: "integer", minimum: 0 },
+          assignedCount: { type: "integer", minimum: 0 },
+          closedCount: { type: "integer", minimum: 0 },
+          cancelledCount: { type: "integer", minimum: 0 },
+          settlementLockedCount: { type: "integer", minimum: 0 },
+          settlementReleasedCount: { type: "integer", minimum: 0 },
+          disputeOpenCount: { type: "integer", minimum: 0 }
+        }
+      },
+      tasks: { type: "array", items: RouterLaunchStatusTaskV1 },
+      generatedAt: { type: "string", format: "date-time" },
+      statusHash: { type: "string", pattern: "^[0-9a-f]{64}$" }
+    }
+  };
+
+  const RouterMarketplaceDispatchResult = {
+    type: "object",
+    additionalProperties: false,
+    required: ["taskId", "taskIndex", "rfqId", "state", "dependsOnTaskIds", "blockingTaskIds"],
+    properties: {
+      taskId: { type: "string" },
+      taskIndex: { type: "integer", minimum: 1, nullable: true },
+      rfqId: { type: "string", nullable: true },
+      state: RouterMarketplaceDispatchTaskV1.properties.state,
+      reasonCode: { type: "string", nullable: true },
+      dependsOnTaskIds: { type: "array", items: { type: "string" } },
+      blockingTaskIds: { type: "array", items: { type: "string" } },
+      rfqStatus: { type: "string", nullable: true },
+      acceptedBidId: { type: "string", nullable: true },
+      runId: { type: "string", nullable: true },
+      decisionHash: { type: "string", nullable: true },
+      decision: { ...MarketplaceAutoAwardDecisionV1, nullable: true },
+      rfq: { ...MarketplaceRfqV1, nullable: true },
+      acceptedBid: { allOf: [MarketplaceRfqBidV1], nullable: true },
+      run: { ...AgentRunV1, nullable: true },
+      settlement: { ...AgentRunSettlementV1, nullable: true },
+      agreement: { ...MarketplaceTaskAgreementV2, nullable: true },
+      offer: { allOf: [MarketplaceOfferV2], nullable: true },
+      offerAcceptance: { allOf: [MarketplaceAcceptanceV2], nullable: true },
+      decisionRecord: { ...SettlementDecisionRecordAny, nullable: true },
+      settlementReceipt: { ...SettlementReceiptV1, nullable: true },
+      error: {
+        type: "object",
+        additionalProperties: false,
+        nullable: true,
+        properties: {
+          message: { type: "string" },
+          code: { type: "string", nullable: true },
+          details: { type: "object", nullable: true }
+        }
+      }
+    }
+  };
+
   const TenantSettlementPolicyUpsertRequest = {
     type: "object",
     additionalProperties: false,
@@ -6761,6 +7122,69 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
+      "/router/dispatch": {
+        post: {
+          summary: "Deterministically auto-award and dispatch eligible RFQs for a router launch",
+          parameters: [TenantHeader, ProtocolHeader, RequestIdHeader, IdempotencyHeader],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: { required: true, content: { "application/json": { schema: RouterDispatchRequest } } },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["ok", "dispatch", "results"],
+                    properties: {
+                      ok: { type: "boolean", enum: [true] },
+                      dispatch: RouterMarketplaceDispatchV1,
+                      results: { type: "array", items: RouterMarketplaceDispatchResult }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/router/launches/{launchId}/status": {
+        get: {
+          summary: "Read the reconstructed status graph for a router launch",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "launchId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["ok", "status"],
+                    properties: {
+                      ok: { type: "boolean", enum: [true] },
+                      status: RouterLaunchStatusV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
       "/marketplace/rfqs": {
         get: {
           summary: "List marketplace RFQs",
@@ -7054,6 +7478,43 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
                       offerAcceptance: { allOf: [MarketplaceAcceptanceV2], nullable: true },
                       decisionRecord: { ...SettlementDecisionRecordAny, nullable: true },
                       settlementReceipt: { ...SettlementReceiptV1, nullable: true }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/marketplace/rfqs/{rfqId}/auto-accept": {
+        post: {
+          summary: "Deterministically select and accept a marketplace bid for an RFQ",
+          parameters: [TenantHeader, ProtocolHeader, RequestIdHeader, IdempotencyHeader, { name: "rfqId", in: "path", required: true, schema: { type: "string" } }],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: { required: true, content: { "application/json": { schema: MarketplaceBidAutoAcceptRequest } } },
+          responses: {
+            200: {
+              description: "Accepted",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["rfq", "acceptedBid", "run", "settlement", "agreement", "decision"],
+                    properties: {
+                      rfq: MarketplaceRfqV1,
+                      acceptedBid: { allOf: [MarketplaceRfqBidV1], nullable: true },
+                      run: AgentRunV1,
+                      settlement: AgentRunSettlementV1,
+                      agreement: MarketplaceTaskAgreementV2,
+                      offer: { allOf: [MarketplaceOfferV2], nullable: true },
+                      offerAcceptance: { allOf: [MarketplaceAcceptanceV2], nullable: true },
+                      decisionRecord: { ...SettlementDecisionRecordAny, nullable: true },
+                      settlementReceipt: { ...SettlementReceiptV1, nullable: true },
+                      decision: MarketplaceAutoAwardDecisionV1
                     }
                   }
                 }
@@ -8094,110 +8555,6 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
-      "/v1/public/identity-log/entries": {
-        get: {
-          summary: "List public identity transparency-log entries",
-          parameters: [
-            ProtocolHeader,
-            RequestIdHeader,
-            { name: "agentId", in: "query", required: false, schema: { type: "string" } },
-            { name: "eventType", in: "query", required: false, schema: { type: "string", enum: ["create", "rotate", "revoke", "capability-claim-change"] } },
-            { name: "entryId", in: "query", required: false, schema: { type: "string" } },
-            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 1000 } },
-            { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } }
-          ],
-          security: [],
-          responses: {
-            200: {
-              description: "OK",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      ok: { type: "boolean" },
-                      entries: { type: "array", items: IdentityLogEntryV1 },
-                      limit: { type: "integer" },
-                      offset: { type: "integer" },
-                      checkpoint: IdentityLogCheckpointV1
-                    }
-                  }
-                }
-              }
-            },
-            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
-            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
-            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
-          }
-        }
-      },
-      "/v1/public/identity-log/proof": {
-        get: {
-          summary: "Fetch public identity transparency-log Merkle proof for an entry",
-          parameters: [
-            ProtocolHeader,
-            RequestIdHeader,
-            { name: "entry", in: "query", required: true, schema: { type: "string" } },
-            { name: "trustedCheckpointHash", in: "query", required: false, schema: { type: "string", pattern: "^[0-9a-f]{64}$" } },
-            { name: "trustedTreeSize", in: "query", required: false, schema: { type: "integer", minimum: 0 } }
-          ],
-          security: [],
-          responses: {
-            200: {
-              description: "OK",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      ok: { type: "boolean" },
-                      proof: IdentityLogProofV1
-                    }
-                  }
-                }
-              }
-            },
-            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
-            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
-            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
-            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
-          }
-        }
-      },
-      "/v1/public/identity-log/checkpoint": {
-        get: {
-          summary: "Fetch latest public identity transparency-log checkpoint",
-          parameters: [
-            ProtocolHeader,
-            RequestIdHeader,
-            { name: "trustedCheckpointHash", in: "query", required: false, schema: { type: "string", pattern: "^[0-9a-f]{64}$" } },
-            { name: "trustedTreeSize", in: "query", required: false, schema: { type: "integer", minimum: 0 } }
-          ],
-          security: [],
-          responses: {
-            200: {
-              description: "OK",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      ok: { type: "boolean" },
-                      checkpoint: IdentityLogCheckpointV1
-                    }
-                  }
-                }
-              }
-            },
-            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
-            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
-            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
-          }
-        }
-      },
       "/public/agent-cards/discover": {
         get: {
           summary: "Discover public agent cards across tenants",
@@ -8629,6 +8986,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
               }
             },
             { name: "sinceEventId", in: "query", required: false, schema: { type: "string" } },
+            { name: "checkpointConsumerId", in: "query", required: false, schema: { type: "string" } },
             { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 2000 } },
             { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } }
           ],
@@ -8712,6 +9070,136 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
           }
         }
       },
+      "/sessions/{sessionId}/events/checkpoint": {
+        get: {
+          summary: "Read SessionEvent inbox relay checkpoint for a session consumer",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+            { name: "checkpointConsumerId", in: "query", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      checkpoint: SessionEventInboxRelayCheckpointV1,
+                      inbox: SessionEventInboxWatermarkV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        },
+        post: {
+          summary: "Advance SessionEvent inbox relay checkpoint (ack)",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "sessionId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["checkpointConsumerId"],
+                  properties: {
+                    checkpointConsumerId: { type: "string" },
+                    sinceEventId: { type: "string", nullable: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      checkpoint: SessionEventInboxRelayCheckpointV1,
+                      inbox: SessionEventInboxWatermarkV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/sessions/{sessionId}/events/checkpoint/requeue": {
+        post: {
+          summary: "Requeue SessionEvent inbox relay checkpoint to an earlier cursor",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "sessionId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["checkpointConsumerId"],
+                  properties: {
+                    checkpointConsumerId: { type: "string" },
+                    sinceEventId: { type: "string", nullable: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      checkpoint: SessionEventInboxRelayCheckpointV1,
+                      inbox: SessionEventInboxWatermarkV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
       "/sessions/{sessionId}/events/stream": {
         get: {
           summary: "Stream SessionEvent.v1 envelope records via SSE",
@@ -8742,6 +9230,7 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
               }
             },
             { name: "sinceEventId", in: "query", required: false, schema: { type: "string" } },
+            { name: "checkpointConsumerId", in: "query", required: false, schema: { type: "string" } },
             {
               name: "Last-Event-ID",
               in: "header",
@@ -8921,6 +9410,174 @@ export function buildOpenApiSpec({ baseUrl = null } = {}) {
               }
             },
             400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/intents": {
+        get: {
+          summary: "List IntentContract.v1 records",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "intentId", in: "query", required: false, schema: { type: "string" } },
+            { name: "proposerAgentId", in: "query", required: false, schema: { type: "string" } },
+            { name: "counterpartyAgentId", in: "query", required: false, schema: { type: "string" } },
+            { name: "status", in: "query", required: false, schema: { type: "string", enum: ["proposed", "countered", "accepted"] } },
+            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 1000 } },
+            { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      intents: { type: "array", items: IntentContractV1 },
+                      limit: { type: "integer" },
+                      offset: { type: "integer" }
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/intents/propose": {
+        post: {
+          summary: "Propose a new IntentContract.v1",
+          parameters: [TenantHeader, ProtocolHeader, RequestIdHeader, IdempotencyHeader],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: { required: true, content: { "application/json": { schema: IntentContractProposeRequest } } },
+          responses: {
+            201: {
+              description: "Created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      intentContract: IntentContractV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
+            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/intents/{intentId}": {
+        get: {
+          summary: "Get IntentContract.v1 by id",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            { name: "intentId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      intentContract: IntentContractV1
+                    }
+                  }
+                }
+              }
+            },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/intents/{intentId}/counter": {
+        post: {
+          summary: "Create a counter IntentContract.v1 from an existing intent",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "intentId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: { required: true, content: { "application/json": { schema: IntentContractCounterRequest } } },
+          responses: {
+            201: {
+              description: "Created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      intentContract: IntentContractV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
+            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
+          }
+        }
+      },
+      "/intents/{intentId}/accept": {
+        post: {
+          summary: "Accept an IntentContract.v1",
+          parameters: [
+            TenantHeader,
+            ProtocolHeader,
+            RequestIdHeader,
+            IdempotencyHeader,
+            { name: "intentId", in: "path", required: true, schema: { type: "string" } }
+          ],
+          security: [{ BearerAuth: [] }, { ProxyApiKey: [] }],
+          requestBody: { required: true, content: { "application/json": { schema: IntentContractAcceptRequest } } },
+          responses: {
+            200: {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ok: { type: "boolean" },
+                      intentContract: IntentContractV1
+                    }
+                  }
+                }
+              }
+            },
+            400: { description: "Bad Request", content: { "application/json": { schema: ErrorResponse } } },
+            404: { description: "Not Found", content: { "application/json": { schema: ErrorResponse } } },
+            409: { description: "Conflict", content: { "application/json": { schema: ErrorResponse } } },
+            501: { description: "Not Implemented", content: { "application/json": { schema: ErrorResponse } } }
           }
         }
       },

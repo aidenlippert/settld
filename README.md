@@ -74,6 +74,14 @@ More: [OpenClaw Quickstart](./docs/integrations/openclaw/PUBLIC_QUICKSTART.md)
 - CLI: `./bin/nooterra.js`
 - Magic Link onboarding service: `./services/magic-link/`
 - Conformance pack + verification tools: `./conformance/`
+- Agentverse bridge API wrappers: `./src/agentverse/bridge/`
+
+## Agentverse Bridge Wrappers
+
+```sh
+node --input-type=module -e "await import('./src/agentverse/bridge/index.js'); await import('./src/agentverse/index.js');"
+npm run -s test:ops:agentverse-gate
+```
 
 ## “Nooterra Verified” (Gates + Receipts)
 

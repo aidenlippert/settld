@@ -42,6 +42,9 @@ async function main() {
     sh("tar", ["-xzf", tarballPath, "-C", unpackDir], { env: npmEnv });
     const packageRoot = path.join(unpackDir, "package");
     const cliPath = path.join(packageRoot, "bin", "nooterra.js");
+    await fs.access(path.join(packageRoot, "bin", "agentverse-cli.js"));
+    await fs.access(path.join(packageRoot, "src", "agentverse", "index.js"));
+    await fs.access(path.join(packageRoot, "scripts", "ci", "run-agentverse-gate.mjs"));
     await fs.access(path.join(packageRoot, "scripts", "mcp", "nooterra-mcp-server.mjs"));
     await fs.access(path.join(packageRoot, "packages", "api-sdk", "src", "x402-autopay.js"));
 

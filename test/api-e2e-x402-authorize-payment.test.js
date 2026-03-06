@@ -1198,6 +1198,138 @@ test("API e2e: x402 authorize-payment is idempotent and token verifies via keyse
   assert.equal(verifyRes.json?.zkProofVerification?.verified, false);
 });
 
+test("API e2e: x402 authorize-payment idempotency matrix handles duplicate, reordered, and replay attempts", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const payerAgentId = await registerAgent(api, { agentId: "agt_x402_auth_matrix_payer_1" });
+  const payeeAgentId = await registerAgent(api, { agentId: "agt_x402_auth_matrix_payee_1" });
+  await creditWallet(api, { agentId: payerAgentId, amountCents: 7000, idempotencyKey: "wallet_credit_x402_auth_matrix_1" });
+
+  const gateId = "gate_auth_matrix_1";
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/gate/create",
+    headers: { "x-idempotency-key": "x402_gate_create_auth_matrix_1" },
+    body: {
+      gateId,
+      payerAgentId,
+      payeeAgentId,
+      amountCents: 700,
+      currency: "USD"
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+
+  const requestBindingSha256 = "d".repeat(64);
+  const first = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_matrix_a" },
+    body: {
+      gateId,
+      requestBindingMode: "strict",
+      requestBindingSha256
+    }
+  });
+  assert.equal(first.statusCode, 200, first.body);
+  assert.ok(typeof first.json?.token === "string" && first.json.token.length > 0);
+  assert.ok(typeof first.json?.reserve?.reserveId === "string" && first.json.reserve.reserveId.length > 0);
+
+  const duplicateReorderedBody = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_matrix_a" },
+    body: {
+      requestBindingSha256,
+      gateId,
+      requestBindingMode: "strict"
+    }
+  });
+  assert.equal(duplicateReorderedBody.statusCode, 200, duplicateReorderedBody.body);
+  assert.deepEqual(duplicateReorderedBody.json, first.json);
+
+  const duplicateConflict = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_matrix_a" },
+    body: {
+      gateId,
+      requestBindingMode: "strict",
+      requestBindingSha256: "e".repeat(64)
+    }
+  });
+  assert.equal(duplicateConflict.statusCode, 409, duplicateConflict.body);
+  assert.match(duplicateConflict.body, /idempotency key conflict/i);
+
+  const reorderedNewKey = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_matrix_b" },
+    body: {
+      requestBindingMode: "strict",
+      gateId,
+      requestBindingSha256
+    }
+  });
+  assert.equal(reorderedNewKey.statusCode, 200, reorderedNewKey.body);
+  assert.equal(reorderedNewKey.json?.token, first.json?.token);
+  assert.equal(reorderedNewKey.json?.reserve?.reserveId, first.json?.reserve?.reserveId);
+
+  const requestSha256 = requestBindingSha256;
+  const responseSha256 = sha256Hex("{\"ok\":true,\"matrix\":true}");
+  const verified = await request(api, {
+    method: "POST",
+    path: "/x402/gate/verify",
+    headers: { "x-idempotency-key": "x402_gate_verify_auth_matrix_1" },
+    body: {
+      gateId,
+      verificationStatus: "green",
+      runStatus: "completed",
+      policy: {
+        mode: "automatic",
+        rules: {
+          autoReleaseOnGreen: true,
+          greenReleaseRatePct: 100,
+          autoReleaseOnAmber: false,
+          amberReleaseRatePct: 0,
+          autoReleaseOnRed: true,
+          redReleaseRatePct: 0
+        }
+      },
+      verificationMethod: { mode: "deterministic", source: "http_status_v1" },
+      evidenceRefs: [`http:request_sha256:${requestSha256}`, `http:response_sha256:${responseSha256}`]
+    }
+  });
+  assert.equal(verified.statusCode, 200, verified.body);
+  assert.equal(verified.json?.settlement?.status, "released");
+
+  const replayAfterTerminalSameKey = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_matrix_a" },
+    body: {
+      gateId,
+      requestBindingMode: "strict",
+      requestBindingSha256
+    }
+  });
+  assert.equal(replayAfterTerminalSameKey.statusCode, 200, replayAfterTerminalSameKey.body);
+  assert.deepEqual(replayAfterTerminalSameKey.json, first.json);
+
+  const replayAfterTerminalNewKey = await request(api, {
+    method: "POST",
+    path: "/x402/gate/authorize-payment",
+    headers: { "x-idempotency-key": "x402_gate_authz_matrix_c" },
+    body: {
+      gateId,
+      requestBindingMode: "strict",
+      requestBindingSha256
+    }
+  });
+  assert.equal(replayAfterTerminalNewKey.statusCode, 409, replayAfterTerminalNewKey.body);
+  assert.equal(replayAfterTerminalNewKey.json?.code, "X402_GATE_TERMINAL");
+});
+
 test("API e2e: x402 verify fails closed when policy decision signer is unavailable", async () => {
   const api = createApi({ opsToken: "tok_ops" });
 
@@ -3383,6 +3515,78 @@ test("API e2e: x402 webhook endpoint secret rotation supports dual-signature gra
   });
   assert.ok(signatures.includes(expectedNew));
   assert.ok(signatures.includes(expectedOld));
+});
+
+test("API e2e: x402 webhook endpoint routes fail closed with deterministic reject codes", async () => {
+  const api = createApi({ opsToken: "tok_ops" });
+
+  const invalidCreate = await request(api, {
+    method: "POST",
+    path: "/x402/webhooks/endpoints",
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_invalid_create_1"
+    },
+    body: {
+      url: "https://example.invalid/x402/invalid-create",
+      events: ["x402.unsupported.event"]
+    }
+  });
+  assert.equal(invalidCreate.statusCode, 400, invalidCreate.body);
+  assert.equal(invalidCreate.json?.code, "SCHEMA_INVALID");
+
+  const invalidList = await request(api, {
+    method: "GET",
+    path: "/x402/webhooks/endpoints?event=x402.unsupported.event"
+  });
+  assert.equal(invalidList.statusCode, 400, invalidList.body);
+  assert.equal(invalidList.json?.code, "SCHEMA_INVALID");
+
+  const missingEndpoint = await request(api, {
+    method: "GET",
+    path: "/x402/webhooks/endpoints/x402wh_missing_1"
+  });
+  assert.equal(missingEndpoint.statusCode, 404, missingEndpoint.body);
+  assert.equal(missingEndpoint.json?.code, "NOT_FOUND");
+
+  const created = await request(api, {
+    method: "POST",
+    path: "/x402/webhooks/endpoints",
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_revoke_for_rotate_1"
+    },
+    body: {
+      url: "https://example.invalid/x402/revoked-endpoint",
+      events: ["x402.escalation.created"]
+    }
+  });
+  assert.equal(created.statusCode, 201, created.body);
+  const endpointId = created.json?.endpoint?.endpointId;
+  assert.ok(typeof endpointId === "string" && endpointId.length > 0);
+
+  const revoked = await request(api, {
+    method: "DELETE",
+    path: `/x402/webhooks/endpoints/${encodeURIComponent(endpointId)}`,
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_revoke_for_rotate_1_delete"
+    }
+  });
+  assert.equal(revoked.statusCode, 200, revoked.body);
+  assert.equal(revoked.json?.endpoint?.status, "revoked");
+
+  const rotateRevoked = await request(api, {
+    method: "POST",
+    path: `/x402/webhooks/endpoints/${encodeURIComponent(endpointId)}/rotate-secret`,
+    headers: {
+      "x-nooterra-protocol": "1.0",
+      "x-idempotency-key": "x402_webhook_rotate_revoked_1"
+    },
+    body: { gracePeriodSeconds: 60 }
+  });
+  assert.equal(rotateRevoked.statusCode, 409, rotateRevoked.body);
+  assert.equal(rotateRevoked.json?.code, "X402_WEBHOOK_ENDPOINT_REVOKED");
 });
 
 test("API e2e: production-like defaults fail closed when external reserve is unavailable", async (t) => {

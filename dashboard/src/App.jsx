@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
-import SiteShell from "./site/SiteShell.jsx";
 import OperatorDashboard from "./operator/OperatorDashboard.jsx";
+import ProductShell from "./product/ProductShell.jsx";
 import { docsLinks } from "./site/config/links.js";
 
 function ExternalRedirect({ href }) {
@@ -14,30 +14,40 @@ function ExternalRedirect({ href }) {
 }
 
 function getRouteMode() {
-  if (typeof window === "undefined") return "home";
+  if (typeof window === "undefined") return { mode: "home", launchId: null };
   const rawPath = window.location.pathname;
   const path = rawPath.length > 1 && rawPath.endsWith("/") ? rawPath.slice(0, -1) : rawPath;
 
-  if (path === "/operator") return "operator";
-  if (path === "/docs") return "docs";
-  if (path === "/docs/quickstart") return "docs_quickstart";
-  if (path === "/docs/architecture") return "docs_architecture";
-  if (path === "/docs/integrations") return "docs_integrations";
-  if (path === "/docs/api") return "docs_api";
-  if (path === "/docs/security") return "docs_security";
-  if (path === "/docs/ops") return "docs_ops";
-  return "home";
+  if (path === "/operator") return { mode: "operator", launchId: null };
+  if (path === "/network" || path === "/app") return { mode: "network", launchId: null };
+  if (path === "/onboarding" || path === "/login") return { mode: "onboarding", launchId: null };
+  if (path === "/studio") return { mode: "studio", launchId: null };
+  if (path === "/developers") return { mode: "developers", launchId: null };
+  if (path === "/docs") return { mode: "docs", launchId: null };
+  if (path === "/docs/quickstart") return { mode: "docs_quickstart", launchId: null };
+  if (path === "/docs/architecture") return { mode: "docs_architecture", launchId: null };
+  if (path === "/docs/integrations") return { mode: "docs_integrations", launchId: null };
+  if (path === "/docs/api") return { mode: "docs_api", launchId: null };
+  if (path === "/docs/security") return { mode: "docs_security", launchId: null };
+  if (path === "/docs/ops") return { mode: "docs_ops", launchId: null };
+  if (path.startsWith("/launch/")) {
+    return {
+      mode: "launch",
+      launchId: decodeURIComponent(path.slice("/launch/".length))
+    };
+  }
+  return { mode: "home", launchId: null };
 }
 
 export default function App() {
-  const mode = getRouteMode();
-  if (mode === "operator") return <OperatorDashboard />;
-  if (mode === "docs") return <ExternalRedirect href={docsLinks.home} />;
-  if (mode === "docs_quickstart") return <ExternalRedirect href={docsLinks.quickstart} />;
-  if (mode === "docs_architecture") return <ExternalRedirect href={docsLinks.architecture} />;
-  if (mode === "docs_integrations") return <ExternalRedirect href={docsLinks.integrations} />;
-  if (mode === "docs_api") return <ExternalRedirect href={docsLinks.api} />;
-  if (mode === "docs_security") return <ExternalRedirect href={docsLinks.security} />;
-  if (mode === "docs_ops") return <ExternalRedirect href={docsLinks.ops} />;
-  return <SiteShell />;
+  const route = getRouteMode();
+  if (route.mode === "operator") return <OperatorDashboard />;
+  if (route.mode === "docs") return <ExternalRedirect href={docsLinks.home} />;
+  if (route.mode === "docs_quickstart") return <ExternalRedirect href={docsLinks.quickstart} />;
+  if (route.mode === "docs_architecture") return <ExternalRedirect href={docsLinks.architecture} />;
+  if (route.mode === "docs_integrations") return <ExternalRedirect href={docsLinks.integrations} />;
+  if (route.mode === "docs_api") return <ExternalRedirect href={docsLinks.api} />;
+  if (route.mode === "docs_security") return <ExternalRedirect href={docsLinks.security} />;
+  if (route.mode === "docs_ops") return <ExternalRedirect href={docsLinks.ops} />;
+  return <ProductShell mode={route.mode} launchId={route.launchId} />;
 }

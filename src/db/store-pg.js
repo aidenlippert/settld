@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 
 import { createStore as createMemoryStore } from "../api/store.js";
 import { createEd25519Keypair, keyIdFromPublicKeyPem } from "../core/crypto.js";
-import { createId } from "../core/ids.js";
 import { reduceJob } from "../core/job-reducer.js";
 import { reduceRobot } from "../core/robot-reducer.js";
 import { reduceOperator } from "../core/operator-reducer.js";
@@ -43,15 +42,6 @@ import { computePartyStatement, computePayoutAmountCentsForStatement, jobIdFromL
 import { failpoint } from "../core/failpoints.js";
 import { logger } from "../core/log.js";
 import { clampQuota } from "../core/quotas.js";
-import { makeOpsAuditRecord } from "../core/ops-audit.js";
-import {
-  buildIdentityLogEntry,
-  buildIdentityLogCheckpoint,
-  parseIdentityLogEntryFromAuditDetails,
-  validateIdentityLogEntry,
-  validateIdentityLogEntriesAppendOnly,
-  IDENTITY_LOG_OPS_AUDIT_ACTION
-} from "../core/identity-transparency-log.js";
 import { reconcileGlBatchAgainstPartyStatements } from "../../packages/artifact-verify/src/index.js";
 
 import { createPgPool, quoteIdent } from "./pg.js";
@@ -2526,58 +2516,6 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     };
   }
 
-  function collectIdentityLogEntriesFromOpsAuditRecords(records, { tenantId = DEFAULT_TENANT_ID } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    const rows = [];
-    const list = Array.isArray(records) ? records : [];
-    for (const row of list) {
-      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
-      if (normalizeTenantId(row.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) continue;
-      if (String(row.action ?? "") !== IDENTITY_LOG_OPS_AUDIT_ACTION) continue;
-      let entry = null;
-      try {
-        entry = parseIdentityLogEntryFromAuditDetails(row.details, { allowNull: false });
-      } catch (err) {
-        const wrapped = new Error(`identity log audit entry is invalid: ${err?.message ?? String(err)}`);
-        wrapped.code = "IDENTITY_LOG_AUDIT_INVALID";
-        wrapped.details = { auditId: row.id ?? null };
-        throw wrapped;
-      }
-      if (normalizeTenantId(entry.tenantId ?? DEFAULT_TENANT_ID) !== tenantId) {
-        const wrapped = new Error("identity log entry tenant mismatch");
-        wrapped.code = "IDENTITY_LOG_TENANT_MISMATCH";
-        wrapped.details = { auditId: row.id ?? null, entryId: entry.entryId ?? null };
-        throw wrapped;
-      }
-      rows.push(entry);
-    }
-    return validateIdentityLogEntriesAppendOnly(rows);
-  }
-
-  async function loadIdentityLogEntries({ tenantId = DEFAULT_TENANT_ID } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    try {
-      const res = await pool.query(
-        `
-          SELECT id, tenant_id, actor_key_id, actor_principal_id, action, target_type, target_id, request_id, at, details_hash, details_json
-          FROM ops_audit
-          WHERE tenant_id = $1 AND action = $2
-          ORDER BY id ASC
-        `,
-        [tenantId, IDENTITY_LOG_OPS_AUDIT_ACTION]
-      );
-      const records = res.rows.map(opsAuditRowToRecord).filter(Boolean);
-      return collectIdentityLogEntriesFromOpsAuditRecords(records, { tenantId });
-    } catch (err) {
-      if (err?.code !== "42P01") throw err;
-      const fallbackRecords = [];
-      if (store.opsAudit instanceof Map) {
-        for (const row of store.opsAudit.values()) fallbackRecords.push(row);
-      }
-      return collectIdentityLogEntriesFromOpsAuditRecords(fallbackRecords, { tenantId });
-    }
-  }
-
   async function insertOpsAuditRow(client, { tenantId, audit }) {
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     if (!audit || typeof audit !== "object") throw new TypeError("audit is required");
@@ -4646,21 +4584,16 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
     tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
     assertNonEmptyString(triageKey, "triageKey");
     const normalizedTriageKey = String(triageKey).trim();
-    try {
-      const res = await pool.query(
-        `
-          SELECT tenant_id, aggregate_id, snapshot_json
-          FROM snapshots
-          WHERE tenant_id = $1 AND aggregate_type = 'finance_reconciliation_triage' AND aggregate_id = $2
-          LIMIT 1
-        `,
-        [tenantId, normalizedTriageKey]
-      );
-      return res.rows.length ? financeReconciliationTriageSnapshotRowToRecord(res.rows[0]) : null;
-    } catch (err) {
-      if (err?.code !== "42P01") throw err;
-      return store.financeReconciliationTriages.get(financeReconciliationTriageMapKey({ tenantId, triageKey: normalizedTriageKey })) ?? null;
-    }
+    const res = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'finance_reconciliation_triage' AND aggregate_id = $2
+        LIMIT 1
+      `,
+      [tenantId, normalizedTriageKey]
+    );
+    return res.rows.length ? financeReconciliationTriageSnapshotRowToRecord(res.rows[0]) : null;
   };
 
   store.putFinanceReconciliationTriage = async function putFinanceReconciliationTriage({
@@ -4731,20 +4664,16 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
           : String(triage.resolvedByPrincipalId).trim()
     };
 
-    try {
-      await withTx(async (client) => {
-        await persistSnapshotAggregate(client, {
-          tenantId,
-          aggregateType: "finance_reconciliation_triage",
-          aggregateId: triageKey,
-          snapshot: normalized,
-          updatedAt: normalized.updatedAt
-        });
-        if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+    await withTx(async (client) => {
+      await persistSnapshotAggregate(client, {
+        tenantId,
+        aggregateType: "finance_reconciliation_triage",
+        aggregateId: triageKey,
+        snapshot: normalized,
+        updatedAt: normalized.updatedAt
       });
-    } catch (err) {
-      if (err?.code !== "42P01") throw err;
-    }
+      if (audit) await insertOpsAuditRow(client, { tenantId, audit });
+    });
 
     if (!(store.financeReconciliationTriages instanceof Map)) store.financeReconciliationTriages = new Map();
     store.financeReconciliationTriages.set(financeReconciliationTriageMapKey({ tenantId, triageKey }), normalized);
@@ -4793,21 +4722,16 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       return out.slice(safeOffset, safeOffset + safeLimit);
     };
 
-    try {
-      const res = await pool.query(
-        `
-          SELECT tenant_id, aggregate_id, snapshot_json
-          FROM snapshots
-          WHERE tenant_id = $1 AND aggregate_type = 'finance_reconciliation_triage'
-          ORDER BY updated_at DESC, aggregate_id ASC
-        `,
-        [tenantId]
-      );
-      return applyFilters(res.rows.map(financeReconciliationTriageSnapshotRowToRecord).filter(Boolean));
-    } catch (err) {
-      if (err?.code !== "42P01") throw err;
-      return applyFilters(Array.from(store.financeReconciliationTriages.values()));
-    }
+    const res = await pool.query(
+      `
+        SELECT tenant_id, aggregate_id, snapshot_json
+        FROM snapshots
+        WHERE tenant_id = $1 AND aggregate_type = 'finance_reconciliation_triage'
+        ORDER BY updated_at DESC, aggregate_id ASC
+      `,
+      [tenantId]
+    );
+    return applyFilters(res.rows.map(financeReconciliationTriageSnapshotRowToRecord).filter(Boolean));
   };
 
   store.getMarketplaceProviderPublication = async function getMarketplaceProviderPublication({
@@ -7064,161 +6988,6 @@ export async function createPgStore({ databaseUrl, schema = "public", dropSchema
       out.sort((left, right) => String(left.agentId ?? "").localeCompare(String(right.agentId ?? "")));
       return out.slice(safeOffset, safeOffset + safeLimit);
     }
-  };
-
-  function assertIdentityLogAuditObject(value, name) {
-    if (value === null || value === undefined) return null;
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${name} must be an object`);
-    return value;
-  }
-
-  store.getIdentityLogEntry = async function getIdentityLogEntry({ tenantId = DEFAULT_TENANT_ID, entryId } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    assertNonEmptyString(entryId, "entryId");
-    const normalizedEntryId = String(entryId).trim();
-    const entries = await loadIdentityLogEntries({ tenantId });
-    return entries.find((row) => row.entryId === normalizedEntryId) ?? null;
-  };
-
-  store.listIdentityLogEntries = async function listIdentityLogEntries({
-    tenantId = DEFAULT_TENANT_ID,
-    agentId = null,
-    eventType = null,
-    entryId = null,
-    limit = 200,
-    offset = 0
-  } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    if (agentId !== null && (typeof agentId !== "string" || agentId.trim() === "")) throw new TypeError("agentId must be null or non-empty string");
-    if (eventType !== null && (typeof eventType !== "string" || eventType.trim() === "")) throw new TypeError("eventType must be null or non-empty string");
-    if (entryId !== null && (typeof entryId !== "string" || entryId.trim() === "")) throw new TypeError("entryId must be null or non-empty string");
-    if (!Number.isSafeInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive safe integer");
-    if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("offset must be a non-negative safe integer");
-    const safeLimit = Math.min(1000, limit);
-    const safeOffset = offset;
-    const agentFilter = agentId ? String(agentId).trim() : null;
-    const eventFilter = eventType ? String(eventType).trim().toLowerCase() : null;
-    const entryFilter = entryId ? String(entryId).trim() : null;
-
-    const entries = await loadIdentityLogEntries({ tenantId });
-    const filtered = [];
-    for (const row of entries) {
-      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
-      if (agentFilter && String(row.agentId ?? "") !== agentFilter) continue;
-      if (eventFilter && String(row.eventType ?? "").toLowerCase() !== eventFilter) continue;
-      if (entryFilter && String(row.entryId ?? "") !== entryFilter) continue;
-      filtered.push(row);
-    }
-    return filtered.slice(safeOffset, safeOffset + safeLimit);
-  };
-
-  store.getIdentityLogCheckpoint = async function getIdentityLogCheckpoint({ tenantId = DEFAULT_TENANT_ID, generatedAt = null } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    const entries = await loadIdentityLogEntries({ tenantId });
-    return buildIdentityLogCheckpoint({ tenantId, entries, generatedAt });
-  };
-
-  store.appendIdentityLogEntry = async function appendIdentityLogEntry({ tenantId = DEFAULT_TENANT_ID, entry, audit = null } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new TypeError("entry is required");
-    const normalizedEntry =
-      typeof entry.entryHash === "string" && entry.entryHash.trim() !== ""
-        ? validateIdentityLogEntry({ ...entry, tenantId })
-        : buildIdentityLogEntry({ ...entry, tenantId });
-    const existingEntries = await loadIdentityLogEntries({ tenantId });
-    const existingById = existingEntries.find((row) => row.entryId === normalizedEntry.entryId) ?? null;
-    if (existingById) {
-      if (existingById.entryHash === normalizedEntry.entryHash) return existingById;
-      const err = new Error("identity log entry conflict for entryId");
-      err.code = "IDENTITY_LOG_ENTRY_CONFLICT";
-      err.details = { entryId: normalizedEntry.entryId };
-      throw err;
-    }
-    const expectedLogIndex = existingEntries.length;
-    if (normalizedEntry.logIndex !== expectedLogIndex) {
-      const err = new Error("identity log index mismatch");
-      err.code = "IDENTITY_LOG_INDEX_MISMATCH";
-      err.details = { expectedLogIndex, actualLogIndex: normalizedEntry.logIndex };
-      throw err;
-    }
-    const expectedPrevEntryHash = expectedLogIndex === 0 ? null : existingEntries[expectedLogIndex - 1].entryHash;
-    if ((normalizedEntry.prevEntryHash ?? null) !== expectedPrevEntryHash) {
-      const err = new Error("identity log prevEntryHash mismatch");
-      err.code = "IDENTITY_LOG_PREV_HASH_MISMATCH";
-      err.details = { expectedPrevEntryHash, actualPrevEntryHash: normalizedEntry.prevEntryHash ?? null };
-      throw err;
-    }
-
-    const auditInput = assertIdentityLogAuditObject(audit, "audit");
-    const detailsInput =
-      auditInput?.details && typeof auditInput.details === "object" && !Array.isArray(auditInput.details)
-        ? auditInput.details
-        : {};
-    const identityAudit = makeOpsAuditRecord({
-      tenantId,
-      actorKeyId: auditInput?.actorKeyId ?? null,
-      actorPrincipalId: auditInput?.actorPrincipalId ?? null,
-      requestId: auditInput?.requestId ?? null,
-      action: IDENTITY_LOG_OPS_AUDIT_ACTION,
-      targetType: "identity_log_entry",
-      targetId: normalizedEntry.entryId,
-      at: auditInput?.at ?? normalizedEntry.recordedAt,
-      details: {
-        ...detailsInput,
-        entry: normalizedEntry
-      }
-    });
-
-    await withTx(async (client) => {
-      await insertOpsAuditRow(client, { tenantId, audit: identityAudit });
-    });
-    return normalizedEntry;
-  };
-
-  store.appendIdentityLogEvent = async function appendIdentityLogEvent({
-    tenantId = DEFAULT_TENANT_ID,
-    agentId,
-    eventType,
-    beforeIdentity = null,
-    afterIdentity = null,
-    reasonCode = null,
-    reason = null,
-    metadata = null,
-    occurredAt = null,
-    recordedAt = null,
-    entryId = null,
-    audit = null
-  } = {}) {
-    tenantId = normalizeTenantId(tenantId ?? DEFAULT_TENANT_ID);
-    assertNonEmptyString(agentId, "agentId");
-    const existingEntries = await loadIdentityLogEntries({ tenantId });
-    const logIndex = existingEntries.length;
-    const prevEntryHash = logIndex === 0 ? null : existingEntries[logIndex - 1].entryHash;
-    const normalizedAfterIdentity =
-      afterIdentity && typeof afterIdentity === "object" && !Array.isArray(afterIdentity) ? afterIdentity : {};
-    const normalizedBeforeIdentity =
-      beforeIdentity && typeof beforeIdentity === "object" && !Array.isArray(beforeIdentity) ? beforeIdentity : null;
-
-    const entry = buildIdentityLogEntry({
-      entryId: entryId ?? createId("idlog"),
-      tenantId,
-      agentId: String(agentId).trim(),
-      eventType,
-      logIndex,
-      prevEntryHash,
-      keyIdBefore: normalizedBeforeIdentity?.keys?.keyId ?? null,
-      keyIdAfter: normalizedAfterIdentity?.keys?.keyId ?? null,
-      statusBefore: normalizedBeforeIdentity?.status ?? null,
-      statusAfter: normalizedAfterIdentity?.status ?? null,
-      capabilitiesBefore: Array.isArray(normalizedBeforeIdentity?.capabilities) ? normalizedBeforeIdentity.capabilities : [],
-      capabilitiesAfter: Array.isArray(normalizedAfterIdentity?.capabilities) ? normalizedAfterIdentity.capabilities : [],
-      reasonCode,
-      reason,
-      occurredAt: occurredAt ?? normalizedAfterIdentity?.updatedAt ?? new Date().toISOString(),
-      recordedAt: recordedAt ?? new Date().toISOString(),
-      metadata
-    });
-    return await store.appendIdentityLogEntry({ tenantId, entry, audit });
   };
 
   store.getAgentPassport = async function getAgentPassport({ tenantId = DEFAULT_TENANT_ID, agentId } = {}) {

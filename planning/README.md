@@ -27,6 +27,9 @@ If you're asking **"what's still open?"**, start with `planning/STATUS.md` and t
 - `planning/jira/self-serve-icp-v1-backlog.json`
   - Backlog export / intended scope for self-serve launch.
 
+- `planning/jira/nooterra-network-beta-backlog.json`
+  - Backlog export for the current Nooterra Network beta execution package.
+
 ## Historical Plans
 
 - `planning/sprints/sprint-plan.md`
@@ -40,9 +43,15 @@ If you're asking **"what's still open?"**, start with `planning/STATUS.md` and t
   - Deep technical program architecture (Programs A-F), dependency graph, invariants, and acceptance gates.
   - Sequence-based (no date constraints), intended as execution design input.
 
+- `planning/sprints/nooterra-network-beta-enterprise-plan.md`
+  - Six-week enterprise beta delivery plan with chunked order, critical path, and ownership model.
+
 - `planning/jira/agent-economy-backlog.json`
   - Jira-shaped epic/ticket backlog for Programs A-F with dependencies and gate criteria.
   - Input artifact; live open/closed state still belongs in GitHub Issues.
 
 - `planning/jira/agent-economy-epics.csv` + `planning/jira/agent-economy-tickets.csv`
   - CSV exports of the same Program A-F backlog for quick Jira import.
+
+- `planning/jira/nooterra-network-beta-epics.csv` + `planning/jira/nooterra-network-beta-tickets.csv`
+  - CSV exports for the beta execution package in Jira-import format.

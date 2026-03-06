@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/agentverse/**"
+      - "scripts/ci/run-agentverse-gate.mjs"
+      - "scripts/publish/prepublish-check.mjs"
+      - "scripts/publish/publish-all.sh"
+      - "bin/agentverse-cli.js"
+      - "docs/INSTALL.md"
+      - "docs/PUBLISHING.md"
+      - "package.json"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "src/agentverse/**"
+      - "scripts/ci/run-agentverse-gate.mjs"
+      - "scripts/publish/prepublish-check.mjs"
+      - "scripts/publish/publish-all.sh"
+      - "bin/agentverse-cli.js"
+      - "docs/INSTALL.md"
+      - "docs/PUBLISHING.md"
+      - "package.json"
+      - ".github/workflows/ci.yml"
+
+jobs:
+  agentverse_gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import bridge modules
+        run: node --input-type=module -e "await import('./src/agentverse/bridge/index.js'); await import('./src/agentverse/index.js');"
+
+      - name: Run agentverse gate
+        run: npm run -s test:ops:agentverse-gate -- --out artifacts/gates/agentverse-gate.ci.json
+
+      - name: Upload gate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentverse-gate-${{ github.run_id }}
+          path: artifacts/gates/agentverse-gate.ci.json
+          if-no-files-found: error

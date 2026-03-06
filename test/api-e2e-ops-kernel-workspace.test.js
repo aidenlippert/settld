@@ -38,8 +38,7 @@ test("API e2e: ops kernel workspace renders receipt explorer controls", async ()
     headers: {},
     auth: "none"
   });
-  assert.equal(workspaceWithQueryAuth.statusCode, 200, workspaceWithQueryAuth.body);
-  assert.match(workspaceWithQueryAuth.body, /Kernel Explorer/);
+  assert.equal(workspaceWithQueryAuth.statusCode, 403, workspaceWithQueryAuth.body);
 
   const forbidden = await request(api, {
     method: "GET",

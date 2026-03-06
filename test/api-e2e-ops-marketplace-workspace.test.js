@@ -43,8 +43,7 @@ test("API e2e: ops marketplace workspace page renders listing/RFQ/bid controls",
     headers: {},
     auth: "none"
   });
-  assert.equal(workspaceWithQueryAuth.statusCode, 200, workspaceWithQueryAuth.body);
-  assert.match(workspaceWithQueryAuth.body, /Marketplace Operator Workspace/);
+  assert.equal(workspaceWithQueryAuth.statusCode, 403, workspaceWithQueryAuth.body);
 
   const forbidden = await request(api, {
     method: "GET",

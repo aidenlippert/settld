@@ -4904,6 +4904,45 @@ async function buildWalletFundingOptions({ tenantId, walletBootstrap, hostedUrlO
   };
 }
 
+function buildWalletFundingStatusReport({ requestedMethod = null, walletBootstrap, funding, session }) {
+  const method = requestedMethod ?? null;
+  const faucetResultsRaw = Array.isArray(walletBootstrap?.faucetResults) ? walletBootstrap.faucetResults : [];
+  const faucetResults = faucetResultsRaw.map((row) => ({
+    wallet: typeof row?.wallet === "string" ? row.wallet : null,
+    ok: row?.ok === true,
+    status: Number.isInteger(row?.status) ? row.status : null
+  }));
+  const faucetSuccessCount = faucetResults.filter((row) => row.ok).length;
+  return {
+    schemaVersion: "MagicLinkWalletFundingStatus.v1",
+    state: method === "faucet" ? "attempted" : "prepared",
+    method,
+    preparedAt: nowIso(),
+    optionAvailability: {
+      card: Boolean(funding?.hosted?.card),
+      bank: Boolean(funding?.hosted?.bank),
+      transfer: Boolean(funding?.transfer?.address),
+      faucet: method === "faucet" || Boolean(walletBootstrap?.faucetEnabled)
+    },
+    session: session && typeof session === "object" && !Array.isArray(session)
+      ? {
+          type: typeof session.type === "string" ? session.type : null,
+          method: typeof session.method === "string" ? session.method : null
+        }
+      : null,
+    faucet:
+      method === "faucet"
+        ? {
+            attempted: true,
+            total: faucetResults.length,
+            successCount: faucetSuccessCount,
+            failureCount: faucetResults.length - faucetSuccessCount,
+            results: faucetResults
+          }
+        : null
+  };
+}
+
 async function handleTenantWalletBootstrap(req, res, tenantId) {
   const auth = await requireTenantPrincipal(req, res, { tenantId, minBuyerRole: "admin" });
   if (!auth.ok) return;
@@ -4917,12 +4956,59 @@ async function handleTenantWalletBootstrap(req, res, tenantId) {
   if (json === null) json = {};
   if (!isPlainObject(json)) return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "body must be an object" });
 
+  const idempotencyParsed = parseRequestIdempotencyKey({ req, body: json });
+  if (!idempotencyParsed.ok) {
+    return sendJson(res, 400, {
+      ok: false,
+      code: idempotencyParsed.code,
+      message: idempotencyParsed.message
+    });
+  }
+  const idempotencyKey = idempotencyParsed.idempotencyKey;
+  if (idempotencyKey) {
+    const existing = await loadTenantOnboardingIdempotentResultBestEffort({
+      tenantId,
+      idempotencyScope: "onboarding_wallet_bootstrap",
+      schemaVersion: "MagicLinkWalletBootstrapIdempotency.v1",
+      idempotencyKey
+    });
+    if (existing?.response) {
+      const cached = applyIdempotencyResponseEnvelope(existing.response, {
+        keyHash: existing.idempotencyKeyHash,
+        reused: true,
+        createdAt: existing.createdAt
+      });
+      return sendJson(res, Number.isInteger(existing.statusCode) ? existing.statusCode : 200, cached);
+    }
+  }
+  const sendWalletBootstrapResponse = async (statusCode, body) => {
+    if (!idempotencyKey || !isPlainObject(body)) return sendJson(res, statusCode, body);
+    const responseBody = applyIdempotencyResponseEnvelope(body, {
+      keyHash: sha256Hex(String(idempotencyKey)),
+      reused: false,
+      createdAt: nowIso()
+    });
+    try {
+      await saveTenantOnboardingIdempotentResult({
+        tenantId,
+        idempotencyScope: "onboarding_wallet_bootstrap",
+        schemaVersion: "MagicLinkWalletBootstrapIdempotency.v1",
+        idempotencyKey,
+        statusCode,
+        response: responseBody
+      });
+    } catch {
+      // ignore idempotency persistence failures for convenience endpoint
+    }
+    return sendJson(res, statusCode, responseBody);
+  };
+
   const provider = typeof json.provider === "string" && json.provider.trim()
     ? json.provider.trim().toLowerCase()
     : "circle";
   const supportedProviders = supportedWalletBootstrapProviders();
   if (!supportedProviders.includes(provider)) {
-    return sendJson(res, 400, {
+    return await sendWalletBootstrapResponse(400, {
       ok: false,
       code: "UNSUPPORTED_WALLET_PROVIDER",
       message: `provider must be one of: ${supportedProviders.join(", ")}`
@@ -4932,7 +5018,7 @@ async function handleTenantWalletBootstrap(req, res, tenantId) {
   if (provider === "circle") {
     const circleApiKey = String(process.env.CIRCLE_API_KEY ?? "").trim();
     if (!circleApiKey) {
-      return sendJson(res, 503, {
+      return await sendWalletBootstrapResponse(503, {
         ok: false,
         code: "WALLET_PROVIDER_NOT_CONFIGURED",
         message: "Circle wallet bootstrap is not configured on this control plane"
@@ -4977,7 +5063,7 @@ async function handleTenantWalletBootstrap(req, res, tenantId) {
         fetchImpl: fetch
       });
     } catch (err) {
-      return sendJson(res, 502, {
+      return await sendWalletBootstrapResponse(502, {
         ok: false,
         code: "WALLET_BOOTSTRAP_FAILED",
         message: err?.message ?? "wallet bootstrap failed"
@@ -5005,7 +5091,7 @@ async function handleTenantWalletBootstrap(req, res, tenantId) {
       // ignore audit write failures for bootstrap convenience endpoint
     }
 
-    return sendJson(res, 201, {
+    return await sendWalletBootstrapResponse(201, {
       ok: true,
       schemaVersion: "MagicLinkWalletBootstrap.v1",
       tenantId,
@@ -5013,7 +5099,7 @@ async function handleTenantWalletBootstrap(req, res, tenantId) {
     });
   }
 
-  return sendJson(res, 400, {
+  return await sendWalletBootstrapResponse(400, {
     ok: false,
     code: "UNSUPPORTED_WALLET_PROVIDER",
     message: `provider must be one of: ${supportedProviders.join(", ")}`
@@ -5033,12 +5119,59 @@ async function handleTenantWalletFunding(req, res, tenantId) {
   if (json === null) json = {};
   if (!isPlainObject(json)) return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "body must be an object" });
 
+  const idempotencyParsed = parseRequestIdempotencyKey({ req, body: json });
+  if (!idempotencyParsed.ok) {
+    return sendJson(res, 400, {
+      ok: false,
+      code: idempotencyParsed.code,
+      message: idempotencyParsed.message
+    });
+  }
+  const idempotencyKey = idempotencyParsed.idempotencyKey;
+  if (idempotencyKey) {
+    const existing = await loadTenantOnboardingIdempotentResultBestEffort({
+      tenantId,
+      idempotencyScope: "onboarding_wallet_funding",
+      schemaVersion: "MagicLinkWalletFundingIdempotency.v1",
+      idempotencyKey
+    });
+    if (existing?.response) {
+      const cached = applyIdempotencyResponseEnvelope(existing.response, {
+        keyHash: existing.idempotencyKeyHash,
+        reused: true,
+        createdAt: existing.createdAt
+      });
+      return sendJson(res, Number.isInteger(existing.statusCode) ? existing.statusCode : 200, cached);
+    }
+  }
+  const sendWalletFundingResponse = async (statusCode, body) => {
+    if (!idempotencyKey || !isPlainObject(body)) return sendJson(res, statusCode, body);
+    const responseBody = applyIdempotencyResponseEnvelope(body, {
+      keyHash: sha256Hex(String(idempotencyKey)),
+      reused: false,
+      createdAt: nowIso()
+    });
+    try {
+      await saveTenantOnboardingIdempotentResult({
+        tenantId,
+        idempotencyScope: "onboarding_wallet_funding",
+        schemaVersion: "MagicLinkWalletFundingIdempotency.v1",
+        idempotencyKey,
+        statusCode,
+        response: responseBody
+      });
+    } catch {
+      // ignore idempotency persistence failures for convenience endpoint
+    }
+    return sendJson(res, statusCode, responseBody);
+  };
+
   const provider = typeof json.provider === "string" && json.provider.trim()
     ? json.provider.trim().toLowerCase()
     : "circle";
   const supportedProviders = supportedWalletBootstrapProviders();
   if (!supportedProviders.includes(provider)) {
-    return sendJson(res, 400, {
+    return await sendWalletFundingResponse(400, {
       ok: false,
       code: "UNSUPPORTED_WALLET_PROVIDER",
       message: `provider must be one of: ${supportedProviders.join(", ")}`
@@ -5047,7 +5180,7 @@ async function handleTenantWalletFunding(req, res, tenantId) {
 
   const requestedMethod = normalizeWalletFundingMethod(json.method);
   if (json.method !== undefined && requestedMethod === null) {
-    return sendJson(res, 400, {
+    return await sendWalletFundingResponse(400, {
       ok: false,
       code: "INVALID_FUNDING_METHOD",
       message: "method must be one of: card, bank, transfer, faucet"
@@ -5057,7 +5190,7 @@ async function handleTenantWalletFunding(req, res, tenantId) {
   if (provider === "circle") {
     const circleApiKey = String(process.env.CIRCLE_API_KEY ?? "").trim();
     if (!circleApiKey) {
-      return sendJson(res, 503, {
+      return await sendWalletFundingResponse(503, {
         ok: false,
         code: "WALLET_PROVIDER_NOT_CONFIGURED",
         message: "Circle wallet funding is not configured on this control plane"
@@ -5101,7 +5234,7 @@ async function handleTenantWalletFunding(req, res, tenantId) {
         fetchImpl: fetch
       });
     } catch (err) {
-      return sendJson(res, 502, {
+      return await sendWalletFundingResponse(502, {
         ok: false,
         code: "WALLET_FUNDING_PREP_FAILED",
         message: err?.message ?? "wallet funding preparation failed"
@@ -5118,7 +5251,7 @@ async function handleTenantWalletFunding(req, res, tenantId) {
         clientIp: req.socket?.remoteAddress ?? null
       });
     } catch (err) {
-      return sendJson(res, 502, {
+      return await sendWalletFundingResponse(502, {
         ok: false,
         code: "WALLET_FUNDING_HOSTED_PROVIDER_ERROR",
         message: err?.message ?? "wallet hosted funding provider failed",
@@ -5130,7 +5263,7 @@ async function handleTenantWalletFunding(req, res, tenantId) {
     if (requestedMethod === "transfer") {
       session = funding.transfer;
       if (!session?.address) {
-        return sendJson(res, 409, {
+        return await sendWalletFundingResponse(409, {
           ok: false,
           code: "WALLET_TRANSFER_ADDRESS_MISSING",
           message: "spend wallet address is missing"
@@ -5139,7 +5272,7 @@ async function handleTenantWalletFunding(req, res, tenantId) {
     } else if (requestedMethod === "card" || requestedMethod === "bank") {
       const targetUrl = requestedMethod === "card" ? funding.hosted.card : funding.hosted.bank;
       if (!targetUrl) {
-        return sendJson(res, 409, {
+        return await sendWalletFundingResponse(409, {
           ok: false,
           code: "WALLET_FUNDING_METHOD_UNAVAILABLE",
           message: `hosted ${requestedMethod} funding is not configured`
@@ -5180,18 +5313,25 @@ async function handleTenantWalletFunding(req, res, tenantId) {
       // ignore audit write failures for convenience endpoint
     }
 
-    return sendJson(res, 200, {
+    const fundingStatus = buildWalletFundingStatusReport({
+      requestedMethod,
+      walletBootstrap,
+      funding,
+      session
+    });
+    return await sendWalletFundingResponse(200, {
       ok: true,
       schemaVersion: "MagicLinkWalletFunding.v1",
       tenantId,
       wallet: summarizeWalletBootstrap(walletBootstrap),
       recommendedOptionId: funding.recommendedOptionId,
       options: funding.options,
-      session
+      session,
+      fundingStatus
     });
   }
 
-  return sendJson(res, 400, {
+  return await sendWalletFundingResponse(400, {
     ok: false,
     code: "UNSUPPORTED_WALLET_PROVIDER",
     message: `provider must be one of: ${supportedProviders.join(", ")}`
@@ -5510,6 +5650,80 @@ async function appendTenantFirstPaidCallAttempt({ tenantId, attempt }) {
   };
   await saveTenantFirstPaidCallHistory({ tenantId, history: next });
   return next;
+}
+
+function parseRequestIdempotencyKey({ req, body } = {}) {
+  const idempotencyHeader = req?.headers?.["x-idempotency-key"] ? String(req.headers["x-idempotency-key"]).trim() : "";
+  const idempotencyBody = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+  const idempotencyKey = idempotencyHeader || idempotencyBody || null;
+  if (idempotencyKey && (idempotencyKey.length > 160 || /[\r\n]/.test(idempotencyKey))) {
+    return {
+      ok: false,
+      code: "INVALID_IDEMPOTENCY_KEY",
+      message: "idempotencyKey must be <= 160 chars and single-line"
+    };
+  }
+  return { ok: true, idempotencyKey };
+}
+
+function applyIdempotencyResponseEnvelope(body, { keyHash = null, reused = false, createdAt = null } = {}) {
+  if (!isPlainObject(body)) return body;
+  return {
+    ...body,
+    idempotency: {
+      keyHash: typeof keyHash === "string" && keyHash.trim() ? keyHash : null,
+      reused: Boolean(reused),
+      createdAt: typeof createdAt === "string" && createdAt.trim() ? createdAt : nowIso()
+    }
+  };
+}
+
+function tenantOnboardingIdempotencyPath({ tenantId, idempotencyScope, idempotencyKey }) {
+  const keyHash = sha256Hex(String(idempotencyKey ?? ""));
+  const scope = typeof idempotencyScope === "string" && idempotencyScope.trim()
+    ? idempotencyScope.trim()
+    : "onboarding";
+  return path.join(dataDir, "tenants", tenantId, `${scope}_idempotency`, `${keyHash}.json`);
+}
+
+async function loadTenantOnboardingIdempotentResultBestEffort({ tenantId, idempotencyScope, schemaVersion, idempotencyKey }) {
+  const fp = tenantOnboardingIdempotencyPath({ tenantId, idempotencyScope, idempotencyKey });
+  try {
+    const raw = JSON.parse(await fs.readFile(fp, "utf8"));
+    if (!isPlainObject(raw)) return null;
+    return {
+      schemaVersion: typeof schemaVersion === "string" && schemaVersion.trim() ? schemaVersion : "MagicLinkOnboardingIdempotency.v1",
+      tenantId,
+      idempotencyKeyHash: typeof raw.idempotencyKeyHash === "string" ? raw.idempotencyKeyHash : null,
+      createdAt: typeof raw.createdAt === "string" ? raw.createdAt : null,
+      statusCode: Number.isInteger(raw.statusCode) ? raw.statusCode : 200,
+      response: isPlainObject(raw.response) ? raw.response : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveTenantOnboardingIdempotentResult({
+  tenantId,
+  idempotencyScope,
+  schemaVersion,
+  idempotencyKey,
+  statusCode = 200,
+  response
+}) {
+  const fp = tenantOnboardingIdempotencyPath({ tenantId, idempotencyScope, idempotencyKey });
+  await fs.mkdir(path.dirname(fp), { recursive: true });
+  const record = {
+    schemaVersion: typeof schemaVersion === "string" && schemaVersion.trim() ? schemaVersion : "MagicLinkOnboardingIdempotency.v1",
+    tenantId,
+    idempotencyKeyHash: sha256Hex(String(idempotencyKey ?? "")),
+    createdAt: nowIso(),
+    statusCode: Number.isInteger(statusCode) ? statusCode : 200,
+    response: isPlainObject(response) ? response : null
+  };
+  await fs.writeFile(fp, JSON.stringify(record, null, 2) + "\n", "utf8");
+  return record;
 }
 
 function tenantConformanceIdempotencyPath({ tenantId, idempotencyKey }) {

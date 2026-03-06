@@ -41,8 +41,7 @@ test("API e2e: ops policy workspace page renders control-plane UX", async () => 
     headers: {},
     auth: "none"
   });
-  assert.equal(queryAuthWorkspace.statusCode, 200, queryAuthWorkspace.body);
-  assert.match(queryAuthWorkspace.body, /Settlement Policy Control Plane/);
+  assert.equal(queryAuthWorkspace.statusCode, 403, queryAuthWorkspace.body);
 
   const forbidden = await request(api, {
     method: "GET",

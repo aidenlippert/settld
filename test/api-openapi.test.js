@@ -92,3 +92,36 @@ test("API: agent locator OpenAPI contracts include resolve and well-known paths"
   assert.ok(pathParam, "missing agentId path parameter for /.well-known/agent-locator/{agentId}");
   assert.equal(pathParam?.required, true);
 });
+
+test("API: intent + session checkpoint OpenAPI contracts are published", async () => {
+  const api = createApi();
+  const res = await request(api, {
+    method: "GET",
+    path: "/openapi.json",
+    headers: { "x-nooterra-protocol": "1.0" }
+  });
+  assert.equal(res.statusCode, 200, res.body);
+
+  assert.ok(res.json?.paths?.["/intents"]?.get, "missing GET /intents");
+  assert.ok(res.json?.paths?.["/intents/propose"]?.post, "missing POST /intents/propose");
+  assert.ok(res.json?.paths?.["/intents/{intentId}"]?.get, "missing GET /intents/{intentId}");
+  assert.ok(res.json?.paths?.["/intents/{intentId}/counter"]?.post, "missing POST /intents/{intentId}/counter");
+  assert.ok(res.json?.paths?.["/intents/{intentId}/accept"]?.post, "missing POST /intents/{intentId}/accept");
+
+  assert.ok(res.json?.paths?.["/sessions/{sessionId}/events/checkpoint"]?.get, "missing GET /sessions/{sessionId}/events/checkpoint");
+  assert.ok(res.json?.paths?.["/sessions/{sessionId}/events/checkpoint"]?.post, "missing POST /sessions/{sessionId}/events/checkpoint");
+  assert.ok(
+    res.json?.paths?.["/sessions/{sessionId}/events/checkpoint/requeue"]?.post,
+    "missing POST /sessions/{sessionId}/events/checkpoint/requeue"
+  );
+  const eventListParams = res.json?.paths?.["/sessions/{sessionId}/events"]?.get?.parameters ?? [];
+  const streamParams = res.json?.paths?.["/sessions/{sessionId}/events/stream"]?.get?.parameters ?? [];
+  assert.ok(
+    eventListParams.some((row) => row?.in === "query" && row?.name === "checkpointConsumerId"),
+    "missing checkpointConsumerId query on GET /sessions/{sessionId}/events"
+  );
+  assert.ok(
+    streamParams.some((row) => row?.in === "query" && row?.name === "checkpointConsumerId"),
+    "missing checkpointConsumerId query on GET /sessions/{sessionId}/events/stream"
+  );
+});
