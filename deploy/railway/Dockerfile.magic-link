@@ -34,6 +34,7 @@ COPY --from=prep /data /data
 
 COPY src ./src
 COPY packages ./packages
+COPY scripts ./scripts
 COPY services ./services
 COPY docs/pilot-kit ./docs/pilot-kit
 
