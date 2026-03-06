@@ -128,6 +128,66 @@ const ideModes = [
   }
 ];
 
+const networkTemplates = [
+  {
+    id: "code_review",
+    title: "Code Review",
+    body: "Send a change through review, testing, and merge readiness.",
+    text: "Review the change, run the test suite, call out regressions, and prepare a merge recommendation.",
+    budgetCents: "3500",
+    maxCandidates: "4"
+  },
+  {
+    id: "bugfix",
+    title: "Bug Fix",
+    body: "Route a production bug into implementation and validation work.",
+    text: "Investigate the bug, implement the fix, run the relevant tests, and summarize the root cause with the final patch.",
+    budgetCents: "5000",
+    maxCandidates: "5"
+  },
+  {
+    id: "research",
+    title: "Research Task",
+    body: "Ask the network to gather, compare, and summarize options.",
+    text: "Research the problem, compare viable options, and return a short recommendation with evidence and tradeoffs.",
+    budgetCents: "2500",
+    maxCandidates: "3"
+  }
+];
+
+const studioProfiles = [
+  {
+    id: "code_worker",
+    title: "Code Worker",
+    body: "Implements changes, runs tests, and hands back a patch-ready result.",
+    displayName: "Code Worker",
+    description: "A public worker for implementation, debugging, and patch delivery.",
+    capabilities: "capability://code.generation\ncapability://code.test.run",
+    priceAmountCents: "500",
+    tags: "software, implementation"
+  },
+  {
+    id: "qa_worker",
+    title: "QA Worker",
+    body: "Checks behavior, reproduces bugs, and verifies releases before merge.",
+    displayName: "QA Worker",
+    description: "A public worker for regression checks, validation, and release confidence.",
+    capabilities: "capability://code.test.run\ncapability://quality.review",
+    priceAmountCents: "350",
+    tags: "software, qa"
+  },
+  {
+    id: "research_worker",
+    title: "Research Worker",
+    body: "Finds evidence, compares options, and returns structured recommendations.",
+    displayName: "Research Worker",
+    description: "A public worker for research, synthesis, and option analysis.",
+    capabilities: "capability://research.analysis\ncapability://knowledge.synthesis",
+    priceAmountCents: "300",
+    tags: "research, analysis"
+  }
+];
+
 const faqItems = [
   {
     value: "what-is-nooterra",
@@ -241,6 +301,15 @@ function maskToken(value) {
   if (!normalized) return "Not issued";
   if (normalized.length <= 12) return normalized;
   return `${normalized.slice(0, 8)}…${normalized.slice(-4)}`;
+}
+
+function toIdSlug(value, fallback = "tenant") {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/[^a-z0-9_]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+  return normalized || fallback;
 }
 
 function titleCaseState(value) {
@@ -641,17 +710,20 @@ function LaunchTaskCard({ task }) {
   );
 }
 
-function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false }) {
+function NetworkPage({ runtime, onboardingState, lastAgentId, launchId, onLaunchRecorded, debugMode = false }) {
+  const buyer = onboardingState?.buyer ?? null;
+  const bootstrapBundle = onboardingState?.bootstrap ?? null;
   const [form, setForm] = useState({
-    text: "Implement the feature and make tests pass. Open a PR on GitHub.",
+    text: networkTemplates[0].text,
     posterAgentId: "",
     scope: "public",
-    budgetCents: "5000",
+    budgetCents: networkTemplates[0].budgetCents,
     currency: "USD",
     deadlineAt: "",
-    maxCandidates: "5"
+    maxCandidates: networkTemplates[0].maxCandidates
   });
-  const [statusMessage, setStatusMessage] = useState("Launch work into the network or load an existing launch page.");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(networkTemplates[0].id);
+  const [statusMessage, setStatusMessage] = useState("Pick a request template, then plan or dispatch the work.");
   const [busyState, setBusyState] = useState("");
   const [plan, setPlan] = useState(null);
   const [launchResponse, setLaunchResponse] = useState(null);
@@ -659,11 +731,18 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
   const [launchStatus, setLaunchStatus] = useState(null);
   const [activeLaunchId, setActiveLaunchId] = useState(launchId ?? readStoredValue(LAST_LAUNCH_STORAGE_KEY));
   const deferredLaunchStatus = useDeferredValue(launchStatus);
+  const runtimeReady = Boolean(String(runtime.apiKey ?? "").trim());
+  const suggestedPosterAgentId = lastAgentId || (buyer?.tenantId ? `agt_${toIdSlug(buyer.tenantId)}_requester` : "");
 
   useEffect(() => {
     if (!launchId) return;
     setActiveLaunchId(launchId);
   }, [launchId]);
+
+  useEffect(() => {
+    if (!suggestedPosterAgentId || form.posterAgentId.trim()) return;
+    setForm((previous) => ({ ...previous, posterAgentId: suggestedPosterAgentId }));
+  }, [form.posterAgentId, suggestedPosterAgentId]);
 
   useEffect(() => {
     if (!activeLaunchId) return;
@@ -694,7 +773,23 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
     };
   }, [activeLaunchId, runtime]);
 
+  function applyNetworkTemplate(template) {
+    setSelectedTemplateId(template.id);
+    setForm((previous) => ({
+      ...previous,
+      text: template.text,
+      budgetCents: template.budgetCents,
+      maxCandidates: template.maxCandidates,
+      posterAgentId: previous.posterAgentId || suggestedPosterAgentId
+    }));
+    setStatusMessage(`${template.title} template loaded. Adjust the request, then preview the plan.`);
+  }
+
   async function previewPlan() {
+    if (!runtimeReady) {
+      setStatusMessage("Issue runtime bootstrap on onboarding before planning or dispatching work.");
+      return;
+    }
     setBusyState("plan");
     setStatusMessage("Planning against the network graph...");
     try {
@@ -726,6 +821,10 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
   }
 
   async function launchWork({ dispatchNow }) {
+    if (!runtimeReady) {
+      setStatusMessage("Issue runtime bootstrap on onboarding before launching work.");
+      return;
+    }
     setBusyState(dispatchNow ? "dispatch" : "launch");
     setStatusMessage(dispatchNow ? "Launching and dispatching..." : "Launching network RFQs...");
     try {
@@ -795,6 +894,30 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
 
   const summary = deferredLaunchStatus?.summary ?? null;
   const currentLaunchId = deferredLaunchStatus?.launchRef?.launchId ?? activeLaunchId ?? null;
+  const readinessItems = [
+    {
+      title: "Workspace session",
+      body: buyer ? `${buyer.email} is active in ${buyer.tenantId}.` : "Sign in on onboarding so the product can issue runtime credentials.",
+      ready: Boolean(buyer)
+    },
+    {
+      title: "Runtime key",
+      body: runtimeReady
+        ? `Using ${bootstrapBundle?.bootstrap?.apiKey?.keyId ?? "a configured API key"} for live requests.`
+        : "Issue runtime bootstrap before planning or dispatching work.",
+      ready: runtimeReady
+    },
+    {
+      title: "Requester agent",
+      body: form.posterAgentId ? `${form.posterAgentId} will post the work.` : "Add a requester agent for cleaner lineage and downstream reporting.",
+      ready: Boolean(form.posterAgentId)
+    },
+    {
+      title: "Supply side",
+      body: lastAgentId ? `Latest worker ${lastAgentId} is ready to receive work.` : "Publish at least one worker in Studio to seed the market.",
+      ready: Boolean(lastAgentId)
+    }
+  ];
 
   return (
     <div className="product-page">
@@ -812,7 +935,8 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
               Open shareable launch page
             </a>
           ) : null}
-          <a className="product-button product-button-ghost" href="/studio">Publish supply first</a>
+          <a className="product-button product-button-ghost" href="/onboarding">Finish setup</a>
+          <a className="product-button product-button-solid" href="/studio">Publish supply</a>
         </div>
       </section>
 
@@ -820,7 +944,20 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
         <article className="product-card">
           <div className="product-section-head compact">
             <p>Requester Console</p>
-            <h2>Route, launch, and dispatch from one surface.</h2>
+            <h2>Start from a real work shape instead of a blank form.</h2>
+          </div>
+          <div className="product-option-grid">
+            {networkTemplates.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                className={`product-option-card ${selectedTemplateId === template.id ? "active" : ""}`}
+                onClick={() => applyNetworkTemplate(template)}
+              >
+                <strong>{template.title}</strong>
+                <span>{template.body}</span>
+              </button>
+            ))}
           </div>
           <div className="product-form-grid">
             <label className="wide">
@@ -832,7 +969,7 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
               />
             </label>
             <label>
-              <span>Poster agent ID</span>
+              <span>Requester agent (optional)</span>
               <input
                 value={form.posterAgentId}
                 onChange={(event) => setForm((previous) => ({ ...previous, posterAgentId: event.target.value }))}
@@ -883,58 +1020,47 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
             </label>
           </div>
           <div className="product-actions">
-            <button className="product-button product-button-ghost" disabled={busyState !== ""} onClick={() => void previewPlan()}>
+            <button className="product-button product-button-ghost" disabled={busyState !== "" || !runtimeReady} onClick={() => void previewPlan()}>
               {busyState === "plan" ? "Planning..." : "Preview Plan"}
             </button>
-            <button className="product-button product-button-ghost" disabled={busyState !== ""} onClick={() => void launchWork({ dispatchNow: false })}>
+            <button className="product-button product-button-ghost" disabled={busyState !== "" || !runtimeReady} onClick={() => void launchWork({ dispatchNow: false })}>
               {busyState === "launch" ? "Launching..." : "Launch RFQs"}
             </button>
-            <button className="product-button product-button-solid" disabled={busyState !== ""} onClick={() => void launchWork({ dispatchNow: true })}>
+            <button className="product-button product-button-solid" disabled={busyState !== "" || !runtimeReady} onClick={() => void launchWork({ dispatchNow: true })}>
               {busyState === "dispatch" ? "Dispatching..." : "Launch + Dispatch"}
             </button>
           </div>
-          <div className="product-inline-note">{statusMessage}</div>
+          <div className={`product-inline-note ${runtimeReady ? "" : "warn"}`}>{statusMessage}</div>
         </article>
 
-        <article className="product-card product-metric-stack">
+        <article className="product-card">
           <div className="product-section-head compact">
-            <p>Read Model</p>
-            <h2>Follow work after it starts.</h2>
+            <p>Launch Readiness</p>
+            <h2>Keep the prerequisites visible before you spend.</h2>
           </div>
-          <div className="product-metric-grid">
-            <div className="product-metric-card">
-              <span>Tasks</span>
-              <strong>{summary?.openCount !== undefined ? deferredLaunchStatus?.taskCount : "0"}</strong>
-              <small>routed units of work</small>
-            </div>
-            <div className="product-metric-card">
-              <span>Ready</span>
-              <strong>{summary?.readyCount ?? 0}</strong>
-              <small>tasks with bids and no blockers</small>
-            </div>
-            <div className="product-metric-card">
-              <span>Assigned</span>
-              <strong>{summary?.assignedCount ?? 0}</strong>
-              <small>runs in flight with locked settlement</small>
-            </div>
-            <div className="product-metric-card">
-              <span>Closed</span>
-              <strong>{summary?.closedCount ?? 0}</strong>
-              <small>tasks completed and released</small>
-            </div>
+          <div className="product-step-list">
+            {readinessItems.map((item) => (
+              <div key={item.title} className="product-step-item">
+                <div className="product-step-copy">
+                  <strong>{item.title}</strong>
+                  <span>{item.body}</span>
+                </div>
+                <span className={`product-status-pill tone-${item.ready ? "good" : "warn"}`}>{item.ready ? "Ready" : "Needs setup"}</span>
+              </div>
+            ))}
           </div>
           <div className="product-sidebar-list">
             <div>
-              <strong>Shareable launch pages</strong>
-              <span>Each launch has a status page you can revisit or share with collaborators.</span>
+              <strong>Fastest path</strong>
+              <span>Complete onboarding, issue runtime bootstrap, then come back here to plan the request.</span>
             </div>
             <div>
-              <strong>Safe dispatch</strong>
-              <span>Tasks stay blocked when dependencies, bids, or budget checks are missing.</span>
+              <strong>Best with supply</strong>
+              <span>Publish at least one worker in Studio so a launch can receive real bids immediately.</span>
             </div>
             <div>
-              <strong>Best for</strong>
-              <span>Software work that can be routed, awarded, and completed online.</span>
+              <strong>After dispatch</strong>
+              <span>Use the shareable launch page to watch tasks, bids, and accepted runs.</span>
             </div>
           </div>
         </article>
@@ -983,6 +1109,28 @@ function NetworkPage({ runtime, launchId, onLaunchRecorded, debugMode = false })
             <div>
               <strong>Launch ID</strong>
               <span>{currentLaunchId || "pending"}</span>
+            </div>
+          </div>
+          <div className="product-metric-grid">
+            <div className="product-metric-card">
+              <span>Tasks</span>
+              <strong>{summary?.openCount !== undefined ? deferredLaunchStatus?.taskCount : "0"}</strong>
+              <small>routed units of work</small>
+            </div>
+            <div className="product-metric-card">
+              <span>Ready</span>
+              <strong>{summary?.readyCount ?? 0}</strong>
+              <small>tasks with bids and no blockers</small>
+            </div>
+            <div className="product-metric-card">
+              <span>Assigned</span>
+              <strong>{summary?.assignedCount ?? 0}</strong>
+              <small>runs in flight with locked settlement</small>
+            </div>
+            <div className="product-metric-card">
+              <span>Closed</span>
+              <strong>{summary?.closedCount ?? 0}</strong>
+              <small>tasks completed and released</small>
             </div>
           </div>
           {debugMode ? (
@@ -1657,6 +1805,7 @@ agentverse agent run --agent-id agt_${String(runtime.tenantId || "tenant").repla
 }
 
 function StudioPage({ runtime, onboardingState, onAgentRecorded, lastAgentId, debugMode = false }) {
+  const buyer = onboardingState?.buyer ?? null;
   const bootstrapBundle = onboardingState?.bootstrap ?? null;
   const smokeBundle = onboardingState?.smoke ?? null;
   const [form, setForm] = useState({
@@ -1675,12 +1824,52 @@ function StudioPage({ runtime, onboardingState, onAgentRecorded, lastAgentId, de
     tags: "software, beta",
     attachPublishSignature: false
   });
+  const [selectedProfileId, setSelectedProfileId] = useState(studioProfiles[0].id);
   const [keys, setKeys] = useState({ publicKeyPem: "", privateKeyPem: "", keyId: "" });
-  const [studioMessage, setStudioMessage] = useState("Generate a browser keypair, register the agent, then publish a public card.");
+  const [studioMessage, setStudioMessage] = useState("Pick a starter profile, generate a signer, then publish the worker.");
   const [registerOutput, setRegisterOutput] = useState(null);
   const [publishOutput, setPublishOutput] = useState(null);
   const [discoverOutput, setDiscoverOutput] = useState(null);
   const [busyState, setBusyState] = useState("");
+  const runtimeReady = Boolean(String(runtime.apiKey ?? "").trim());
+  const discoveryResults = Array.isArray(discoverOutput?.results) ? discoverOutput.results : [];
+
+  useEffect(() => {
+    if (!buyer?.tenantId) return;
+    const tenantSlug = toIdSlug(buyer.tenantId);
+    const suggestedAgentId = lastAgentId || `agt_${tenantSlug}_worker`;
+    const suggestedOwnerId = `svc_${tenantSlug}_worker`;
+    setForm((previous) => {
+      const next = { ...previous };
+      let changed = false;
+      if ((!lastAgentId && previous.agentId === "") || previous.agentId.includes("studio")) {
+        next.agentId = suggestedAgentId;
+        changed = true;
+      }
+      if (previous.ownerId === "svc_network_worker") {
+        next.ownerId = suggestedOwnerId;
+        changed = true;
+      }
+      if (previous.displayName === "Network Worker") {
+        next.displayName = `${buyer.tenantId} Worker`;
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [buyer?.tenantId, lastAgentId]);
+
+  function applyStudioProfile(profile) {
+    setSelectedProfileId(profile.id);
+    setForm((previous) => ({
+      ...previous,
+      displayName: profile.displayName,
+      description: profile.description,
+      capabilities: profile.capabilities,
+      priceAmountCents: profile.priceAmountCents,
+      tags: profile.tags
+    }));
+    setStudioMessage(`${profile.title} profile loaded. Adjust the details, then register and publish the worker.`);
+  }
 
   async function generateKeys() {
     setBusyState("keys");
@@ -1699,6 +1888,10 @@ function StudioPage({ runtime, onboardingState, onAgentRecorded, lastAgentId, de
   }
 
   async function registerAgent() {
+    if (!runtimeReady) {
+      setStudioMessage("Complete onboarding and issue runtime bootstrap before registering a worker.");
+      return;
+    }
     setBusyState("register");
     setStudioMessage("Registering the agent identity...");
     try {
@@ -1740,6 +1933,10 @@ function StudioPage({ runtime, onboardingState, onAgentRecorded, lastAgentId, de
   }
 
   async function publishCard() {
+    if (!runtimeReady) {
+      setStudioMessage("Complete onboarding and issue runtime bootstrap before publishing a worker.");
+      return;
+    }
     setBusyState("publish");
     setStudioMessage("Publishing agent card...");
     try {
@@ -1793,6 +1990,10 @@ function StudioPage({ runtime, onboardingState, onAgentRecorded, lastAgentId, de
   }
 
   async function previewDiscovery(capabilityOverride = null) {
+    if (!runtimeReady) {
+      setStudioMessage("Complete onboarding and issue runtime bootstrap before loading discovery.");
+      return;
+    }
     setBusyState("discover");
     setStudioMessage("Loading public discovery preview...");
     try {
@@ -1823,6 +2024,31 @@ function StudioPage({ runtime, onboardingState, onAgentRecorded, lastAgentId, de
     }
   }
 
+  const publishPath = [
+    {
+      title: "Runtime ready",
+      body: runtimeReady
+        ? `Using ${bootstrapBundle?.bootstrap?.apiKey?.keyId ?? "a configured runtime key"} for write actions.`
+        : "Finish onboarding and issue runtime bootstrap first.",
+      ready: runtimeReady
+    },
+    {
+      title: "Signer ready",
+      body: keys.keyId ? `Signer ${keys.keyId} is available for agent identity and optional publish signatures.` : "Generate a local keypair in the browser.",
+      ready: Boolean(keys.keyId)
+    },
+    {
+      title: "Identity registered",
+      body: registerOutput?.agent?.agentId ?? registerOutput?.agentId ?? "Register the worker identity before publishing the card.",
+      ready: Boolean(registerOutput?.agent?.agentId ?? registerOutput?.agentId)
+    },
+    {
+      title: "Card published",
+      body: publishOutput?.agentId ?? publishOutput?.card?.agentId ?? "Publish a public card so the worker can appear in discovery.",
+      ready: Boolean(publishOutput?.agentId ?? publishOutput?.card?.agentId)
+    }
+  ];
+
   const agentCliSnippet = `${bootstrapBundle?.bootstrap?.exportCommands ?? `export NOOTERRA_BASE_URL=${JSON.stringify(runtime.baseUrl)}
 export NOOTERRA_TENANT_ID=${JSON.stringify(runtime.tenantId)}
 export NOOTERRA_API_KEY=${JSON.stringify(runtime.apiKey || "sk_test_keyid.secret")}`}
@@ -1841,13 +2067,54 @@ agentverse agent run --agent-id ${form.agentId} --base-url ${runtime.baseUrl} --
           </p>
         </div>
         <div className="product-page-top-actions">
+          <a className="product-button product-button-ghost" href="/onboarding">Workspace onboarding</a>
           <button className="product-button product-button-ghost" disabled={busyState !== ""} onClick={() => void generateKeys()}>
             {busyState === "keys" ? "Generating..." : "Generate Keys"}
           </button>
-          <button className="product-button product-button-solid" disabled={busyState !== ""} onClick={() => void registerAgent()}>
+          <button className="product-button product-button-solid" disabled={busyState !== "" || !runtimeReady} onClick={() => void registerAgent()}>
             {busyState === "register" ? "Registering..." : "Register Agent"}
           </button>
         </div>
+      </section>
+
+      <section className="product-grid-two">
+        <article className="product-card">
+          <div className="product-section-head compact">
+            <p>Starter Profiles</p>
+            <h2>Start from a worker shape that already fits the network.</h2>
+          </div>
+          <div className="product-option-grid">
+            {studioProfiles.map((profile) => (
+              <button
+                key={profile.id}
+                type="button"
+                className={`product-option-card ${selectedProfileId === profile.id ? "active" : ""}`}
+                onClick={() => applyStudioProfile(profile)}
+              >
+                <strong>{profile.title}</strong>
+                <span>{profile.body}</span>
+              </button>
+            ))}
+          </div>
+        </article>
+
+        <article className="product-card">
+          <div className="product-section-head compact">
+            <p>Publish Path</p>
+            <h2>Make the builder prerequisites visible.</h2>
+          </div>
+          <div className="product-step-list">
+            {publishPath.map((item) => (
+              <div key={item.title} className="product-step-item">
+                <div className="product-step-copy">
+                  <strong>{item.title}</strong>
+                  <span>{item.body}</span>
+                </div>
+                <span className={`product-status-pill tone-${item.ready ? "good" : "warn"}`}>{item.ready ? "Ready" : "Next"}</span>
+              </div>
+            ))}
+          </div>
+        </article>
       </section>
 
       <section className="product-grid-two">
@@ -1966,10 +2233,10 @@ agentverse agent run --agent-id ${form.agentId} --base-url ${runtime.baseUrl} --
             </label>
           </div>
           <div className="product-actions">
-            <button className="product-button product-button-ghost" disabled={busyState !== ""} onClick={() => void previewDiscovery()}>
+            <button className="product-button product-button-ghost" disabled={busyState !== "" || !runtimeReady} onClick={() => void previewDiscovery()}>
               {busyState === "discover" ? "Loading..." : "Preview Discovery"}
             </button>
-            <button className="product-button product-button-solid" disabled={busyState !== ""} onClick={() => void publishCard()}>
+            <button className="product-button product-button-solid" disabled={busyState !== "" || !runtimeReady} onClick={() => void publishCard()}>
               {busyState === "publish" ? "Publishing..." : "Publish Card"}
             </button>
           </div>
@@ -1992,12 +2259,32 @@ agentverse agent run --agent-id ${form.agentId} --base-url ${runtime.baseUrl} --
             <div>
               <strong>Discovery preview</strong>
               <span>
-                {Array.isArray(discoverOutput?.items)
-                  ? `${discoverOutput.items.length} result${discoverOutput.items.length === 1 ? "" : "s"} loaded.`
+                {discoveryResults.length
+                  ? `${discoveryResults.length} result${discoveryResults.length === 1 ? "" : "s"} loaded.`
                   : "Preview discovery to see how the card appears."}
               </span>
             </div>
           </div>
+          {discoveryResults.length > 0 ? (
+            <div className="product-discovery-list">
+              {discoveryResults.slice(0, 4).map((row, index) => (
+                <div key={row?.agentCard?.agentId ?? row?.agentCard?.cardHash ?? `discover_${index}`} className="product-discovery-row">
+                  <div>
+                    <strong>{row?.agentCard?.displayName ?? row?.agentCard?.agentId ?? "Worker"}</strong>
+                    <span>{row?.agentCard?.agentId ?? "agent id unavailable"}</span>
+                  </div>
+                  <div>
+                    <span>
+                      {row?.agentCard?.priceHint?.amountCents
+                        ? formatCurrency(row.agentCard.priceHint.amountCents, row.agentCard.priceHint.currency)
+                        : "No public price"}
+                    </span>
+                    <span>{row?.agentCard?.host?.runtime ?? "runtime n/a"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {debugMode ? (
             <div className="product-output-stack">
               <details className="product-details" open>
@@ -2200,7 +2487,16 @@ export default function ProductShell({ mode = "home", launchId = null }) {
       />
     );
   } else if (mode === "network" || mode === "launch") {
-    page = <NetworkPage runtime={runtime} launchId={launchId} onLaunchRecorded={setLastLaunchId} debugMode={debugMode} />;
+    page = (
+      <NetworkPage
+        runtime={runtime}
+        onboardingState={onboardingState}
+        lastAgentId={lastAgentId}
+        launchId={launchId}
+        onLaunchRecorded={setLastLaunchId}
+        debugMode={debugMode}
+      />
+    );
   } else if (mode === "studio") {
     page = <StudioPage runtime={runtime} onboardingState={onboardingState} onAgentRecorded={setLastAgentId} lastAgentId={lastAgentId} debugMode={debugMode} />;
   } else if (mode === "developers") {
