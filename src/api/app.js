@@ -165,6 +165,8 @@ import {
 } from "../core/intent-contract.js";
 import {
   buildStateCheckpointV1,
+  compactStateCheckpointLineageV1,
+  restoreStateCheckpointLineageV1,
   validateStateCheckpointV1
 } from "../core/state-checkpoint.js";
 import {
@@ -63136,6 +63138,79 @@ export function createApi({
           return sendError(res, 400, "invalid state checkpoint query", { message: err?.message }, { code: "SCHEMA_INVALID" });
         }
         return sendJson(res, 200, { ok: true, stateCheckpoints, limit: safeLimit, offset: safeOffset });
+      }
+
+      if (req.method === "POST" && path === "/state-checkpoints/lineage/compact") {
+        if (!requireProtocolHeaderForWrite(req, res)) return;
+        const body = await readJsonBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return sendError(res, 400, "invalid state checkpoint lineage compaction request", null, { code: "SCHEMA_INVALID" });
+        }
+        if (!Array.isArray(body.checkpoints) || body.checkpoints.length === 0) {
+          return sendError(res, 400, "checkpoints must be a non-empty array", null, { code: "SCHEMA_INVALID" });
+        }
+
+        let stateCheckpointLineageCompaction = null;
+        try {
+          stateCheckpointLineageCompaction = compactStateCheckpointLineageV1({
+            checkpoints: body.checkpoints,
+            compactionId:
+              typeof body.compactionId === "string" && body.compactionId.trim() !== "" ? body.compactionId.trim() : null,
+            retainEvery: body.retainEvery,
+            retainTail: body.retainTail,
+            compactedAt:
+              typeof body.compactedAt === "string" && body.compactedAt.trim() !== "" ? body.compactedAt.trim() : undefined,
+            metadata: body.metadata ?? null
+          });
+        } catch (err) {
+          const reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "SCHEMA_INVALID";
+          return sendError(
+            res,
+            reasonCode === "SCHEMA_INVALID" ? 400 : 409,
+            "state checkpoint lineage compaction blocked",
+            {
+              reasonCode,
+              message: err?.message ?? null,
+              ...(err?.details && typeof err.details === "object" ? err.details : {})
+            },
+            { code: reasonCode }
+          );
+        }
+        return sendJson(res, 200, { ok: true, stateCheckpointLineageCompaction });
+      }
+
+      if (req.method === "POST" && path === "/state-checkpoints/lineage/restore") {
+        if (!requireProtocolHeaderForWrite(req, res)) return;
+        const body = await readJsonBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return sendError(res, 400, "invalid state checkpoint lineage restore request", null, { code: "SCHEMA_INVALID" });
+        }
+        if (!body.compaction || typeof body.compaction !== "object" || Array.isArray(body.compaction)) {
+          return sendError(res, 400, "compaction is required", null, { code: "SCHEMA_INVALID" });
+        }
+
+        let stateCheckpointLineageRestore = null;
+        try {
+          stateCheckpointLineageRestore = restoreStateCheckpointLineageV1({
+            compaction: body.compaction,
+            restoredAt:
+              typeof body.restoredAt === "string" && body.restoredAt.trim() !== "" ? body.restoredAt.trim() : null
+          });
+        } catch (err) {
+          const reasonCode = typeof err?.code === "string" && err.code.trim() !== "" ? err.code.trim() : "SCHEMA_INVALID";
+          return sendError(
+            res,
+            reasonCode === "SCHEMA_INVALID" ? 400 : 409,
+            "state checkpoint lineage restore blocked",
+            {
+              reasonCode,
+              message: err?.message ?? null,
+              ...(err?.details && typeof err.details === "object" ? err.details : {})
+            },
+            { code: reasonCode }
+          );
+        }
+        return sendJson(res, 200, { ok: true, stateCheckpointLineageRestore });
       }
 
       {
