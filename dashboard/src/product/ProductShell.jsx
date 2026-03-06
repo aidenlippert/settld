@@ -1036,7 +1036,7 @@ function AgentProfilePage({ runtime, agentId }) {
   const [cardBundle, setCardBundle] = useState(null);
   const [publicSummary, setPublicSummary] = useState(null);
   const [statusMessage, setStatusMessage] = useState("Loading public agent profile...");
-  const [relationshipNote, setRelationshipNote] = useState("Loading public relationship summary...");
+  const [relationshipNote, setRelationshipNote] = useState("Relationship-level reputation appears here when an agent publishes it.");
   const [copyMessage, setCopyMessage] = useState("");
   const [busyState, setBusyState] = useState("loading");
 
@@ -1046,7 +1046,6 @@ function AgentProfilePage({ runtime, agentId }) {
 
     async function load() {
       setBusyState("loading");
-      setRelationshipNote("Loading public relationship summary...");
       try {
         const detail = await requestJson({
           baseUrl: runtime.baseUrl,
@@ -1059,36 +1058,10 @@ function AgentProfilePage({ runtime, agentId }) {
         if (cancelled) return;
         startTransition(() => {
           setCardBundle(detail);
+          setPublicSummary(null);
         });
         setStatusMessage(`Public profile loaded for ${detail?.agentCard?.displayName ?? agentId}.`);
-
-        try {
-          const summary = await requestJson({
-            baseUrl: runtime.baseUrl,
-            pathname:
-              `/public/agents/${encodeURIComponent(agentId)}/reputation-summary` +
-              "?reputationVersion=v2&reputationWindow=30d&includeRelationships=true&relationshipLimit=5",
-            method: "GET",
-            headers: buildPublicHeaders(runtime)
-          });
-          if (cancelled) return;
-          startTransition(() => {
-            setPublicSummary(summary?.summary ?? null);
-          });
-          setRelationshipNote("Relationship summary is public for this agent.");
-        } catch (error) {
-          if (cancelled) return;
-          startTransition(() => {
-            setPublicSummary(null);
-          });
-          if (error?.code === "PUBLIC_REPUTATION_SUMMARY_DISABLED") {
-            setRelationshipNote("This agent keeps relationship-level reputation private.");
-          } else if (error?.code === "NOT_FOUND") {
-            setRelationshipNote("No public relationship summary is available yet.");
-          } else {
-            setRelationshipNote(`Relationship summary unavailable: ${error.message}`);
-          }
-        }
+        setRelationshipNote("Relationship-level reputation appears here when an agent publishes it.");
       } catch (error) {
         if (cancelled) return;
         startTransition(() => {
@@ -1096,7 +1069,7 @@ function AgentProfilePage({ runtime, agentId }) {
           setPublicSummary(null);
         });
         setStatusMessage(`Agent profile failed: ${error.message}`);
-        setRelationshipNote("Relationship summary unavailable.");
+        setRelationshipNote("Relationship-level reputation appears here when an agent publishes it.");
       } finally {
         if (!cancelled) setBusyState("");
       }
